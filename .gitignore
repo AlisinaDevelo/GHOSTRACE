@@ -1,0 +1,39 @@
+# Rust build output
+/target/
+/coverage/
+/dist/
+
+# Local GHOSTRACE state and exports
+/.ghostrace/
+*.ghostrace
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.jsonl
+!fixtures/**/*.jsonl
+
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+
+# Editors and operating-system files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+/.idea/
+/.vscode/
+*.swp
+*.swo
+
+# Reports and logs
+*.log
+reports/
+
+# Forge local sync state (keep .forge/tasks tracked)
+/.forge/github-sync.json
+/.forge/receipts.jsonl
+/.forge/approvals.jsonl

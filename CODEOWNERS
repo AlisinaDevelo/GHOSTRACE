@@ -1,0 +1,6 @@
+# Default review owner for the public project.
+* @AlisinaDevelo
+
+# Keep public contract and workflow changes visible to the maintainer.
+/docs/ @AlisinaDevelo
+/.github/ @AlisinaDevelo

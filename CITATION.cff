@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+title: "GHOSTRACE"
+message: "If GHOSTRACE supports your work, please cite the repository and the version used."
+type: software
+license: MPL-2.0
+abstract: >-
+  GHOSTRACE is a local macOS causal event journal that records bounded,
+  user-authorized evidence about changes and explains the observations supporting
+  each causal link.
+keywords:
+  - causal event journal
+  - macOS
+  - provenance
+  - privacy
+  - FSEvents
+authors:
+  - family-names: Karimi
+    given-names: Alisina
+repository-code: "https://github.com/AlisinaDevelo/GHOSTRACE"
+url: "https://github.com/AlisinaDevelo/GHOSTRACE"

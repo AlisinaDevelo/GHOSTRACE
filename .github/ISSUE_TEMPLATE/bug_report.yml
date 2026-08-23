@@ -1,0 +1,71 @@
+name: Bug report
+description: Report a reproducible problem using synthetic data.
+title: "[bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include journals, exports, file contents, browser data, secrets,
+        account names, URLs, or unredacted paths. Use the security advisory process
+        for vulnerabilities.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Paste the release tag or commit SHA.
+      placeholder: 0.0.1 or abc1234
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: Include operating system and architecture.
+      placeholder: macOS 15.x on Apple silicon, or Linux x86_64
+    validations:
+      required: true
+  - type: input
+    id: rust
+    attributes:
+      label: Rust version
+      description: Paste the output of rustc --version.
+      placeholder: rustc 1.88.0
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: Show the command with private paths and identifiers removed.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Describe the smallest synthetic fixture or steps that reproduce the issue.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted output
+      description: Remove paths, event payloads, URLs, account names, and secrets.
+      render: text
+    validations:
+      required: false

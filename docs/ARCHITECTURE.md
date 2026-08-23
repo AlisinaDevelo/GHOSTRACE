@@ -1,0 +1,108 @@
+# Architecture
+
+GHOSTRACE is a local, modular Rust application with a deliberately narrow data
+path. The current public slice replays synthetic JSONL fixtures. Live collection is
+a separate capability and remains disabled until its policy, recovery, writer, and
+encryption gates pass.
+
+## Pipeline
+
+~~~text
+source adapter
+  ├─ fixture JSONL (current)
+  └─ explicitly enabled macOS source (future)
+        │
+        v
+bounded normalization
+        │
+        v
+consent + capture policy (deny by default)
+        │
+        v
+versioned event envelope + provenance
+        │
+        v
+bounded single-writer SQLite WAL journal
+        │
+        ├─ deterministic query
+        ├─ evidence-backed explanation
+        └─ explicit JSONL export
+~~~
+
+The arrows are trust and ownership boundaries. A source does not write directly to
+the journal. Policy runs before persistence. A writer acknowledges an accepted event
+only after its transaction commits. If the source cannot prove coverage, it emits a
+gap or an unknown evidence level rather than allowing the explanation layer to infer
+one.
+
+## Components
+
+| Component | Responsibility | Current state |
+| --- | --- | --- |
+| CLI | Parse commands, print structured results, and surface refusal reasons | Fixture commands available; capture refuses |
+| Fixture adapter | Read synthetic JSONL and validate the event contract | Available |
+| Source adapters | Translate bounded platform observations into the envelope | Live adapters not shipped |
+| Policy gate | Apply consent, selected scope, exclusions, private-context rules, and redaction | Required before live capture |
+| Event envelope | Preserve source facts, provenance, evidence level, and schema version | Versioned contract is documented |
+| Ingest writer | Bound memory, serialize writes, and commit event plus cursor atomically | Fixture path is the current exercise; live gate remains |
+| Journal | Store local event metadata and encrypted payloads when the production key path exists | SQLite/WAL design documented; Keychain production path not shipped |
+| Explain/export | Produce deterministic evidence-linked explanations and explicit exports | Fixture surface available |
+
+## Event lifecycle
+
+1. A source produces an observation or a fixture supplies one.
+2. Normalization rejects malformed or out-of-contract data without retaining
+   sensitive rejected values.
+3. The policy gate decides whether the observation is allowed, denied, or converted
+   to a gap/status record. Policy decisions have a version and reason.
+4. An accepted event receives a stable identifier and provenance, including the
+   immutable policy profile ID and version. The envelope
+   retains what the source actually established, not what a caller wished it had
+   established.
+5. The bounded writer persists the event and source cursor in one transaction when
+   the live path is enabled. Queue pressure and unrecoverable source history become
+   visible gaps.
+6. Query, explanation, and export read committed records. They never mutate source
+   history and never silently repair a gap.
+
+## Storage boundary
+
+The active journal is planned as one local SQLite database in WAL mode with one
+writer and read-only readers. WAL improves reader/writer concurrency, but it is not
+an encryption boundary and it does not make a source complete. SQLite metadata,
+temporary files, backups, and operating-system filesystem behavior remain part of
+the threat model. See [ADR 0003](adr/0003-sqlite-wal-active-journal.md).
+
+Production sensitive payloads require authenticated encryption with a macOS Keychain
+backing key. That key path is not represented as shipped live-capture capability in
+the current headstart. Missing keys or failed authentication must fail closed.
+
+## Explanation boundary
+
+The explanation layer is deterministic and evidence-linked. It may describe a
+supported sequence such as “an observed change followed another observed change
+within the fixture window,” but it cannot turn temporal order into proof of intent or
+complete causality. Every claim must identify the event IDs and evidence levels it
+uses. Every uncovered interval, coalesced source result, denied observation, or
+restart discontinuity is visible as a gap or limitation.
+
+## Extension rules
+
+A new source or output is acceptable only when it:
+
+- has an explicit consent and scope model;
+- defines fields that are retained and fields that are forbidden;
+- can bound memory, payload size, and processing time;
+- persists progress atomically or reports exactly what cannot be recovered;
+- handles private contexts and exclusions before persistence;
+- adds deterministic fixtures and failure tests;
+- updates [PRIVACY.md](PRIVACY.md), [THREAT_MODEL.md](THREAT_MODEL.md), and an ADR
+  when the trust boundary changes.
+
+## Failure behavior
+
+GHOSTRACE prefers a visible refusal or gap to an apparently complete but misleading
+journal. A source that cannot reconnect to its history must not resume as if no
+interval were lost. A full queue must produce backpressure or an explicit loss
+record. A failed decrypt, malformed fixture, invalid policy, or existing export
+destination must produce a bounded error without dumping sensitive payloads.

@@ -1,0 +1,544 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ghostrace.local/schema/event-envelope-v1.json",
+  "title": "GHOSTRACE event envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "observed_at",
+    "ingested_at",
+    "source",
+    "kind",
+    "payload",
+    "collector_instance",
+    "source_cursor",
+    "provenance_version",
+    "policy_profile_id",
+    "policy_profile_version",
+    "evidence",
+    "parent_event_id"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "event_id": {
+      "type": "string",
+      "format": "uuid",
+      "not": { "const": "00000000-0000-0000-0000-000000000000" }
+    },
+    "observed_at": { "type": "string", "format": "date-time" },
+    "ingested_at": { "type": "string", "format": "date-time" },
+    "source": { "$ref": "#/$defs/source" },
+    "kind": { "$ref": "#/$defs/kind" },
+    "payload": { "type": "object" },
+    "collector_instance": { "$ref": "#/$defs/bounded_string" },
+    "source_cursor": { "$ref": "#/$defs/nullable_bounded_string" },
+    "provenance_version": { "$ref": "#/$defs/bounded_string" },
+    "policy_profile_id": { "$ref": "#/$defs/bounded_string" },
+    "policy_profile_version": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+    "evidence": {
+      "enum": ["direct", "contextual", "inferred", "unknown"]
+    },
+    "parent_event_id": {
+      "oneOf": [
+        {
+          "type": "string",
+          "format": "uuid",
+          "not": { "const": "00000000-0000-0000-0000-000000000000" }
+        },
+        { "type": "null" }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "source": { "const": "filesystem" },
+            "kind": { "const": "filesystem_changed" },
+            "payload": { "$ref": "#/$defs/filesystem_changed" }
+          }
+        },
+        {
+          "properties": {
+            "source": { "const": "frontmost_app" },
+            "kind": { "const": "frontmost_app_changed" },
+            "payload": { "$ref": "#/$defs/frontmost_app_changed" }
+          }
+        },
+        {
+          "properties": {
+            "source": { "const": "shell" },
+            "kind": { "const": "shell_started" },
+            "payload": { "$ref": "#/$defs/shell_started" }
+          }
+        },
+        {
+          "properties": {
+            "source": { "const": "shell" },
+            "kind": { "const": "shell_finished" },
+            "payload": { "$ref": "#/$defs/shell_finished" }
+          }
+        },
+        {
+          "properties": {
+            "source": { "const": "git" },
+            "kind": { "const": "git_snapshot" },
+            "payload": { "$ref": "#/$defs/git_snapshot" }
+          }
+        },
+        {
+          "properties": {
+            "source": { "const": "browser" },
+            "kind": { "const": "browser_navigation" },
+            "payload": { "$ref": "#/$defs/browser_navigation" }
+          }
+        },
+        {
+          "properties": {
+            "source": { "const": "browser" },
+            "kind": { "const": "browser_bookmark_changed" },
+            "payload": { "$ref": "#/$defs/browser_bookmark_changed" }
+          }
+        },
+        {
+          "properties": {
+            "source": { "const": "lifecycle" },
+            "kind": { "const": "collector_started" },
+            "payload": { "$ref": "#/$defs/collector_started" }
+          }
+        },
+        {
+          "properties": {
+            "source": { "const": "lifecycle" },
+            "kind": { "const": "collector_stopped" },
+            "payload": { "$ref": "#/$defs/collector_stopped" }
+          }
+        },
+        {
+          "properties": {
+            "kind": { "const": "gap" },
+            "payload": { "$ref": "#/$defs/gap" }
+          }
+        },
+        {
+          "properties": {
+            "kind": { "const": "policy_blocked_summary" },
+            "payload": { "$ref": "#/$defs/policy_blocked_summary" }
+          }
+        },
+        {
+          "properties": {
+            "kind": { "const": "source_error" },
+            "payload": { "$ref": "#/$defs/source_error" }
+          }
+        }
+      ]
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": { "enum": ["gap", "policy_blocked_summary", "source_error"] }
+        }
+      },
+      "then": {
+        "oneOf": [
+          {
+            "properties": {
+              "source": { "const": "filesystem" },
+              "payload": {
+                "properties": {
+                  "data": { "properties": { "source": { "const": "filesystem" } } }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "source": { "const": "frontmost_app" },
+              "payload": {
+                "properties": {
+                  "data": { "properties": { "source": { "const": "frontmost_app" } } }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "source": { "const": "shell" },
+              "payload": {
+                "properties": {
+                  "data": { "properties": { "source": { "const": "shell" } } }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "source": { "const": "git" },
+              "payload": {
+                "properties": {
+                  "data": { "properties": { "source": { "const": "git" } } }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "source": { "const": "browser" },
+              "payload": {
+                "properties": {
+                  "data": { "properties": { "source": { "const": "browser" } } }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "source": { "const": "lifecycle" },
+              "payload": {
+                "properties": {
+                  "data": { "properties": { "source": { "const": "lifecycle" } } }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "source": { "const": "fixture" },
+              "payload": {
+                "properties": {
+                  "data": { "properties": { "source": { "const": "fixture" } } }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "source": {
+      "enum": [
+        "filesystem",
+        "frontmost_app",
+        "shell",
+        "git",
+        "browser",
+        "lifecycle",
+        "fixture"
+      ]
+    },
+    "kind": {
+      "enum": [
+        "filesystem_changed",
+        "frontmost_app_changed",
+        "shell_started",
+        "shell_finished",
+        "git_snapshot",
+        "browser_navigation",
+        "browser_bookmark_changed",
+        "collector_started",
+        "collector_stopped",
+        "gap",
+        "policy_blocked_summary",
+        "source_error"
+      ]
+    },
+    "bounded_string": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?=.*\\S)[^\\u0000-\\u001F\\u007F]+$"
+    },
+    "nullable_bounded_string": {
+      "oneOf": [
+        { "$ref": "#/$defs/bounded_string" },
+        { "type": "null" }
+      ]
+    },
+    "reason_code": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "filesystem_changed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "data"],
+      "properties": {
+        "type": { "const": "filesystem_changed" },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "root_id",
+            "path_class",
+            "operation",
+            "entry_kind",
+            "path_digest",
+            "size_bytes"
+          ],
+          "properties": {
+            "root_id": { "$ref": "#/$defs/bounded_string" },
+            "path_class": {
+              "enum": ["workspace_relative", "home_relative", "absolute_redacted", "unknown"]
+            },
+            "operation": { "enum": ["created", "modified", "deleted", "renamed"] },
+            "entry_kind": { "enum": ["file", "directory", "symlink", "unknown"] },
+            "path_digest": { "$ref": "#/$defs/nullable_bounded_string" },
+            "size_bytes": {
+              "oneOf": [
+                { "type": "integer", "minimum": 0, "maximum": 18446744073709551615 },
+                { "type": "null" }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "frontmost_app_changed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "data"],
+      "properties": {
+        "type": { "const": "frontmost_app_changed" },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["app_id", "change", "previous_app_id"],
+          "properties": {
+            "app_id": { "$ref": "#/$defs/bounded_string" },
+            "change": { "enum": ["launched", "activated", "deactivated", "terminated"] },
+            "previous_app_id": { "$ref": "#/$defs/nullable_bounded_string" }
+          }
+        }
+      }
+    },
+    "shell_started": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "data"],
+      "properties": {
+        "type": { "const": "shell_started" },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["session_id", "shell_kind"],
+          "properties": {
+            "session_id": { "$ref": "#/$defs/bounded_string" },
+            "shell_kind": { "$ref": "#/$defs/bounded_string" }
+          }
+        }
+      }
+    },
+    "shell_finished": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "data"],
+      "properties": {
+        "type": { "const": "shell_finished" },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["session_id", "status", "exit_code", "duration_ms"],
+          "properties": {
+            "session_id": { "$ref": "#/$defs/bounded_string" },
+            "status": { "enum": ["succeeded", "failed", "signaled", "unknown"] },
+            "exit_code": {
+              "oneOf": [
+                { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+                { "type": "null" }
+              ]
+            },
+            "duration_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            }
+          }
+        }
+      }
+    },
+    "git_snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "data"],
+      "properties": {
+        "type": { "const": "git_snapshot" },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repository_id",
+            "branch",
+            "head_oid",
+            "dirty",
+            "changed_file_count",
+            "snapshot_digest"
+          ],
+          "properties": {
+            "repository_id": { "$ref": "#/$defs/bounded_string" },
+            "branch": { "$ref": "#/$defs/bounded_string" },
+            "head_oid": {
+              "type": "string",
+              "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+            },
+            "dirty": { "type": "boolean" },
+            "changed_file_count": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "snapshot_digest": { "$ref": "#/$defs/nullable_bounded_string" }
+          }
+        }
+      }
+    },
+    "browser_navigation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "data"],
+      "properties": {
+        "type": { "const": "browser_navigation" },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["browser", "url", "private_context"],
+          "properties": {
+            "browser": { "$ref": "#/$defs/bounded_string" },
+            "url": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8192,
+              "format": "uri",
+              "pattern": "^https?://[^/?#@\\s]+(?:/[^?#\\s]*)?$"
+            },
+            "private_context": { "const": false }
+          }
+        }
+      }
+    },
+    "browser_bookmark_changed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "data"],
+      "properties": {
+        "type": { "const": "browser_bookmark_changed" },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["browser", "bookmark_id", "change", "url", "folder_id", "private_context"],
+          "properties": {
+            "browser": { "$ref": "#/$defs/bounded_string" },
+            "bookmark_id": { "$ref": "#/$defs/bounded_string" },
+            "change": { "enum": ["created", "updated", "deleted"] },
+            "url": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8192,
+              "format": "uri",
+              "pattern": "^https?://[^/?#@\\s]+(?:/[^?#\\s]*)?$"
+            },
+            "folder_id": { "$ref": "#/$defs/nullable_bounded_string" },
+            "private_context": { "const": false }
+          }
+        }
+      }
+    },
+    "collector_lifecycle_data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["collector", "instance_label"],
+      "properties": {
+        "collector": { "$ref": "#/$defs/source" },
+        "instance_label": { "$ref": "#/$defs/bounded_string" }
+      }
+    },
+    "collector_started": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "data"],
+      "properties": {
+        "type": { "const": "collector_started" },
+        "data": { "$ref": "#/$defs/collector_lifecycle_data" }
+      }
+    },
+    "collector_stopped": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "data"],
+      "properties": {
+        "type": { "const": "collector_stopped" },
+        "data": { "$ref": "#/$defs/collector_lifecycle_data" }
+      }
+    },
+    "gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "data"],
+      "properties": {
+        "type": { "const": "gap" },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source", "reason_code", "dropped_count", "from_cursor", "to_cursor"],
+          "properties": {
+            "source": { "$ref": "#/$defs/source" },
+            "reason_code": { "$ref": "#/$defs/reason_code" },
+            "dropped_count": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "from_cursor": { "$ref": "#/$defs/nullable_bounded_string" },
+            "to_cursor": { "$ref": "#/$defs/nullable_bounded_string" }
+          }
+        }
+      }
+    },
+    "policy_blocked_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "data"],
+      "properties": {
+        "type": { "const": "policy_blocked_summary" },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source", "reason_code", "count"],
+          "properties": {
+            "source": { "$ref": "#/$defs/source" },
+            "reason_code": { "$ref": "#/$defs/reason_code" },
+            "count": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            }
+          }
+        }
+      }
+    },
+    "source_error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "data"],
+      "properties": {
+        "type": { "const": "source_error" },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source", "reason_code", "retryable"],
+          "properties": {
+            "source": { "$ref": "#/$defs/source" },
+            "reason_code": { "$ref": "#/$defs/reason_code" },
+            "retryable": { "type": "boolean" }
+          }
+        }
+      }
+    }
+  }
+}

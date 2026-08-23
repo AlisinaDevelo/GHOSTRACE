@@ -1,0 +1,104 @@
+# Threat model
+
+This model covers the local fixture headstart and the future opt-in macOS journal.
+It is a design boundary, not a claim that every implementation risk has been
+eliminated. GHOSTRACE records diagnostic evidence; it does not create legal chain of
+custody.
+
+## Security objectives
+
+1. Keep collection within the user's explicit scope.
+2. Minimize what enters the journal and reject prohibited data before persistence.
+3. Preserve provenance, ordering limits, and gaps without overstating causality.
+4. Protect production payloads and keys at rest.
+5. Make exports and other plaintext transitions deliberate and visible.
+6. Keep the baseline local, offline, and free of silent upload paths.
+
+## Assets
+
+- event payloads, paths, timestamps, source cursors, and policy state;
+- encryption keys and plaintext buffers;
+- journal database, WAL and sidecar files, backups, and exports;
+- evidence links, event ordering, gaps, and coverage claims;
+- user consent, exclusions, and private-context state;
+- build and dependency integrity.
+
+## Actors and assumptions
+
+| Actor | Capability or motivation | Trust assumption |
+| --- | --- | --- |
+| User | Reads, deletes, exports, or changes local files | The user controls their account and can stop the process |
+| Same-user process | Can often read user-owned files and observe process behavior | Not trusted; same-user compromise is a residual risk |
+| Other local user | May access only what operating-system permissions allow | Not trusted |
+| Malicious fixture or path | Supplies malformed, huge, ambiguous, or attacker-shaped input | Not trusted |
+| Malicious dependency or build input | Attempts to change behavior or add a network path | Controlled by review, lockfile, advisories, and policy checks |
+| Remote attacker | Has no intended application network channel | Relevant only through compromised dependencies, exports, or the host |
+
+The host operating system and macOS security services are assumed to enforce their
+documented permission model. This assumption does not make FSEvents complete or
+protect against a compromised same-user account.
+
+## Trust boundaries
+
+~~~text
+untrusted fixture / OS observation
+              │
+              v
+     parser + bounded normalizer
+              │
+              v
+       consent / policy gate
+              │
+              v
+      event envelope + provenance
+              │
+              v
+        journal writer + key
+              │
+        ┌─────┴─────┐
+        v           v
+  local query   explicit export
+~~~
+
+The parser boundary protects the process from malformed input. The policy boundary
+protects the journal from unauthorized fields and scope. The storage/key boundary
+protects payloads at rest. The export boundary is a deliberate transition to
+plaintext chosen by the user.
+
+## STRIDE analysis
+
+| Category | Example threat | Mitigation | State |
+| --- | --- | --- | --- |
+| Spoofing | A fixture or future adapter claims another source or policy | Versioned source identity, provenance, policy IDs, and validation | Fixture checks now; live source attestation is future work |
+| Tampering | A local process edits journal rows or an export | Authenticated payloads; future integrity chain; explicit integrity status | Keychain encryption and chain verification are roadmap gates |
+| Repudiation | An explanation hides a denied interval or restart | First-class gaps, source status, cursor metadata, event IDs, deterministic output | Contract documented; live recovery tests required |
+| Information disclosure | Logs, WAL files, exports, or errors reveal paths or payloads | Minimized fields, redaction, no sensitive diagnostics, explicit export, file permissions | Fixture checks now; production storage hardening is not shipped |
+| Denial of service | Huge fixture, event storm, or full queue exhausts memory | Bounded parser, bounded queue, input limits, backpressure, visible loss | Fixture limits now; event-storm evidence is roadmap work |
+| Elevation of privilege | Collector asks for broad TCC access or follows a symlink outside scope | No root/Full Disk Access baseline, selected roots, canonicalization, exclusions | Policy design documented; live collector not shipped |
+
+## Residual risks
+
+- A same-user attacker may read plaintext while a process is running, inspect
+  exported data, alter local configuration, or delete the journal.
+- The host may leak metadata through filesystem indexing, backups, crash reports,
+  swap, or file-system snapshots.
+- FSEvents may coalesce, delay, reorder, or omit changes and does not provide
+  process attribution or completeness. An explanation cannot repair that limitation.
+- A user may intentionally export sensitive data to an insecure destination.
+- A compromised dependency, toolchain, or build host can violate the local-only
+  contract. CI checks reduce this risk; they do not prove source intent.
+- A malicious path, fixture, or source can consume resources unless every adapter
+  honors bounds.
+
+These risks are communicated, not silently accepted as evidence quality.
+
+## Severity calibration
+
+Treat a boundary violation, silent network path, unredacted sensitive field, key
+exposure, or false completeness claim as high severity. Treat a reproducible crash,
+unbounded resource use, or export overwrite as at least medium severity depending on
+whether data loss or disclosure is possible. Cosmetic explanation wording is lower
+severity unless it changes evidence level or hides a gap.
+
+See [SECURITY.md](../SECURITY.md) for private reporting and
+[PRIVACY.md](PRIVACY.md) for the data inventory.

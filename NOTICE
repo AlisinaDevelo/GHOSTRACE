@@ -1,0 +1,9 @@
+GHOSTRACE
+Copyright 2026 Alisina Karimi
+
+GHOSTRACE is distributed under the Mozilla Public License, version 2.0.
+See LICENSE for the complete license text.
+
+Third-party dependencies are distributed under their respective licenses. Their
+license and notice requirements are represented by the package metadata, lockfile,
+and dependency policy in deny.toml.

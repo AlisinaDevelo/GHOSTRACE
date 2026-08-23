@@ -1,0 +1,45 @@
+name: Proposal
+description: Propose a focused change to the product or its documentation.
+title: "[proposal] "
+labels:
+  - proposal
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Proposals must preserve the local-only, minimized-capture contract. Do not
+        attach real journals, exports, screenshots, or user data.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or maintainer problem would this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposed-change
+    attributes:
+      label: Proposed change
+      description: Describe the smallest coherent change.
+    validations:
+      required: true
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy and permission impact
+      description: List fields, permissions, consent, private-context behavior, and network implications.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance evidence
+      description: What fixtures, tests, benchmarks, or documentation would show this is ready?
+    validations:
+      required: true
