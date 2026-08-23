@@ -1110,9 +1110,19 @@ def metadata_plan(
             operations.append(
                 {"action": "create_milestone", "blocking": False, "title": milestone["title"], "payload": payload}
             )
-        elif (current.get("description") or "") != milestone["description"] or (
-            current.get("due_on") or ""
-        ) != milestone["due_on"]:
+        else:
+            current_due_on = current.get("due_on")
+            due_date_matches = current_due_on is not None and _parse_due_on(
+                current_due_on, f"GitHub milestone {milestone['title']!r}.due_on"
+            ).date() == _parse_due_on(
+                milestone["due_on"], f"program milestone {milestone['title']!r}.due_on"
+            ).date()
+            definition_matches = (
+                (current.get("description") or "") == milestone["description"]
+                and due_date_matches
+            )
+            if definition_matches:
+                continue
             operations.append(
                 _blocking(
                     "milestone_definition_drift",
