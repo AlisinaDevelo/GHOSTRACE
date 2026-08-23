@@ -637,6 +637,44 @@ class RoadmapTests(unittest.TestCase):
         self.assertTrue(any(item["action"] == "defer_issue_metadata" for item in operations))
         self.assertEqual(roadmap.plan_blockers(operations), [])
 
+    def test_milestone_due_dates_compare_by_calendar_date(self):
+        program = tiny_program()
+        task = tiny_task()
+        milestone = program["milestones"][0]
+        FakeGitHub.responses = {
+            "labels": program["labels"],
+            "milestones?state=all": [
+                {
+                    "number": 7,
+                    "title": milestone["title"],
+                    "description": milestone["description"],
+                    "due_on": "2026-12-31T00:00:00Z",
+                }
+            ],
+            "issues?state=all": [
+                fake_issue(
+                    1,
+                    (
+                        "<!-- forge-task:v1 id=0001 "
+                        f"sync={roadmap.forge_task_sync_hash(task)} -->"
+                    ),
+                    milestone={"number": 7, "title": milestone["title"]},
+                )
+            ],
+        }
+        with mock.patch.object(roadmap, "validate"), mock.patch.object(
+            roadmap, "load_sync_mapping", return_value={"0001": 1}
+        ), mock.patch.object(roadmap, "GitHub", FakeGitHub):
+            operations = roadmap.metadata_plan(
+                program, [task], program["repository"], "0" * 64
+            )
+        self.assertFalse(
+            any(
+                operation["action"] == "milestone_definition_drift"
+                for operation in operations
+            )
+        )
+
     def test_malformed_program_metadata_is_rejected(self):
         program = tiny_program()
         program["labels"][0]["color"] = "not-a-color"
