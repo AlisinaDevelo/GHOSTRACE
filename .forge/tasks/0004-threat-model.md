@@ -7,6 +7,11 @@ model: human
 release: M0
 depends_on: [0001, 0002]
 change: null
+workstream: foundation
+type: docs
+priority: p0
+risks: [security]
+platform: any
 ---
 
 ## Goal

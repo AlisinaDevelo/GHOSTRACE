@@ -5,8 +5,13 @@ status: backlog
 agent: maintainer
 model: human
 release: M5
-depends_on: [0013, 0027, 0030, 0035]
+depends_on: [0013, 0027, 0030, 0035, 0114]
 change: null
+workstream: service-ui
+type: feature
+priority: p1
+risks: [privacy, security]
+platform: macos
 ---
 
 ## Goal

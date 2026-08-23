@@ -7,6 +7,11 @@ model: human
 release: M0
 depends_on: [0001]
 change: null
+workstream: foundation
+type: spike
+priority: p1
+risks: []
+platform: any
 ---
 
 ## Goal

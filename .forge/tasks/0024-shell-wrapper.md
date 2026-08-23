@@ -5,8 +5,13 @@ status: backlog
 agent: maintainer
 model: human
 release: M4
-depends_on: [0007, 0018]
+depends_on: [0007, 0018, 0091, 0092, 0093]
 change: null
+workstream: shell-git
+type: feature
+priority: p1
+risks: [privacy]
+platform: any
 ---
 
 ## Goal

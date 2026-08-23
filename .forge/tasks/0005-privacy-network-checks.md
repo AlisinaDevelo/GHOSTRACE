@@ -1,12 +1,17 @@
 ---
 id: 0005
 title: Add privacy regression and network-surface checks
-status: ready
+status: backlog
 agent: maintainer
 model: human
 release: M0
-depends_on: [0003, 0004]
+depends_on: [0003, 0004, 0043, 0044]
 change: null
+workstream: privacy
+type: test
+priority: p0
+risks: [privacy, security]
+platform: any
 ---
 
 ## Goal

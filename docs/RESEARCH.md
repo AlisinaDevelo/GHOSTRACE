@@ -68,6 +68,31 @@ does not remove side-channel metadata, and does not repair incomplete sources.
 GHOSTRACE pairs it with bounded writes, explicit gaps, and a future Keychain-backed
 payload key.
 
+### Future platform contracts
+
+Later integrations remain design work, not shipped capability. Their ADRs and test
+matrices must begin with these platform constraints:
+
+- A per-user background helper should use Apple's Service Management lifecycle and
+  preserve explicit approval, status, registration, unregistration, and denial
+  outcomes. A root launch daemon is outside the baseline.
+- Frontmost-application context should use `NSWorkspace` activation and session
+  notifications and retain only the bounded application identity in the event
+  schema. Accessibility trust is a separate permission boundary, not an implicit
+  fallback for titles, documents, or UI contents.
+- Safari support must pass a go/no-go gate against Apple's packaging, signing,
+  private-browsing, profile, website-permission, and native-messaging behavior. A
+  documented no-go is preferable to broader permissions or a network listener.
+- Chromium navigation and bookmark sources require distinct declared permissions.
+  Incognito access is user-controlled and must still be refused by GHOSTRACE even
+  when the browser says the extension is allowed to run there.
+- A Tauri UI must expose only explicitly named commands, capabilities, windows, and
+  scopes. Remote API access stays disabled, and command implementations must enforce
+  their scopes rather than treating configuration as sufficient validation.
+- A local Unix-domain service must authenticate the connected peer with the macOS
+  credential interface, validate file ownership and mode, and keep TCP and Bonjour
+  outside the baseline. Socket location alone is not client authentication.
+
 ## Differentiation
 
 GHOSTRACE makes four choices explicit:
@@ -96,6 +121,18 @@ systems solve the same problem.
   browser-shaped sources?
 - What local key and export lifecycle is usable without creating a broader account
   or cloud dependency?
+- Which claim grammar and abstention rules minimize unsupported causal conclusions
+  across lossy, disabled, denied, and conflicting sources?
+- Can people correctly distinguish direct evidence, context, inference, conflicts,
+  retention gaps, and collection gaps in realistic investigation tasks?
+- How much privacy leakage remains in operational residue such as WAL sidecars,
+  diagnostics, support bundles, backups, archives, and crash paths?
+- Which conservative W3C PROV and offline OpenTelemetry mappings preserve source
+  limitations instead of strengthening imported or exported claims?
+- Can a third-party adapter model enforce declared capabilities, origin, bounds,
+  cursor semantics, and gap behavior without granting arbitrary journal authority?
+- What five-year energy, storage, compatibility, and maintenance cost is acceptable
+  for a continuously running local journal on supported macOS hardware?
 
 ## Primary sources
 
@@ -107,6 +144,25 @@ systems solve the same problem.
 - [OpenTelemetry specification](https://opentelemetry.io/docs/specs/otel/)
 - [W3C PROV-O](https://www.w3.org/TR/prov-o/)
 - [NIST SP 800-92, Guide to Computer Security Log Management](https://csrc.nist.gov/pubs/sp/800/92/final)
+- [Apple TN3137, On Mac keychain APIs and implementations](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains)
+- [Apple Notarizing macOS software before distribution](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
+- [Chrome Native messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging)
+- [Chrome `webNavigation` API](https://developer.chrome.com/docs/extensions/reference/api/webNavigation)
+- [Chrome `bookmarks` API](https://developer.chrome.com/docs/extensions/reference/api/bookmarks)
+- [Chrome extension permissions and incognito access](https://developer.chrome.com/docs/extensions/develop/concepts/declare-permissions)
+- [Chrome guidance on extension user privacy](https://developer.chrome.com/docs/extensions/develop/security-privacy/user-privacy)
+- [Apple Service Management](https://developer.apple.com/documentation/servicemanagement)
+- [Apple `SMAppService.register()`](https://developer.apple.com/documentation/servicemanagement/smappservice/register%28%29)
+- [Apple `NSWorkspace.didActivateApplicationNotification`](https://developer.apple.com/documentation/appkit/nsworkspace/didactivateapplicationnotification)
+- [Apple `AXIsProcessTrustedWithOptions`](https://developer.apple.com/documentation/applicationservices/1459186-axisprocesstrustedwithoptions)
+- [Apple Safari Web Extensions](https://developer.apple.com/documentation/safariservices/safari-web-extensions)
+- [Apple Safari Web Extension permissions](https://developer.apple.com/documentation/safariservices/managing-safari-web-extension-permissions)
+- [Apple `getpeereid(3)` manual page](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/getpeereid.3.html)
+- [Tauri 2 capabilities](https://v2.tauri.app/security/capabilities/)
+- [Tauri 2 runtime authority](https://v2.tauri.app/security/runtime-authority/)
+- [Tauri 2 command scopes](https://v2.tauri.app/security/scope/)
+- [SLSA specification 1.2](https://slsa.dev/spec/v1.2/)
+- [NIST SP 800-218, Secure Software Development Framework](https://csrc.nist.gov/pubs/sp/800/218/final)
 
 The links above are source material, not endorsements or claims that GHOSTRACE
 implements every referenced model.

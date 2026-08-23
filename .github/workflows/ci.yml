@@ -13,6 +13,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  roadmap:
+    name: roadmap
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Validate roadmap graph
+        run: python3 scripts/roadmap.py check
+      - name: Test roadmap synchronizer
+        run: python3 -m unittest discover -s tests -p 'test_roadmap.py' -v
+      - name: Verify task index
+        run: |
+          python3 scripts/roadmap.py index > /tmp/ghostrace-roadmap-index.md
+          diff -u .forge/tasks/README.md /tmp/ghostrace-roadmap-index.md
+
   fmt:
     name: rustfmt
     runs-on: ubuntu-latest

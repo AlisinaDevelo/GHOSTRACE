@@ -5,8 +5,13 @@ status: backlog
 agent: maintainer
 model: human
 release: M2
-depends_on: [0002, 0007, 0010, 0012]
+depends_on: [0002, 0007, 0010, 0012, 0063, 0064, 0065]
 change: null
+workstream: filesystem
+type: feature
+priority: p0
+risks: [privacy]
+platform: macos
 ---
 
 ## Goal

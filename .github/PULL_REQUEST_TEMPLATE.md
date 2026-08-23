@@ -16,6 +16,7 @@ Describe the change and the user-visible contract it preserves or adds.
 - [ ] cargo fmt --all -- --check
 - [ ] cargo clippy --all-targets --all-features -- -D warnings
 - [ ] cargo test --all-targets --all-features
+- [ ] python3 scripts/roadmap.py check
 - [ ] Documentation and ADRs updated where the boundary or contract changed.
 
 Checks not run and the reason:

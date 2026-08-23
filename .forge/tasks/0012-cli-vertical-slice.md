@@ -7,6 +7,11 @@ model: human
 release: M1
 depends_on: [0007, 0009, 0010, 0011]
 change: null
+workstream: foundation
+type: feature
+priority: p0
+risks: []
+platform: any
 ---
 
 ## Goal

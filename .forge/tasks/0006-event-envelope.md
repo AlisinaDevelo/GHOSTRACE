@@ -4,9 +4,14 @@ title: Define the versioned canonical event envelope
 status: done
 agent: maintainer
 model: human
-release: M1
+release: M0
 depends_on: [0003]
 change: null
+workstream: foundation
+type: feature
+priority: p0
+risks: []
+platform: any
 ---
 
 ## Goal

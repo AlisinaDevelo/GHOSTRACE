@@ -30,6 +30,10 @@ Run the checks locally:
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
+python3 scripts/roadmap.py check
+python3 -m unittest discover -s tests -p 'test_roadmap.py' -v
+python3 scripts/roadmap.py index > /tmp/ghostrace-roadmap-index.md
+diff -u .forge/tasks/README.md /tmp/ghostrace-roadmap-index.md
 ~~~
 
 The fixture demo must not require a network connection or macOS privacy permission.
