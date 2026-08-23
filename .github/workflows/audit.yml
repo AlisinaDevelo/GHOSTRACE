@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  checks: write
 
 concurrency:
   group: audit-${{ github.workflow }}-${{ github.ref }}
@@ -23,3 +24,5 @@ jobs:
           persist-credentials: false
       - name: Check Rust advisories
         uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998  # v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
