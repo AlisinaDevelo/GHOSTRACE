@@ -1,12 +1,17 @@
 ---
 id: 0008
 title: Implement Keychain-backed DEK and AEAD envelopes
-status: ready
+status: backlog
 agent: maintainer
 model: human
 release: M1
-depends_on: [0003, 0004]
+depends_on: [0003, 0004, 0054, 0055, 0056]
 change: null
+workstream: storage
+type: feature
+priority: p0
+risks: [security]
+platform: macos
 ---
 
 ## Goal

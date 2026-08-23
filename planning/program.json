@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "project": "GHOSTRACE",
+  "repository": "AlisinaDevelo/GHOSTRACE",
+  "owner": "AlisinaDevelo",
+  "horizon": {
+    "starts_on": "2026-08-23",
+    "ends_on": "2031-12-31",
+    "minimum_task_count": 160
+  },
+  "milestones": [
+    {
+      "title": "M0",
+      "due_on": "2026-09-30T23:59:59Z",
+      "description": "Public fixture-only contract, identity gate, executable privacy boundaries, reproducible planning, and CI evidence."
+    },
+    {
+      "title": "M1",
+      "due_on": "2027-03-31T23:59:59Z",
+      "description": "Typed evidence core, revocable consent, production Keychain lifecycle, hardened SQLite WAL storage, bounded writer, and crash recovery."
+    },
+    {
+      "title": "M2",
+      "due_on": "2027-09-30T23:59:59Z",
+      "description": "Opt-in selected-root FSEvents collection with path containment, volume-aware cursors, first-class gaps, storm recovery, and benchmarks."
+    },
+    {
+      "title": "M3",
+      "due_on": "2028-03-31T23:59:59Z",
+      "description": "Snapshot-stable queries, evidence-claim grammar, deterministic explanation, streaming export, retention, deletion limits, integrity, and archives."
+    },
+    {
+      "title": "M4",
+      "due_on": "2028-09-30T23:59:59Z",
+      "description": "Explicit shell and Git integrations, frontmost-application context, adversarial privacy tests, and cross-source developer workflow evaluation."
+    },
+    {
+      "title": "M5",
+      "due_on": "2029-03-31T23:59:59Z",
+      "description": "Constrained browser adapters, authenticated local service, accessible read-only UI, and reversible launchd lifecycle."
+    },
+    {
+      "title": "M6",
+      "due_on": "2029-08-23T23:59:59Z",
+      "description": "v1 readiness: reproducible signed and notarized artifacts, SBOM and provenance, performance gates, compatibility, red-team, incident drills, and Endpoint Security decision."
+    },
+    {
+      "title": "M7",
+      "due_on": "2030-02-28T23:59:59Z",
+      "description": "v1.1 operational resilience: diagnostics, backup and recovery, annual macOS compatibility, accessibility, distribution strategy, and telemetry-free support."
+    },
+    {
+      "title": "M8",
+      "due_on": "2030-08-31T23:59:59Z",
+      "description": "Interoperability with explicit imported-evidence trust, W3C PROV, bounded offline telemetry import, adapter capabilities and conformance, and encrypted bundles."
+    },
+    {
+      "title": "M9",
+      "due_on": "2031-02-28T23:59:59Z",
+      "description": "Research-grade evaluation of causal precision, coverage, abstention, gap comprehension, privacy leakage, longitudinal cost, and reproducibility."
+    },
+    {
+      "title": "M10",
+      "due_on": "2031-08-31T23:59:59Z",
+      "description": "Governed ecosystem extensibility with stable adapter contracts, isolation decision, signing and revocation, conformance evidence, governance, and platform feasibility."
+    },
+    {
+      "title": "M11",
+      "due_on": "2031-12-31T23:59:59Z",
+      "description": "v2 and long-term support gate: format and crypto migration, verified compaction, LTS policy, independent audit, release-candidate migration, and 2032 sustainability decision."
+    }
+  ],
+  "labels": [
+    {"name": "epic:foundation", "color": "5319e7", "description": "Public contract, schemas, semantic types, and core foundations"},
+    {"name": "epic:privacy", "color": "5319e7", "description": "Consent, minimization, policy, and privacy evidence"},
+    {"name": "epic:storage", "color": "5319e7", "description": "Journal, keys, migrations, writer, and recovery"},
+    {"name": "epic:filesystem", "color": "5319e7", "description": "FSEvents collection, containment, coverage, and benchmarks"},
+    {"name": "epic:explain-export", "color": "5319e7", "description": "Queries, explanations, exports, retention, and integrity"},
+    {"name": "epic:shell-git", "color": "5319e7", "description": "Explicit shell and Git integrations"},
+    {"name": "epic:frontmost", "color": "5319e7", "description": "Frontmost-application context and evaluation"},
+    {"name": "epic:browser", "color": "5319e7", "description": "Browser security, pairing, adapters, and privacy"},
+    {"name": "epic:service-ui", "color": "5319e7", "description": "Local service, accessible UI, and launchd lifecycle"},
+    {"name": "epic:release-scale", "color": "5319e7", "description": "Release, performance, compatibility, and v1 readiness"},
+    {"name": "epic:operations", "color": "5319e7", "description": "Day-two operation, support, backup, updates, and compatibility"},
+    {"name": "epic:interoperability", "color": "5319e7", "description": "Evidence exchange, adapter contracts, and conformance"},
+    {"name": "epic:research", "color": "5319e7", "description": "Reproducible usefulness, privacy, and resource evaluation"},
+    {"name": "epic:ecosystem", "color": "5319e7", "description": "Governed third-party extensibility and project scale"},
+    {"name": "epic:long-term", "color": "5319e7", "description": "v2 migration, cryptographic agility, LTS, and sustainability"},
+    {"name": "type:feature", "color": "1d76db", "description": "Product or engineering capability"},
+    {"name": "type:test", "color": "0e8a16", "description": "Verification, benchmark, drill, or regression evidence"},
+    {"name": "type:docs", "color": "0075ca", "description": "Documentation, policy, research artifact, or decision record"},
+    {"name": "type:spike", "color": "d4c5f9", "description": "Bounded research, prototype, or go/no-go decision"},
+    {"name": "priority:p0", "color": "b60205", "description": "Critical path or release-blocking safety work"},
+    {"name": "priority:p1", "color": "d93f0b", "description": "Important committed program work"},
+    {"name": "priority:p2", "color": "fbca04", "description": "Optional, contingent, or deferred exploration"},
+    {"name": "risk:privacy", "color": "b60205", "description": "Privacy-sensitive boundary or evidence"},
+    {"name": "risk:security", "color": "d93f0b", "description": "Security-sensitive boundary or evidence"},
+    {"name": "platform:macos", "color": "000000", "description": "macOS-specific implementation or validation"},
+    {"name": "status:backlog", "color": "ededed", "description": "Dependencies or scheduling not yet ready"},
+    {"name": "status:ready", "color": "0e8a16", "description": "Dependencies are complete and work can start"},
+    {"name": "status:in-progress", "color": "1d76db", "description": "Actively being implemented"},
+    {"name": "status:review", "color": "fbca04", "description": "Implementation is awaiting evidence review"},
+    {"name": "status:blocked", "color": "b60205", "description": "External authority or state prevents progress"},
+    {"name": "status:done", "color": "6f42c1", "description": "Acceptance evidence is complete"}
+  ]
+}

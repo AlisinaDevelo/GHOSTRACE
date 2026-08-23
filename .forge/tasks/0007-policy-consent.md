@@ -1,12 +1,17 @@
 ---
 id: 0007
 title: Implement the consent and capture-policy engine
-status: ready
+status: backlog
 agent: maintainer
 model: human
 release: M1
-depends_on: [0004, 0006]
+depends_on: [0004, 0006, 0051, 0052, 0053]
 change: null
+workstream: privacy
+type: feature
+priority: p0
+risks: [privacy, security]
+platform: any
 ---
 
 ## Goal

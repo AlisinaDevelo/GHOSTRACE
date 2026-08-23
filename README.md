@@ -98,8 +98,11 @@ and state when the source cannot establish completeness. See
 
 GHOSTRACE is designed around a narrow local boundary:
 
-- **Local-only:** the baseline has no network client, telemetry, cloud sync, URL
-  fetching, or silent upload path.
+- **Local-only:** source inspection of current product and runtime paths finds no
+  network client, telemetry, cloud sync, URL fetching, or silent upload path. Task
+  0044 must make that boundary independently enforceable in CI before it becomes
+  release evidence. The separate maintainer-only roadmap synchronizer invokes `gh`
+  only when an operator explicitly runs its GitHub commands.
 - **User-authorized:** future collectors require explicit consent, selected scope,
   and a versioned policy. No event is retained before policy evaluation.
 - **Minimized:** the baseline records bounded metadata about changes. It does not
@@ -114,7 +117,8 @@ GHOSTRACE is designed around a narrow local boundary:
 The initial product does **not** use keylogging, microphones, screen recording,
 clipboard capture, window titles, page contents, or private-browsing data by default.
 It does not require root, Full Disk Access, Accessibility, or Automation permissions.
-There is no silent upload mechanism.
+No silent upload mechanism exists in the current source; the planned network-denial
+CI lane will continuously verify that boundary.
 
 FSEvents is a change-notification source, not a complete process-attributed causal
 trace. It can omit, coalesce, reorder, or delay observations. Endpoint Security is
@@ -148,7 +152,7 @@ docs/adr/            Immutable architecture decisions
 - [Research](docs/RESEARCH.md) — landscape, differentiation, and primary sources
 - [Identity audit](docs/IDENTITY.md) — preliminary naming and namespace observations
 - [Platform](docs/PLATFORM.md) — macOS boundary and permission policy
-- [Roadmap](docs/ROADMAP.md) — M0 through M6, August 2026–August 2029
+- [Roadmap](docs/ROADMAP.md) — 160 tasks across M0 through M11, August 2026–December 2031
 - [ADR 0001](docs/adr/0001-local-only-minimized-capture.md) — local-only minimized capture
 - [ADR 0002](docs/adr/0002-fsevents-before-endpoint-security.md) — FSEvents before Endpoint Security
 - [ADR 0003](docs/adr/0003-sqlite-wal-active-journal.md) — SQLite WAL active journal
@@ -159,12 +163,16 @@ in the issue forms, not in a journal attachment.
 
 ## Development checks
 
-Use the pinned toolchain and run the same checks as CI:
+Use the pinned toolchain and run the core checks exercised by CI:
 
 ~~~sh
 cargo +1.88.0 fmt --all -- --check
 cargo +1.88.0 clippy --all-targets --all-features -- -D warnings
 cargo +1.88.0 test --all-targets --all-features
+python3 scripts/roadmap.py check
+python3 -m unittest discover -s tests -p 'test_roadmap.py' -v
+python3 scripts/roadmap.py index > /tmp/ghostrace-roadmap-index.md
+diff -u .forge/tasks/README.md /tmp/ghostrace-roadmap-index.md
 ~~~
 
 The fixture-only path should remain offline. Do not add a network dependency, a

@@ -5,8 +5,13 @@ status: backlog
 agent: maintainer
 model: human
 release: M3
-depends_on: [0018, 0019]
+depends_on: [0018, 0019, 0083, 0084, 0085]
 change: null
+workstream: explain-export
+type: feature
+priority: p1
+risks: [privacy]
+platform: any
 ---
 
 ## Goal
@@ -14,7 +19,8 @@ Ship a documented, streaming, versioned export that carries enough context to in
 
 ## Acceptance criteria
 - [ ] The manifest includes version, policy, coverage, collector status, and gaps.
-- [ ] Export streams safely.
+- [ ] A 10-million-record fixture export completes through a bounded streaming buffer without materializing the result and with no more than 64 MiB peak incremental resident memory.
+- [ ] Before writing plaintext, the command identifies the selected sources and time range and requires explicit confirmation that sensitive metadata may leave encrypted storage.
 - [ ] Existing destinations are not overwritten without explicit confirmation.
 
 ## Context

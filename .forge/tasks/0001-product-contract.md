@@ -7,10 +7,15 @@ model: human
 release: M0
 depends_on: []
 change: null
+workstream: foundation
+type: docs
+priority: p0
+risks: [privacy]
+platform: any
 ---
 
 ## Goal
-Publish the product contract that defines GHOSTRACE as a local-only, opt-in forensic event journal and fixes its permanent privacy boundaries.
+Publish the product contract that defines GHOSTRACE as a local-only, opt-in causal event journal and fixes its permanent privacy boundaries without implying legal-forensic guarantees.
 
 ## Acceptance criteria
 - [x] The README states local-only behavior and opt-in collectors.

@@ -5,8 +5,13 @@ status: backlog
 agent: maintainer
 model: human
 release: M5
-depends_on: [0002, 0004, 0005, 0012]
+depends_on: [0002, 0004, 0005, 0012, 0101]
 change: null
+workstream: browser
+type: spike
+priority: p1
+risks: [privacy, security]
+platform: any
 ---
 
 ## Goal

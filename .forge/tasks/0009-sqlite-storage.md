@@ -5,8 +5,13 @@ status: backlog
 agent: maintainer
 model: human
 release: M1
-depends_on: [0006, 0008]
+depends_on: [0006, 0008, 0057, 0058, 0059]
 change: null
+workstream: storage
+type: feature
+priority: p0
+risks: [security]
+platform: any
 ---
 
 ## Goal
