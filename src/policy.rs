@@ -310,6 +310,7 @@ impl PolicyHistory {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PolicyReason {
+    PolicyAllowed,
     SourceNotEnabled,
     RootNotSelected,
     PrivateContext,
@@ -317,11 +318,18 @@ pub enum PolicyReason {
     PolicyProfileMismatch,
     InvalidProfile,
     FixtureOnly,
+    MalformedInput,
+    UnsupportedScope,
+    InternalFailure,
+    RedactionRequired,
+    SummaryOnly,
+    Refused,
 }
 
 impl PolicyReason {
     pub fn code(self) -> &'static str {
         match self {
+            Self::PolicyAllowed => "policy_allowed",
             Self::SourceNotEnabled => "source_not_enabled",
             Self::RootNotSelected => "root_not_selected",
             Self::PrivateContext => "private_context",
@@ -329,7 +337,121 @@ impl PolicyReason {
             Self::PolicyProfileMismatch => "policy_profile_mismatch",
             Self::InvalidProfile => "invalid_policy_profile",
             Self::FixtureOnly => "fixture_only",
+            Self::MalformedInput => "malformed_input",
+            Self::UnsupportedScope => "unsupported_scope",
+            Self::InternalFailure => "internal_failure",
+            Self::RedactionRequired => "redaction_required",
+            Self::SummaryOnly => "summary_only",
+            Self::Refused => "refused",
         }
+    }
+
+    pub fn diagnostic(self) -> PolicyDiagnostic {
+        match self {
+            Self::PolicyAllowed => PolicyDiagnostic::Accepted,
+            Self::MalformedInput | Self::InvalidProfile | Self::EmptyProfileId => {
+                PolicyDiagnostic::MalformedInput
+            }
+            Self::UnsupportedScope => PolicyDiagnostic::UnsupportedScope,
+            Self::InternalFailure => PolicyDiagnostic::InternalFailure,
+            Self::SourceNotEnabled
+            | Self::RootNotSelected
+            | Self::PrivateContext
+            | Self::PolicyProfileMismatch
+            | Self::FixtureOnly
+            | Self::RedactionRequired
+            | Self::SummaryOnly
+            | Self::Refused => PolicyDiagnostic::PolicyDenied,
+        }
+    }
+}
+
+/// The finite public diagnostic classes exposed by the policy gate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PolicyDiagnostic {
+    Accepted,
+    PolicyDenied,
+    MalformedInput,
+    UnsupportedScope,
+    InternalFailure,
+}
+
+impl PolicyDiagnostic {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Accepted => "accepted",
+            Self::PolicyDenied => "policy_denied",
+            Self::MalformedInput => "malformed_input",
+            Self::UnsupportedScope => "unsupported_scope",
+            Self::InternalFailure => "internal_failure",
+        }
+    }
+}
+
+/// The bounded action recorded for a policy decision. Redaction and summary
+/// outcomes carry no rejected value; they are only an explicit disposition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PolicyOutcome {
+    Allow,
+    Deny,
+    Redact,
+    Summarize,
+    Refuse,
+}
+
+impl PolicyOutcome {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Allow => "allow",
+            Self::Deny => "deny",
+            Self::Redact => "redact",
+            Self::Summarize => "summarize",
+            Self::Refuse => "refuse",
+        }
+    }
+}
+
+/// A privacy-bounded, serializable decision record. It intentionally reports
+/// only whether a root was present, never the root or rejected observation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PolicyDecisionRecord {
+    pub outcome: PolicyOutcome,
+    pub reason: PolicyReason,
+    pub source: EventSource,
+    pub policy_id: Option<PolicyProfileId>,
+    pub policy_version: u32,
+    pub root_present: bool,
+    pub private_context: bool,
+}
+
+impl PolicyDecisionRecord {
+    pub fn reason_code(&self) -> &'static str {
+        self.reason.code()
+    }
+
+    pub fn diagnostic(&self) -> PolicyDiagnostic {
+        self.reason.diagnostic()
+    }
+
+    pub fn redact(mut self) -> Self {
+        self.outcome = PolicyOutcome::Redact;
+        self.reason = PolicyReason::RedactionRequired;
+        self
+    }
+
+    pub fn summarize(mut self) -> Self {
+        self.outcome = PolicyOutcome::Summarize;
+        self.reason = PolicyReason::SummaryOnly;
+        self
+    }
+
+    pub fn refuse(mut self, reason: PolicyReason) -> Self {
+        self.outcome = PolicyOutcome::Refuse;
+        self.reason = reason;
+        self
     }
 }
 
@@ -423,11 +545,16 @@ impl PolicyProfile {
         root_id: Option<&str>,
         private_context: bool,
     ) -> PolicyDecision {
-        let root = root_id.map(str::to_owned);
+        // A rejected observation may be an attacker-controlled path. Only
+        // report a root identifier that satisfies the same bounded identifier
+        // contract as selected policy roots; otherwise report presence only.
+        let safe_root = root_id.and_then(|value| {
+            validate_identifier("selected_root", value).ok().map(|_| value.to_owned())
+        });
         if !self.enabled_sources.contains(&source) {
             return PolicyDecision::Denied {
                 source,
-                root_id: root,
+                root_id: safe_root,
                 reason: PolicyReason::SourceNotEnabled,
             };
         }
@@ -435,7 +562,7 @@ impl PolicyProfile {
             if !self.selected_roots.contains(root_id) {
                 return PolicyDecision::Denied {
                     source,
-                    root_id: root,
+                    root_id: safe_root,
                     reason: PolicyReason::RootNotSelected,
                 };
             }
@@ -443,11 +570,52 @@ impl PolicyProfile {
         if private_context && !self.allow_private_context {
             return PolicyDecision::Denied {
                 source,
-                root_id: root,
+                root_id: safe_root,
                 reason: PolicyReason::PrivateContext,
             };
         }
-        PolicyDecision::Allowed { source, root_id: root }
+        PolicyDecision::Allowed { source, root_id: safe_root }
+    }
+
+    pub fn decide_record(
+        &self,
+        source: EventSource,
+        root_id: Option<&str>,
+        private_context: bool,
+    ) -> PolicyDecisionRecord {
+        let policy_id = PolicyProfileId::try_from(self.id.clone()).ok();
+        let profile_valid = self.version != 0
+            && policy_id.is_some()
+            && self.selected_roots.len() <= 256
+            && self
+                .selected_roots
+                .iter()
+                .all(|root| validate_identifier("selected_root", root).is_ok());
+        if !profile_valid {
+            return PolicyDecisionRecord {
+                outcome: PolicyOutcome::Refuse,
+                reason: PolicyReason::InvalidProfile,
+                source,
+                policy_id,
+                policy_version: self.version,
+                root_present: root_id.is_some(),
+                private_context,
+            };
+        }
+        let decision = self.decide(source, root_id, private_context);
+        let (outcome, reason) = match decision {
+            PolicyDecision::Allowed { .. } => (PolicyOutcome::Allow, PolicyReason::PolicyAllowed),
+            PolicyDecision::Denied { reason, .. } => (PolicyOutcome::Deny, reason),
+        };
+        PolicyDecisionRecord {
+            outcome,
+            reason,
+            source,
+            policy_id,
+            policy_version: self.version,
+            root_present: root_id.is_some(),
+            private_context,
+        }
     }
 
     pub fn authorize(&self, event: &EventEnvelope) -> Result<(), GhostraceError> {

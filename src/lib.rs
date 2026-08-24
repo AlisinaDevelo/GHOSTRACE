@@ -39,8 +39,9 @@ pub use model::{
     PROVENANCE_VERSION, REPAIR_PROVENANCE_VERSION, SHA256_DIGEST_BYTES,
 };
 pub use policy::{
-    PolicyChange, PolicyDecision, PolicyDocument, PolicyHistory, PolicyMigration,
-    PolicyMigrationOutcome, PolicyProfile, PolicyReason, POLICY_DOCUMENT_SCHEMA_VERSION,
+    PolicyChange, PolicyDecision, PolicyDecisionRecord, PolicyDiagnostic, PolicyDocument,
+    PolicyHistory, PolicyMigration, PolicyMigrationOutcome, PolicyOutcome, PolicyProfile,
+    PolicyReason, POLICY_DOCUMENT_SCHEMA_VERSION,
 };
 
 pub const EVENT_SCHEMA_JSON: &str = include_str!("../schemas/event-envelope-v1.json");
