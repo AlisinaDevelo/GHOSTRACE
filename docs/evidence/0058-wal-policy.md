@@ -70,4 +70,32 @@ canary. Synthetic MVP artifact digests remain:
 substituted with hosted results. Intel macOS, the macOS 15 floor, signed and
 notarized distribution, and live collectors remain explicit no-go or unverified
 scope. This task must receive the same pipe against the merged `main` SHA before
-the task status changes from `review` or the issue closes.
+the task status changes from `review` or the issue closes; the protected-main
+rerun below records that gate.
+
+## Protected-main rerun
+
+The exact source reproduction was rerun from the protected `main` merge
+`c9fc5bc664e105b7a002c235f6ecdab3a3d05485` in a clean detached worktree on the
+same device and toolchain.
+
+| Artifact | Value |
+| --- | --- |
+| Merged-main full pipe log | `/private/tmp/ghostrace-0058-merged-pipe.XEqRmi`; SHA-256 `42d2b726a93a697a3b0a8b7e14c4be268315f01dd9a18e4606f50f5f030315b6` |
+| Merged-main focused measurement log | `/private/tmp/ghostrace-0058-wal-measurements-merged.log`; SHA-256 `6b4acdf8e6131d699dec7a5dc0b3e6aeae2ec8a174461126c5616d194a4a4ba6` |
+| Merged-main device | MacBook Pro 17,1; Apple M1; 8 GB; arm64; macOS 26.6.2 (25G83) |
+| Merged-main toolchain | Rust/Cargo 1.88.0; `aarch64-apple-darwin` |
+
+The merged focused log records the same bounded truncate report (zero remaining
+frames and zero WAL bytes), 10-frame passive starvation refusal, abrupt-exit
+recovery, and reader-limit refusals (`70 ms / 25 ms` and `33 ms / 10 ms`). The
+full merged pipe ended with `MERGED_PIPE_PASS` and repeated every source check:
+locked metadata, format/check/Clippy, debug and release all-target suites,
+doctests, docs, roadmap/index parity, 38 Python tests, reproducibility, fixture
+and identity checks, deterministic demo/export/capture refusal, ShellCheck,
+actionlint, and the enforced macOS sandbox network-denial lane.
+
+Decision: complete for the fixture file-backed WAL policy contract on the verified
+device. Intel/macOS 15, signed/notarized distribution, live collectors, and
+`cargo-audit`/`cargo-deny` remain explicit no-go or unavailable scope and are not
+represented as covered by this task.
