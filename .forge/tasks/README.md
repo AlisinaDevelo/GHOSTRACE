@@ -46,7 +46,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0040 | Complete v1.0 compatibility, privacy, and incident readiness | M6 | backlog | release-scale | maintainer | — | 0020, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028, 0029, 0030, 0031, 0032, 0033, 0034, 0035, 0036, 0037, 0038, 0039, 0041, 0042, 0121, 0122, 0123 |
 | 0041 | Validate the project identity and package namespaces | M0 | ready | foundation | maintainer | — | 0001 |
 | 0042 | Evaluate optional Endpoint Security actor attribution | M6 | backlog | release-scale | maintainer | — | 0017, 0019, 0037, 0124 |
-| 0043 | Build the prohibited-data privacy regression corpus | M0 | ready | privacy | test-engineer | 0005 | 0004, 0006 |
+| 0043 | Build the prohibited-data privacy regression corpus | M0 | done | privacy | test-engineer | 0005 | 0004, 0006 |
 | 0044 | Enforce an offline network-denial CI lane | M0 | ready | privacy | security-auditor | 0005 | 0003, 0004 |
 | 0045 | Publish the supported macOS and permission test matrix | M0 | ready | foundation | platform-engineer | — | 0002 |
 | 0046 | Freeze semantic identifier and digest contracts | M0 | ready | foundation | security-auditor | — | 0004, 0006 |

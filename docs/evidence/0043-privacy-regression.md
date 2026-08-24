@@ -1,7 +1,7 @@
 # GHOSTRACE 0043 privacy regression evidence
 
 Artifact IDs: `GHOSTRACE-0043-PRIVACY-CORPUS-V1`,
-`GHOSTRACE-0043-PREMERGE-AFC0E3B`.
+`GHOSTRACE-0043-PREMERGE-AFC0E3B`, `GHOSTRACE-0043-MERGED-AC7B4CC`.
 
 This is the pre-merge target-device record for the prohibited-data regression
 corpus. The roadmap task remains open until the same reproduction is rerun
@@ -47,6 +47,15 @@ for the sentinel prefix and was clean.
 
 The raw local verification log is identified by SHA-256
 `70bbbd6038b37d2ffd72bb6aecc732417a4dc5e4b65d240a884ac2432a899382`.
+
+## Merged-main reproduction
+
+The same reproduction was rerun on protected `main` at merged commit
+`ac7b4cc878ffadbcf43ccbaec15c99b7588b4226` on the same device and toolchain.
+The debug and release suites each passed 19 tests, the focused corpus test
+passed, Clippy, formatting, actionlint, and all roadmap checks passed, and the
+sentinel scan was clean. The merged-run log is identified by SHA-256
+`f3886a325650b3be32670875802509f45697259878ff8c9bc51c2154f210a2c3`.
 
 ## Acceptance coverage
 
