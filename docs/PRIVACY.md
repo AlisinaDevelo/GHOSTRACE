@@ -39,6 +39,14 @@ The exact fields are versioned in [EVENT_MODEL.md](EVENT_MODEL.md). A field is n
 privacy-safe merely because it is called metadata; paths, timestamps, identifiers,
 and source flags can be sensitive.
 
+The macOS provider stores only the journal wrapping key as a generic password in the
+data-protection Keychain. It sets `kSecUseDataProtectionKeychain`, requires
+`kSecAttrSynchronizable=false`, and uses `WhenUnlockedThisDeviceOnly` access control.
+The default service/account are `com.alisinadevelo.ghostrace.journal` and
+`journal-wrapping-key-v1`; an access group is optional and must match the signed bundle
+entitlement. An unsigned command-line helper or a locked login session has no fallback:
+missing, inaccessible, duplicated, or malformed items produce redacted refusal errors.
+
 ## Consent and scope
 
 When live capture is eventually enabled, consent must state the source, selected

@@ -472,6 +472,38 @@ fn policy_decision_records_are_bounded_and_diagnostics_are_finite() {
     assert_eq!(PolicyReason::InternalFailure.diagnostic(), PolicyDiagnostic::InternalFailure);
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_keychain_provider_requires_one_valid_non_sync_item() {
+    use ghostrace::{KeyProvider, MacOsKeychainProvider};
+
+    let suffix = Uuid::new_v4().simple().to_string();
+    let provider = MacOsKeychainProvider::with_identity(
+        format!("com.alisinadevelo.ghostrace.test-{suffix}"),
+        format!("journal-key-{suffix}"),
+        Option::<String>::None,
+    )
+    .expect("test keychain identity");
+    let _ = provider.delete();
+    assert!(provider.key().is_err(), "missing item must fail closed");
+
+    let expected = [7_u8; 32];
+    let provision = provider.provision(expected);
+    if let Err(error) = provision {
+        let message = error.to_string();
+        assert!(!message.contains(provider.service()));
+        assert!(!message.contains(provider.account()));
+        assert!(message.contains("failed") || message.contains("missing"));
+        return;
+    }
+    assert_eq!(provider.key().expect("read provisioned key"), expected);
+    assert!(provider.provision([8_u8; 32]).is_err(), "duplicate provision must fail closed");
+    assert_eq!(provider.key().expect("original key remains"), expected);
+
+    provider.delete().expect("delete test item");
+    assert!(provider.key().is_err(), "deleted item must fail closed");
+}
+
 #[test]
 fn browser_url_sanitizes_sensitive_components_and_private_context_is_rejected() {
     let url = SanitizedUrl::parse("https://alice:password@example.test/a?secret=value#fragment")

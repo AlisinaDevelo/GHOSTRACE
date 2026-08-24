@@ -32,6 +32,17 @@ Endpoint Security is optional and entitlement-gated. It is not a hidden fallback
 FSEvents and will require its own threat model, attribution tests, user-facing
 consent, and release evidence.
 
+## Keychain constraints
+
+The journal wrapping key is scoped to the macOS data-protection Keychain. The provider
+uses the `com.alisinadevelo.ghostrace.journal` service and
+`journal-wrapping-key-v1` account, disables iCloud synchronization, and requires
+`WhenUnlockedThisDeviceOnly` access control. The default application uses no access
+group. A command-line helper or extension must be code-signed with the same bundle
+identity and any explicitly configured Keychain access group; otherwise the provider
+reports a bounded failure. Key reads are available only in an unlocked user login
+session, and no legacy-keychain fallback is permitted.
+
 ## FSEvents boundary
 
 The planned first live source observes bounded filesystem metadata below explicitly
