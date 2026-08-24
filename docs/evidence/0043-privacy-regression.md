@@ -1,11 +1,13 @@
 # GHOSTRACE 0043 privacy regression evidence
 
 Artifact IDs: `GHOSTRACE-0043-PRIVACY-CORPUS-V1`,
-`GHOSTRACE-0043-PREMERGE-AFC0E3B`, `GHOSTRACE-0043-MERGED-AC7B4CC`.
+`GHOSTRACE-0043-PREMERGE-AFC0E3B`, `GHOSTRACE-0043-MERGED-AC7B4CC`,
+`GHOSTRACE-0043-LOCAL-PIPELINE-98420EE`, `GHOSTRACE-0043-LOCAL-AUDIT`,
+`GHOSTRACE-0043-LOCAL-DENY`, and `GHOSTRACE-0043-LOCAL-NETWORK`.
 
-This is the pre-merge target-device record for the prohibited-data regression
-corpus. The roadmap task remains open until the same reproduction is rerun
-against the merged `main` SHA and linked from the issue.
+This is the retained target-device record for the prohibited-data regression
+corpus. The same reproduction has been rerun against merged `main`; the roadmap
+task and issue remain open only until the evidence ledger is synchronized.
 
 ## Implementation under test
 
@@ -57,6 +59,28 @@ passed, Clippy, formatting, actionlint, and all roadmap checks passed, and the
 sentinel scan was clean. The merged-run log is identified by SHA-256
 `f3886a325650b3be32670875802509f45697259878ff8c9bc51c2154f210a2c3`.
 
+## Expanded local pipeline (Actions not used as evidence)
+
+At commit `98420ee654ebeddb70f11bed9a3733a9f74b1d60`, the full pipeline was
+rerun locally with `CARGO_NET_OFFLINE=true`: locked metadata, check, build,
+two full debug suites, release suite, five repeated privacy runs, doctests,
+Clippy, formatting, actionlint, roadmap tests/index parity, CLI help/version,
+deterministic demo, export permissions/overwrite/force, schema equality, and
+explicit capture refusal. Every command passed; the local sentinel scan was
+clean. The local-pipeline log digest is
+`cca66853751602af4d1db0d14d85bf5f07e1ebec7a75542abe4b3b3c087f6b63`.
+
+The local RustSec audit used `cargo-audit 0.22.2` and scanned 178 locked
+dependencies with no advisories; log digest
+`bdbcfb9e01bfd07f6b14cb986421667eec10a2da27e230821584ec21631e8403`.
+The local policy check used `cargo-deny 0.20.2` and passed advisories, bans,
+licenses, and sources; it emitted only duplicate-dependency and unmatched
+license-allowance warnings; log digest
+`2f1e8510d523fa397202e9f6938b1f7da99ed8755e954710df9d412adf239025`.
+The dependency/source network-surface scan found no network-client dependency
+or network API reference; log digest
+`df3e48b3dd76e3e4944d49ce121ba320fe85b74b717cadd934be42e6c82f9030`.
+
 ## Acceptance coverage
 
 - Happy path: existing fixture ingest, deterministic explanation, JSONL export,
@@ -71,8 +95,8 @@ sentinel scan was clean. The merged-run log is identified by SHA-256
 ## Limitations and next gate
 
 The corpus is synthetic and fixture-only. It does not enable live capture,
-request macOS permissions, or open a network connection. `cargo-audit` and
-`cargo-deny` were not installed locally; their CI jobs remain separate policy
-checks and are not substituted for the target-device evidence above. No
-hardware is required for this task. The post-merge device rerun and merged
-commit must be recorded in the corresponding GitHub issue before closure.
+request macOS permissions, or open a network connection. The local audit and
+policy tools were installed into task-scoped temporary paths and passed; their
+logs and digests are recorded above. No hardware is required for this task.
+The corresponding GitHub issue must link these artifacts, logs, digests,
+limitations, and the merged commit before closure.

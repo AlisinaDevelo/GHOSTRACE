@@ -28,7 +28,9 @@ The privacy model is credible only when prohibited fields are tested at every se
 
 ## Notes
 Implemented and verified under evidence artifacts `GHOSTRACE-0043-PRIVACY-CORPUS-V1`,
-`GHOSTRACE-0043-PREMERGE-AFC0E3B`, and `GHOSTRACE-0043-MERGED-AC7B4CC`.
+`GHOSTRACE-0043-PREMERGE-AFC0E3B`, `GHOSTRACE-0043-MERGED-AC7B4CC`,
+`GHOSTRACE-0043-LOCAL-PIPELINE-98420EE`, `GHOSTRACE-0043-LOCAL-AUDIT`,
+`GHOSTRACE-0043-LOCAL-DENY`, and `GHOSTRACE-0043-LOCAL-NETWORK`.
 
 Pre-merge implementation commit: `afc0e3bee2517cb18426df3420ef0229cad81624`.
 PR #167 was reviewed locally, passed required GitHub checks, and merged to
@@ -40,9 +42,17 @@ corpus test passed. The merged-run log digest is
 `f3886a325650b3be32670875802509f45697259878ff8c9bc51c2154f210a2c3`.
 The retained report is `docs/evidence/0043-privacy-regression.md`; local
 pre-merge and merged logs were scanned for the sentinel prefix and were clean.
+The expanded offline local pipeline passed locked metadata/check/build, debug
+and release suites, five repeated privacy runs, doctests, Clippy, formatting,
+actionlint, roadmap checks, CLI demo/export/schema/capture checks, RustSec
+audit, cargo-deny policy, and network-surface scans. Its log digests are
+`cca66853751602af4d1db0d14d85bf5f07e1ebec7a75542abe4b3b3c087f6b63`,
+`bdbcfb9e01bfd07f6b14cb986421667eec10a2da27e230821584ec21631e8403`,
+`2f1e8510d523fa397202e9f6938b1f7da99ed8755e954710df9d412adf239025`, and
+`df3e48b3dd76e3e4944d49ce121ba320fe85b74b717cadd934be42e6c82f9030`.
 
 The corpus is synthetic and fixture-only; it does not exercise live capture,
-macOS permissions, or hardware-dependent paths. `cargo-audit` and `cargo-deny`
-were unavailable locally and remain covered by their required CI jobs, not by
-substitution. Completion requires the acceptance evidence above; issue closure
-must link these artifacts, logs, digests, limitations, and the merged SHA.
+macOS permissions, or hardware-dependent paths. The local audit/policy tools
+passed in task-scoped temporary installations. Completion requires the
+acceptance evidence above; issue closure must link these artifacts, logs,
+digests, limitations, and the merged SHA.
