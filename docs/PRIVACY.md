@@ -8,6 +8,9 @@ fixture-only, local, and offline; no live collector is enabled.
 
 - Collection is deny-by-default and requires explicit, versioned consent when live
   sources are introduced.
+- Policy documents are strict and versioned. Unknown versions, duplicate identities,
+  downgrade attempts, and semantic changes without explicit reconfirmation fail
+  closed before a candidate observation can be retained.
 - The baseline has no network client, telemetry, cloud sync, URL fetching, or silent
   upload path.
 - Private browsing and private application contexts are excluded by default.

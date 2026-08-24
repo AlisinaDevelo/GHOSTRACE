@@ -7,9 +7,10 @@ use ghostrace::{
     BrowserName, BrowserNavigationPayload, DeterministicKeyProvider, EntryKind, EventEnvelope,
     EventKind, EventPayload, EventSource, Evidence, ExportPolicyProfile, FileOperation,
     FilesystemChangedPayload, FolderId, FrontmostAppChangedPayload, GitObjectId, IngestionOrigin,
-    Journal, PathClass, PathDigest, PolicyDecision, PolicyProfile, ReasonCode, RepositoryId,
-    RootId, SanitizedUrl, SessionId, ShellFinishedPayload, ShellKind, ShellStatus, SourceCursor,
-    SourceErrorPayload, EVENT_SCHEMA_JSON,
+    Journal, PathClass, PathDigest, PolicyChange, PolicyDecision, PolicyDocument, PolicyHistory,
+    PolicyMigrationOutcome, PolicyProfile, ReasonCode, RepositoryId, RootId, SanitizedUrl,
+    SessionId, ShellFinishedPayload, ShellKind, ShellStatus, SourceCursor, SourceErrorPayload,
+    EVENT_SCHEMA_JSON, POLICY_DOCUMENT_SCHEMA_JSON,
 };
 use serde_json::json;
 use tempfile::tempdir;
@@ -249,6 +250,117 @@ fn policy_versions_are_immutable() {
     let mut changed_policy = policy;
     changed_policy.enable_source(EventSource::Browser);
     assert!(journal.ingest(&origin, &second, &changed_policy).is_err());
+}
+
+#[test]
+fn policy_documents_are_strict_versioned_and_fail_closed() {
+    let valid_json = include_str!("fixtures/policy-document-v1-valid.json");
+    let document = PolicyDocument::from_json(valid_json).expect("valid policy document");
+    let schema: serde_json::Value =
+        serde_json::from_str(POLICY_DOCUMENT_SCHEMA_JSON).expect("policy schema JSON");
+    let validator = jsonschema::options()
+        .should_validate_formats(true)
+        .build(&schema)
+        .expect("valid policy schema");
+    let serialized = serde_json::to_value(&document).expect("serialize policy document");
+    assert!(validator.is_valid(&serialized));
+    for invalid in [
+        include_str!("fixtures/policy-document-v1-invalid-schema.json"),
+        include_str!("fixtures/policy-document-v1-invalid-unknown.json"),
+        include_str!("fixtures/policy-document-v1-invalid-duplicate.json"),
+    ] {
+        let invalid_value: serde_json::Value =
+            serde_json::from_str(invalid).expect("invalid policy JSON");
+        assert!(!validator.is_valid(&invalid_value));
+    }
+    assert_eq!(
+        PolicyDocument::from_json(&document.to_json().expect("policy JSON"))
+            .expect("round-trip policy"),
+        document
+    );
+    assert_eq!(document.to_profile().expect("runtime profile").id, "fixture-default-v1");
+
+    let invalid_documents = [
+        (
+            include_str!("fixtures/policy-document-v1-invalid-schema.json").to_owned(),
+            "unsupported policy schema",
+        ),
+        (
+            include_str!("fixtures/policy-document-v1-invalid-unknown.json").to_owned(),
+            "unknown policy field",
+        ),
+        (
+            include_str!("fixtures/policy-document-v1-invalid-duplicate.json").to_owned(),
+            "duplicate selected root",
+        ),
+        (
+            valid_json.replace("[\"filesystem\", \"fixture\"]", "[\"filesystem\", \"filesystem\"]"),
+            "duplicate source",
+        ),
+        (valid_json.replace("\"fixture-default-v1\"", "\"../private\""), "invalid policy identity"),
+    ];
+    for (candidate, label) in invalid_documents {
+        let error = PolicyDocument::from_json(&candidate).expect_err(label);
+        assert!(!error.to_string().contains("../private"), "policy error echoed candidate");
+    }
+
+    let first = document.clone();
+    let mut history = PolicyHistory::new();
+    assert!(matches!(
+        history.apply(first.clone(), false).expect("install policy"),
+        PolicyMigrationOutcome::Installed { version: 1, .. }
+    ));
+    let duplicate = PolicyDocument::new(
+        "fixture-default-v1",
+        1,
+        first.enabled_sources.iter().copied(),
+        first.selected_roots.iter().cloned(),
+        false,
+    )
+    .expect("duplicate candidate shape");
+    assert!(history.apply(duplicate, false).is_err());
+    assert_eq!(history.current("fixture-default-v1").expect("current policy").version, 1);
+
+    let preserved = PolicyDocument::new(
+        "fixture-default-v1",
+        2,
+        first.enabled_sources.iter().copied(),
+        first.selected_roots.iter().cloned(),
+        false,
+    )
+    .expect("preserving upgrade");
+    assert!(matches!(
+        history.apply(preserved, false).expect("preserving migration"),
+        PolicyMigrationOutcome::PreservedChoices { from_version: 1, to_version: 2, .. }
+    ));
+
+    let changed = PolicyDocument::new(
+        "fixture-default-v1",
+        3,
+        first.enabled_sources.iter().copied(),
+        first.selected_roots.iter().cloned(),
+        true,
+    )
+    .expect("changed upgrade");
+    let error = history.apply(changed.clone(), false).expect_err("reconfirmation required");
+    assert!(error.to_string().contains("reconfirmation"));
+    assert_eq!(history.current("fixture-default-v1").expect("unchanged policy").version, 2);
+    assert!(matches!(
+        history.apply(changed, true).expect("reconfirmed migration"),
+        PolicyMigrationOutcome::Reconfirmed { changed, .. }
+            if changed == vec![PolicyChange::PrivateContext]
+    ));
+
+    let downgrade = PolicyDocument::new(
+        "fixture-default-v1",
+        2,
+        first.enabled_sources.iter().copied(),
+        first.selected_roots.iter().cloned(),
+        false,
+    )
+    .expect("downgrade shape");
+    assert!(history.apply(downgrade, true).is_err());
+    assert_eq!(history.current("fixture-default-v1").expect("latest policy").version, 3);
 }
 
 #[test]

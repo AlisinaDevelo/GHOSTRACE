@@ -38,6 +38,17 @@ only after its transaction commits. If the source cannot prove coverage, it emit
 gap or an unknown evidence level rather than allowing the explanation layer to infer
 one.
 
+## Policy-document boundary
+
+Capture policy is stored as a strict `policy-document-v1` document with an immutable
+identity and a monotonically increasing policy version. The JSON document has no
+extension fields: unknown schema versions, unknown fields, duplicate entries, and
+invalid identifiers are rejected before a candidate reaches a journal or policy
+history. A version upgrade that preserves enabled sources, selected roots, and
+private-context behavior is automatically interpretable. Any semantic change must
+be explicitly reconfirmed; a failed migration leaves the previously accepted
+document active and retains no candidate observation.
+
 ## Components
 
 | Component | Responsibility | Current state |
@@ -56,8 +67,10 @@ one.
 1. A source produces an observation or a fixture supplies one.
 2. Normalization rejects malformed or out-of-contract data without retaining
    sensitive rejected values.
-3. The policy gate decides whether the observation is allowed, denied, or converted
-   to a gap/status record. Policy decisions have a version and reason.
+3. The policy gate loads a validated, versioned policy document and decides whether
+   the observation is allowed, denied, or converted to a gap/status record. Policy
+   decisions have a version and reason; semantic policy upgrades require explicit
+   reconfirmation.
 4. An accepted event receives a stable identifier and provenance, including the
    immutable policy profile ID and version. A typed adapter-origin capability owns
    the provenance version and collector namespace; the envelope retains what the
