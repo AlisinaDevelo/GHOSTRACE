@@ -1,0 +1,469 @@
+{
+  "schema_version": 1,
+  "register_id": "ghostrace-release-evidence-v1",
+  "required_evidence_state": "observed",
+  "states": ["planned", "observed", "inferred", "unavailable"],
+  "state_definitions": {
+    "planned": "A required artifact and method are named, but the measurement has not been run.",
+    "observed": "The named artifact records a completed measurement at the required scope and date.",
+    "inferred": "The result is derived from other evidence and is never sufficient for a release gate by itself.",
+    "unavailable": "The target or measurement could not be run; the limitation is retained and the gate is blocked."
+  },
+  "gate_policy": {
+    "required_state": "observed",
+    "allow_inferred_for_release": false,
+    "allow_unavailable_for_release": false,
+    "require_artifact_exists": true,
+    "require_freshness": true,
+    "require_scope_coverage": true,
+    "missing_or_stale_action": "block",
+    "narrow_scope_action": "block",
+    "future_observation_action": "block"
+  },
+  "milestones": [
+    {
+      "id": "M0",
+      "due_on": "2026-09-30",
+      "outcome": "Fixture-only public contract, identity decision, executable privacy boundaries, supported-platform matrix, and reproducible planning.",
+      "exit_measures": [
+        {
+          "id": "M0-001",
+          "kind": "count",
+          "target": "13/13 M0 tasks done",
+          "measure": "Every M0 task has retained acceptance evidence, and the inspected Forge and metadata plans have zero remaining operations or blockers.",
+          "artifact": "docs/evidence/M0-release-gate.md",
+          "scope": ["M0", "all-m0-tasks"],
+          "freshness_days": 90,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M0-release-gate.md", "observed_at": null, "scope": ["M0", "all-m0-tasks"], "notes": "Aggregate gate report is created only after every M0 task is evidenced."}
+        },
+        {
+          "id": "M0-002",
+          "kind": "binary",
+          "target": "all required privacy and security boundary tests pass",
+          "measure": "The prohibited-data corpus, enforced offline lane, semantic contract checks, and negative/failure paths pass on the named minimum target without unredacted sentinels.",
+          "artifact": "docs/evidence/M0-privacy-security.md",
+          "scope": ["M0", "privacy", "security", "minimum-target"],
+          "freshness_days": 90,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M0-privacy-security.md", "observed_at": null, "scope": ["M0", "privacy", "security", "minimum-target"], "notes": "Child evidence exists for some tasks; the release aggregate remains planned."}
+        },
+        {
+          "id": "M0-003",
+          "kind": "binary",
+          "target": "identity, platform, and toolchain decisions are recorded",
+          "measure": "Identity/package namespace, supported macOS matrix, and pinned developer/fixture toolchain decisions each have a dated artifact and explicit open limitations.",
+          "artifact": "docs/evidence/M0-foundation-decisions.md",
+          "scope": ["M0", "identity", "platform", "toolchain"],
+          "freshness_days": 365,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M0-foundation-decisions.md", "observed_at": null, "scope": ["M0", "identity", "platform", "toolchain"], "notes": "A decision without the required owner, date, or limitation is not observed evidence."}
+        }
+      ]
+    },
+    {
+      "id": "M1",
+      "due_on": "2027-03-31",
+      "outcome": "Typed origins and fields, revocable consent, Keychain lifecycle, hardened SQLite WAL, bounded writer, and crash recovery.",
+      "exit_measures": [
+        {
+          "id": "M1-001",
+          "kind": "count",
+          "target": "100% of retained fields and origin paths covered",
+          "measure": "Every retained field and ingestion origin passes the semantic, capability, consent, and refusal matrix with no bypass path.",
+          "artifact": "docs/evidence/M1-typed-origin-consent.md",
+          "scope": ["M1", "fields", "origins", "consent"],
+          "freshness_days": 180,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M1-typed-origin-consent.md", "observed_at": null, "scope": ["M1", "fields", "origins", "consent"], "notes": "All source and policy combinations must be named, including refusal cases."}
+        },
+        {
+          "id": "M1-002",
+          "kind": "count",
+          "target": "100/100 injected failure cases recover or emit an explicit gap",
+          "measure": "Crash, power-loss, locked-key, disk-full, interrupted-write, and stale-policy injections never acknowledge an event that is lost or silently altered.",
+          "artifact": "docs/evidence/M1-storage-recovery.md",
+          "scope": ["M1", "storage", "writer", "recovery"],
+          "freshness_days": 90,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M1-storage-recovery.md", "observed_at": null, "scope": ["M1", "storage", "writer", "recovery"], "notes": "A smaller or narrower fault matrix cannot close this measure."}
+        },
+        {
+          "id": "M1-003",
+          "kind": "binary",
+          "target": "no forbidden data in journal, sidecars, diagnostics, or exports",
+          "measure": "The privacy sentinel corpus remains absent across normal, denied, failure, recovery, and export paths after consent and key lifecycle changes.",
+          "artifact": "docs/evidence/M1-privacy-regression.md",
+          "scope": ["M1", "privacy", "all-artifacts"],
+          "freshness_days": 90,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M1-privacy-regression.md", "observed_at": null, "scope": ["M1", "privacy", "all-artifacts"], "notes": "Observed evidence must include the corpus digest and exact build."}
+        }
+      ]
+    },
+    {
+      "id": "M2",
+      "due_on": "2027-09-30",
+      "outcome": "Selected-root FSEvents collection with containment, volume-aware cursors, explicit loss, lifecycle recovery, and reproducible benchmarks.",
+      "exit_measures": [
+        {
+          "id": "M2-001",
+          "kind": "count",
+          "target": "100% documented event flags mapped; 0 containment escapes",
+          "measure": "Every supported FSEvents flag has a tested mapping, and the adversarial root/path corpus produces no event outside the selected root.",
+          "artifact": "docs/evidence/M2-fsevents-containment.md",
+          "scope": ["M2", "fsevents", "containment"],
+          "freshness_days": 90,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M2-fsevents-containment.md", "observed_at": null, "scope": ["M2", "fsevents", "containment"], "notes": "The report must include the volume and stream-mode matrix."}
+        },
+        {
+          "id": "M2-002",
+          "kind": "count",
+          "target": "100% loss, wrap, reset, restart, and permission cases explicit",
+          "measure": "Dropped, wrapped, invalidated, or unavailable history produces a first-class gap before collection resumes; silent continuity is zero.",
+          "artifact": "docs/evidence/M2-cursor-gap-recovery.md",
+          "scope": ["M2", "cursors", "gaps", "recovery"],
+          "freshness_days": 90,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M2-cursor-gap-recovery.md", "observed_at": null, "scope": ["M2", "cursors", "gaps", "recovery"], "notes": "Unavailable hardware is recorded as unavailable and blocks the gate."}
+        },
+        {
+          "id": "M2-003",
+          "kind": "binary",
+          "target": "benchmark report includes hardware, workload digest, repetitions, and uncertainty",
+          "measure": "The selected-root storm and lifecycle benchmark is reproducible from locked inputs and publishes resource limits, loss counts, and uncertainty.",
+          "artifact": "docs/evidence/M2-fsevents-benchmark.md",
+          "scope": ["M2", "performance", "minimum-target"],
+          "freshness_days": 180,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M2-fsevents-benchmark.md", "observed_at": null, "scope": ["M2", "performance", "minimum-target"], "notes": "A green narrow unit test is not this benchmark evidence."}
+        }
+      ]
+    },
+    {
+      "id": "M3",
+      "due_on": "2028-03-31",
+      "outcome": "Snapshot queries, evidence-claim grammar, deterministic explanation, streaming export, retention, deletion limits, and integrity.",
+      "exit_measures": [
+        {
+          "id": "M3-001",
+          "kind": "count",
+          "target": "3/3 independent replay outputs byte-identical",
+          "measure": "Fixed query, explanation, and export inputs produce identical manifests, ordering, citations, and gap summaries across three clean replays.",
+          "artifact": "docs/evidence/M3-deterministic-query-explain-export.md",
+          "scope": ["M3", "query", "explanation", "export"],
+          "freshness_days": 180,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M3-deterministic-query-explain-export.md", "observed_at": null, "scope": ["M3", "query", "explanation", "export"], "notes": "The report retains input and output digests, not only a pass/fail claim."}
+        },
+        {
+          "id": "M3-002",
+          "kind": "count",
+          "target": "100% claims cite evidence and preserve gap/uncertainty labels",
+          "measure": "Every emitted claim has valid citations and an evidence level; no missing interval is rendered as an observed fact.",
+          "artifact": "docs/evidence/M3-claim-grammar.md",
+          "scope": ["M3", "claims", "gaps", "uncertainty"],
+          "freshness_days": 180,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M3-claim-grammar.md", "observed_at": null, "scope": ["M3", "claims", "gaps", "uncertainty"], "notes": "Inferred evidence may explain a relationship but cannot erase a gap."}
+        },
+        {
+          "id": "M3-003",
+          "kind": "count",
+          "target": "100% retention, deletion, integrity, and overwrite refusal cases behave as specified",
+          "measure": "Retention dry-runs, deletion limits, authenticated state, repair checkpoints, and atomic streaming export pass their complete failure matrix.",
+          "artifact": "docs/evidence/M3-retention-integrity.md",
+          "scope": ["M3", "retention", "deletion", "integrity"],
+          "freshness_days": 90,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M3-retention-integrity.md", "observed_at": null, "scope": ["M3", "retention", "deletion", "integrity"], "notes": "Missing residue or authentication evidence blocks the gate."}
+        }
+      ]
+    },
+    {
+      "id": "M4",
+      "due_on": "2028-09-30",
+      "outcome": "Explicit shell and Git sources, frontmost context, secret-leakage tests, and multi-source workflow evaluation.",
+      "exit_measures": [
+        {
+          "id": "M4-001",
+          "kind": "count",
+          "target": "100% shell/Git/frontmost prohibited-field cases rejected or omitted",
+          "measure": "Arguments, environment, input, output, raw paths, messages, remote credentials, titles, and documents are absent from every source and failure artifact.",
+          "artifact": "docs/evidence/M4-context-privacy-corpus.md",
+          "scope": ["M4", "shell", "git", "frontmost", "privacy"],
+          "freshness_days": 90,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M4-context-privacy-corpus.md", "observed_at": null, "scope": ["M4", "shell", "git", "frontmost", "privacy"], "notes": "The corpus must include negative and recovery paths."}
+        },
+        {
+          "id": "M4-002",
+          "kind": "binary",
+          "target": "ground-truth workflow evaluation report is complete",
+          "measure": "A versioned multi-source workflow corpus reports observed, inferred, unknown, and gap outcomes with precision, coverage, and abstention limitations.",
+          "artifact": "docs/evidence/M4-workflow-evaluation.md",
+          "scope": ["M4", "evaluation", "multi-source"],
+          "freshness_days": 180,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M4-workflow-evaluation.md", "observed_at": null, "scope": ["M4", "evaluation", "multi-source"], "notes": "A narrative demo without a ground-truth digest is insufficient."}
+        },
+        {
+          "id": "M4-003",
+          "kind": "count",
+          "target": "100% unavailable history cases become explicit gaps",
+          "measure": "Rewrites, missing history, permission refusal, and source shutdown are represented as bounded status or gap records rather than inferred continuity.",
+          "artifact": "docs/evidence/M4-history-gaps.md",
+          "scope": ["M4", "history", "gaps"],
+          "freshness_days": 90,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M4-history-gaps.md", "observed_at": null, "scope": ["M4", "history", "gaps"], "notes": "Unavailable data cannot be upgraded to direct evidence."}
+        }
+      ]
+    },
+    {
+      "id": "M5",
+      "due_on": "2029-03-31",
+      "outcome": "Browser security and pairing, constrained adapters, authenticated local service, accessible UI, and reversible launchd lifecycle.",
+      "exit_measures": [
+        {
+          "id": "M5-001",
+          "kind": "count",
+          "target": "100% hostile browser/native-message cases fail closed",
+          "measure": "Origin, pairing, replay, framing, private-context, stale-approval, and extension-identity cases produce refusal or bounded gaps with no secret echo.",
+          "artifact": "docs/evidence/M5-browser-security.md",
+          "scope": ["M5", "browser", "native-messaging", "pairing"],
+          "freshness_days": 90,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M5-browser-security.md", "observed_at": null, "scope": ["M5", "browser", "native-messaging", "pairing"], "notes": "Stale or copied approvals are negative cases, not exceptions."}
+        },
+        {
+          "id": "M5-002",
+          "kind": "binary",
+          "target": "all local service requests require peer and capability checks; TCP fallback is absent",
+          "measure": "The authenticated Unix-socket service rejects wrong peers, missing capabilities, replayed requests, oversized frames, and any network transport path.",
+          "artifact": "docs/evidence/M5-local-service-boundary.md",
+          "scope": ["M5", "service", "capabilities", "network"],
+          "freshness_days": 90,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M5-local-service-boundary.md", "observed_at": null, "scope": ["M5", "service", "capabilities", "network"], "notes": "The evidence must include the actual target socket and refusal logs."}
+        },
+        {
+          "id": "M5-003",
+          "kind": "count",
+          "target": "100% supported UI and lifecycle combinations have accessibility and rollback evidence",
+          "measure": "The read-only UI preserves evidence/gap semantics for supported locales and assistive technologies, and launchd install/remove is reversible and consent-preserving.",
+          "artifact": "docs/evidence/M5-ui-lifecycle.md",
+          "scope": ["M5", "ui", "accessibility", "launchd"],
+          "freshness_days": 180,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M5-ui-lifecycle.md", "observed_at": null, "scope": ["M5", "ui", "accessibility", "launchd"], "notes": "A screenshot alone does not prove keyboard, VoiceOver, or rollback behavior."}
+        }
+      ]
+    },
+    {
+      "id": "M6",
+      "due_on": "2029-08-23",
+      "outcome": "v1 release evidence: reproducible universal builds, SBOM and SLSA provenance, notarization, performance, compatibility, red-team, and incident drills.",
+      "exit_measures": [
+        {
+          "id": "M6-001",
+          "kind": "count",
+          "target": "2/2 independent builds produce matching normalized artifact digests",
+          "measure": "CLI, service, native host, and application artifacts for Intel and Apple silicon are built from locked inputs and normalized digests match across two independent builders.",
+          "artifact": "docs/evidence/M6-reproducible-artifacts.md",
+          "scope": ["M6", "builds", "universal", "provenance"],
+          "freshness_days": 90,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M6-reproducible-artifacts.md", "observed_at": null, "scope": ["M6", "builds", "universal", "provenance"], "notes": "Any unexplained nondeterministic field blocks the gate."}
+        },
+        {
+          "id": "M6-002",
+          "kind": "count",
+          "target": "100% distributed artifacts have SBOM, provenance, signature, entitlement, and notarization records",
+          "measure": "Every distributed artifact is bound to its source revision, locked inputs, SBOM, SLSA statement, Developer ID signature, hardened-runtime entitlements, and notarization result.",
+          "artifact": "docs/evidence/M6-release-integrity.md",
+          "scope": ["M6", "release", "signing", "notarization"],
+          "freshness_days": 30,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M6-release-integrity.md", "observed_at": null, "scope": ["M6", "release", "signing", "notarization"], "notes": "A build-only artifact cannot satisfy the distributed-release scope."}
+        },
+        {
+          "id": "M6-003",
+          "kind": "threshold",
+          "target": "task 0039 performance thresholds all pass on the minimum supported Mac",
+          "measure": "After warm-up, fixture-only idle CPU median <=1.0% and p95 <=2.0% with RSS <=200 MiB; 10 million records sustain 1,000 events/s for 10 minutes with p99 acknowledgement <=250 ms, zero unreported loss, and no queue-cap breach; fixed 24-hour queries p95 <=500 ms and streaming export >=25,000 records/s; 24-hour soak RSS growth <=10% and WAL <=64 MiB within 60 seconds.",
+          "artifact": "docs/evidence/M6-performance-gates.md",
+          "scope": ["M6", "performance", "minimum-target", "10m-record-corpus"],
+          "freshness_days": 90,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M6-performance-gates.md", "observed_at": null, "scope": ["M6", "performance", "minimum-target", "10m-record-corpus"], "notes": "These are the published task 0039 thresholds, not current product claims."}
+        },
+        {
+          "id": "M6-004",
+          "kind": "count",
+          "target": "100% red-team findings triaged and incident drills pass or have explicit residual risk",
+          "measure": "Privacy, security, compatibility, and incident-response evidence covers every public surface and records known limitations, owners, and expiry dates.",
+          "artifact": "docs/evidence/M6-red-team-incident-readiness.md",
+          "scope": ["M6", "red-team", "incidents", "privacy"],
+          "freshness_days": 90,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M6-red-team-incident-readiness.md", "observed_at": null, "scope": ["M6", "red-team", "incidents", "privacy"], "notes": "Unresolved high-severity findings block release."}
+        }
+      ]
+    },
+    {
+      "id": "M7",
+      "due_on": "2030-02-28",
+      "outcome": "v1.1 operational resilience: diagnostics, backup and recovery, annual macOS compatibility, accessibility, distribution, and telemetry-free support.",
+      "exit_measures": [
+        {
+          "id": "M7-001",
+          "kind": "count",
+          "target": "100/100 backup, restore, wrong-key, corruption, and interrupted cases have expected outcomes",
+          "measure": "Backup and restore preserve integrity, policy, origin, and gap semantics, while wrong keys, corruption, stale versions, and interruption refuse safely.",
+          "artifact": "docs/evidence/M7-backup-recovery.md",
+          "scope": ["M7", "backup", "restore", "recovery"],
+          "freshness_days": 90,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M7-backup-recovery.md", "observed_at": null, "scope": ["M7", "backup", "restore", "recovery"], "notes": "Successful restore alone does not cover refusal cases."}
+        },
+        {
+          "id": "M7-002",
+          "kind": "count",
+          "target": "every supported macOS major version has annual observed or explicit unavailable evidence",
+          "measure": "The annual beta/release-candidate matrix names the target, owner, date, permission results, and retirement rule for each supported major version.",
+          "artifact": "docs/evidence/M7-annual-macos-validation.md",
+          "scope": ["M7", "macos", "compatibility"],
+          "freshness_days": 365,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M7-annual-macos-validation.md", "observed_at": null, "scope": ["M7", "macos", "compatibility"], "notes": "Unavailable hardware remains unavailable and blocks any claim of support."}
+        },
+        {
+          "id": "M7-003",
+          "kind": "binary",
+          "target": "support bundles contain no forbidden data and make no network request",
+          "measure": "The consented support bundle includes only redacted health evidence, manifests, versions, and bounded failure codes; sentinel and network scans are clean.",
+          "artifact": "docs/evidence/M7-telemetry-free-support.md",
+          "scope": ["M7", "support", "privacy", "network"],
+          "freshness_days": 90,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M7-telemetry-free-support.md", "observed_at": null, "scope": ["M7", "support", "privacy", "network"], "notes": "Support artifacts are part of the privacy surface."}
+        }
+      ]
+    },
+    {
+      "id": "M8",
+      "due_on": "2030-08-31",
+      "outcome": "Imported-evidence trust, W3C PROV, bounded offline interoperability, adapter capabilities and conformance, and encrypted bundles.",
+      "exit_measures": [
+        {
+          "id": "M8-001",
+          "kind": "count",
+          "target": "100% imported records retain external origin and cannot become native direct evidence",
+          "measure": "Import, W3C PROV, and offline exchange fixtures preserve source, trust, evidence level, gaps, and explicit loss warnings without upgrading claims.",
+          "artifact": "docs/evidence/M8-imported-evidence-trust.md",
+          "scope": ["M8", "import", "prov", "interoperability"],
+          "freshness_days": 180,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M8-imported-evidence-trust.md", "observed_at": null, "scope": ["M8", "import", "prov", "interoperability"], "notes": "Round-trip equality is not allowed to hide explicit loss."}
+        },
+        {
+          "id": "M8-002",
+          "kind": "count",
+          "target": "100% required adapter capability and conformance cases pass",
+          "measure": "Each adapter declares fields, permissions, bounds, cursors, gaps, network capability, version, and revocation behavior, and the conformance corpus has no unclassified case.",
+          "artifact": "docs/evidence/M8-adapter-conformance.md",
+          "scope": ["M8", "adapters", "capabilities", "conformance"],
+          "freshness_days": 180,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M8-adapter-conformance.md", "observed_at": null, "scope": ["M8", "adapters", "capabilities", "conformance"], "notes": "Unknown capability behavior blocks admission."}
+        },
+        {
+          "id": "M8-003",
+          "kind": "count",
+          "target": "100/100 encrypted-bundle round-trip and wrong-recipient cases behave as specified",
+          "measure": "Encrypted evidence bundles bind manifest, recipient identity, algorithm, policy, expiry, and digest; wrong key, expiry, tamper, and replay cases refuse safely.",
+          "artifact": "docs/evidence/M8-encrypted-bundles.md",
+          "scope": ["M8", "bundles", "encryption", "interoperability"],
+          "freshness_days": 90,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M8-encrypted-bundles.md", "observed_at": null, "scope": ["M8", "bundles", "encryption", "interoperability"], "notes": "A successful decrypt does not prove refusal semantics."}
+        }
+      ]
+    },
+    {
+      "id": "M9",
+      "due_on": "2031-02-28",
+      "outcome": "Reproducible research on causal precision, coverage, abstention, gap comprehension, privacy leakage, and longitudinal resource cost.",
+      "exit_measures": [
+        {
+          "id": "M9-001",
+          "kind": "count",
+          "target": "3/3 independent reruns reproduce corpus and manifest digests",
+          "measure": "Synthetic ground truth, evaluation code, locked environment, workload digest, and output manifests reproduce across three independent runs.",
+          "artifact": "docs/evidence/M9-reproducible-research.md",
+          "scope": ["M9", "research", "reproducibility"],
+          "freshness_days": 365,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M9-reproducible-research.md", "observed_at": null, "scope": ["M9", "research", "reproducibility"], "notes": "The report must publish negative findings and external-validity limits."}
+        },
+        {
+          "id": "M9-002",
+          "kind": "count",
+          "target": "100% evaluation dimensions report uncertainty and abstention",
+          "measure": "Causal precision, coverage, abstention, uncertainty comprehension, privacy leakage, and longitudinal cost each report estimates, intervals, corpus scope, and unsupported inference limits.",
+          "artifact": "docs/evidence/M9-evaluation-dimensions.md",
+          "scope": ["M9", "precision", "coverage", "abstention", "privacy", "resources"],
+          "freshness_days": 365,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M9-evaluation-dimensions.md", "observed_at": null, "scope": ["M9", "precision", "coverage", "abstention", "privacy", "resources"], "notes": "A single aggregate score cannot replace the dimension reports."}
+        }
+      ]
+    },
+    {
+      "id": "M10",
+      "due_on": "2031-08-31",
+      "outcome": "Governed ecosystem with stable adapter contracts, isolation decision, code admission, revocation, conformance evidence, and security response.",
+      "exit_measures": [
+        {
+          "id": "M10-001",
+          "kind": "count",
+          "target": "100% adapter admission, revocation, and upgrade cases have explicit outcomes",
+          "measure": "Only versioned, signed, capability-conformant adapters can be admitted; revoked, stale, incompatible, or untrusted code is refused.",
+          "artifact": "docs/evidence/M10-admission-revocation.md",
+          "scope": ["M10", "admission", "revocation", "adapters"],
+          "freshness_days": 90,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M10-admission-revocation.md", "observed_at": null, "scope": ["M10", "admission", "revocation", "adapters"], "notes": "Governance text without executable refusal evidence is insufficient."}
+        },
+        {
+          "id": "M10-002",
+          "kind": "binary",
+          "target": "isolation go/no-go decision is observed on the target or explicitly unavailable",
+          "measure": "The selected process/WASI-style isolation model is tested against the declared threat boundary, resource limits, and revocation behavior, with a signed decision artifact.",
+          "artifact": "docs/evidence/M10-isolation-decision.md",
+          "scope": ["M10", "isolation", "security", "macos"],
+          "freshness_days": 180,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M10-isolation-decision.md", "observed_at": null, "scope": ["M10", "isolation", "security", "macos"], "notes": "Unavailable isolation support is a no-go, not a CI substitution."}
+        },
+        {
+          "id": "M10-003",
+          "kind": "count",
+          "target": "100% security-response drill roles, timelines, and artifacts exercised",
+          "measure": "A simulated vulnerable adapter incident records detection, revocation, user communication, evidence preservation, recovery, and post-incident review.",
+          "artifact": "docs/evidence/M10-security-response.md",
+          "scope": ["M10", "security", "incident-response"],
+          "freshness_days": 180,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M10-security-response.md", "observed_at": null, "scope": ["M10", "security", "incident-response"], "notes": "A tabletop-only claim must be labeled inferred or unavailable."}
+        }
+      ]
+    },
+    {
+      "id": "M11",
+      "due_on": "2031-12-31",
+      "outcome": "v2 and LTS decision, format and key migration, verified compaction, independent audit, release-candidate recovery, and 2032 sustainability plan.",
+      "exit_measures": [
+        {
+          "id": "M11-001",
+          "kind": "count",
+          "target": "100/100 forward, backward, rollback, wrong-key, and interrupted migrations have expected outcomes",
+          "measure": "Format, schema, key, and compaction migrations preserve or explicitly account for evidence, gaps, policy, origin, and integrity with no unsafe downgrade.",
+          "artifact": "docs/evidence/M11-migration-compaction.md",
+          "scope": ["M11", "migration", "keys", "compaction"],
+          "freshness_days": 90,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M11-migration-compaction.md", "observed_at": null, "scope": ["M11", "migration", "keys", "compaction"], "notes": "Any unverified downgrade path blocks the LTS gate."}
+        },
+        {
+          "id": "M11-002",
+          "kind": "binary",
+          "target": "independent audit and release-candidate recovery are complete",
+          "measure": "An independent audit reviews the public contract and a clean release candidate completes install, upgrade, recovery, rollback, and evidence verification from a fresh target.",
+          "artifact": "docs/evidence/M11-independent-audit-rc.md",
+          "scope": ["M11", "audit", "release-candidate", "recovery"],
+          "freshness_days": 90,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M11-independent-audit-rc.md", "observed_at": null, "scope": ["M11", "audit", "release-candidate", "recovery"], "notes": "An internal review is not independent audit evidence."}
+        },
+        {
+          "id": "M11-003",
+          "kind": "binary",
+          "target": "explicit v2/LTS/retirement and 2032 sustainability decision is signed",
+          "measure": "The project records whether to continue, migrate, maintain LTS, or retire, including user-data, support, security-response, and evidence-retention consequences.",
+          "artifact": "docs/evidence/M11-lts-sustainability.md",
+          "scope": ["M11", "lts", "sustainability", "retirement"],
+          "freshness_days": 365,
+          "evidence": {"state": "planned", "artifact": "docs/evidence/M11-lts-sustainability.md", "observed_at": null, "scope": ["M11", "lts", "sustainability", "retirement"], "notes": "A date without a decision and owner remains planned."}
+        }
+      ]
+    }
+  ]
+}
