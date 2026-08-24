@@ -116,3 +116,19 @@ roadmap tests, generated-index parity, schema/demo/export, export overwrite
 refusal and `--force` recovery, and explicit live-capture refusal. `cargo-audit`
 and `cargo-deny` were not installed on this device and are recorded as
 unavailable rather than replaced by CI claims.
+
+## Current merged-main reproduction
+
+After the offline network-denial lane and its evidence were merged, the complete
+local pipe was rerun against protected `main` at
+`da0eeceab95505613b47819e04e32f45f47af6f4`. The retained log is
+`/tmp/ghostrace-postmerge-full.7HpUuJ/pipeline.log` with SHA-256
+`06eb07b5d9368e314f220da9f851f51642af01f834dcc93480f1d48322852b05`.
+
+On the MacBook Pro M1 (macOS 26.6.2 arm64, Rust/Cargo 1.88.0), formatting,
+debug/release all-target suites, focused privacy corpus, doctests, Clippy,
+actionlint, shellcheck, roadmap validation/23 Python tests/index parity, CLI
+schema/demo/export/overwrite recovery/capture refusal, and the sandbox-exec
+network-denial canary all passed. The canary observed `PermissionDenied`; the
+fixture/privacy path passed with `CARGO_NET_OFFLINE=true`. `cargo-audit` and
+`cargo-deny` remain unavailable locally and are not replaced by CI claims.
