@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ghostrace.local/schema/policy-document-v1.json",
+  "title": "GHOSTRACE capture policy document v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "version",
+    "enabled_sources",
+    "selected_roots",
+    "allow_private_context"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "id": { "$ref": "#/$defs/opaque_identifier" },
+    "version": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+    "enabled_sources": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/source" }
+    },
+    "selected_roots": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/opaque_identifier" }
+    },
+    "allow_private_context": { "type": "boolean" }
+  },
+  "$defs": {
+    "opaque_identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9][a-z0-9._-]*[a-z0-9]$",
+      "not": { "pattern": "\\.\\." }
+    },
+    "source": {
+      "enum": [
+        "filesystem",
+        "frontmost_app",
+        "shell",
+        "git",
+        "browser",
+        "lifecycle",
+        "fixture"
+      ]
+    }
+  }
+}

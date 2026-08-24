@@ -1,0 +1,8 @@
+{
+  "schema_version": 2,
+  "id": "fixture-default-v1",
+  "version": 1,
+  "enabled_sources": ["filesystem", "fixture"],
+  "selected_roots": ["root-a"],
+  "allow_private_context": false
+}

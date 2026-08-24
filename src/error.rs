@@ -66,6 +66,12 @@ pub enum GhostraceError {
     #[error("unsupported schema version: {0}")]
     UnsupportedSchema(u32),
 
+    #[error("unsupported policy document schema version: {0}")]
+    UnsupportedPolicySchema(u32),
+
+    #[error("policy document migration rejected: {0}")]
+    PolicyMigration(String),
+
     #[error("migration error: {0}")]
     Migration(String),
 }

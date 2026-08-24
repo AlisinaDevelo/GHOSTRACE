@@ -36,9 +36,13 @@ pub use model::{
     MAX_BROWSER_URL_BYTES, MAX_CURSOR_BYTES, MAX_EVENT_PAYLOAD_BYTES, MAX_IDENTIFIER_BYTES,
     PROVENANCE_VERSION, REPAIR_PROVENANCE_VERSION, SHA256_DIGEST_BYTES,
 };
-pub use policy::{PolicyDecision, PolicyProfile, PolicyReason};
+pub use policy::{
+    PolicyChange, PolicyDecision, PolicyDocument, PolicyHistory, PolicyMigration,
+    PolicyMigrationOutcome, PolicyProfile, PolicyReason, POLICY_DOCUMENT_SCHEMA_VERSION,
+};
 
 pub const EVENT_SCHEMA_JSON: &str = include_str!("../schemas/event-envelope-v1.json");
+pub const POLICY_DOCUMENT_SCHEMA_JSON: &str = include_str!("../schemas/policy-document-v1.json");
 
 pub fn capture() -> Result<(), GhostraceError> {
     Err(GhostraceError::LiveCaptureDisabled)
