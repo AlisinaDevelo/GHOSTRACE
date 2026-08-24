@@ -149,6 +149,7 @@ docs/adr/            Immutable architecture decisions
 - [Threat model](docs/THREAT_MODEL.md) — assets, STRIDE analysis, and residual risk
 - [Event model](docs/EVENT_MODEL.md) — evidence levels, provenance, and gaps
 - [Evaluation](docs/EVALUATION.md) — correctness, privacy, and performance gates
+- [Reproducibility](docs/REPRODUCIBILITY.md) — pinned toolchain, fixture provenance, and clean-machine smoke
 - [Research](docs/RESEARCH.md) — landscape, differentiation, and primary sources
 - [Identity audit](docs/IDENTITY.md) — preliminary naming and namespace observations
 - [Platform](docs/PLATFORM.md) — macOS boundary and permission policy
@@ -167,12 +168,15 @@ Use the pinned toolchain and run the core checks exercised by CI:
 
 ~~~sh
 cargo +1.88.0 fmt --all -- --check
-cargo +1.88.0 clippy --all-targets --all-features -- -D warnings
-cargo +1.88.0 test --all-targets --all-features
+cargo +1.88.0 clippy --locked --all-targets --all-features -- -D warnings
+cargo +1.88.0 test --locked --all-targets --all-features
 python3 scripts/roadmap.py check
+python3 scripts/reproducibility.py check
+python3 scripts/fixture-manifest.py check
 python3 -m unittest discover -s tests -p 'test_roadmap.py' -v
 python3 scripts/roadmap.py index > /tmp/ghostrace-roadmap-index.md
 diff -u .forge/tasks/README.md /tmp/ghostrace-roadmap-index.md
+scripts/reproducibility-test.sh
 ~~~
 
 The fixture-only path should remain offline. Do not add a network dependency, a

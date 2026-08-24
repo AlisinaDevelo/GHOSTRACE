@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "rust": {
+    "channel": "1.88.0",
+    "source": "rustup official channel manifest",
+    "profile": "minimal",
+    "components": ["clippy", "rustfmt"],
+    "rust_toolchain_file": {
+      "path": "rust-toolchain.toml",
+      "sha256": "1492287aa0b458ad3277d11eae2175fb662a33e7d7958ec99a057973f2bac1a2"
+    },
+    "cargo_lock": {
+      "path": "Cargo.lock",
+      "sha256": "eafeb39e51b7a50a5c9cba96765863199022e6ef2209d3c1ae738e1df77e41c3"
+    },
+    "commands": {
+      "install": "rustup toolchain install --profile minimal --component clippy --component rustfmt 1.88.0",
+      "verify": "rustc +1.88.0 --version --verbose && cargo +1.88.0 --version"
+    }
+  },
+  "python": {
+    "command": "python3",
+    "minimum_version": "3.9",
+    "dependencies": "standard-library-only",
+    "purpose": "roadmap, fixture-manifest, and smoke checks"
+  },
+  "dependency_policy": {
+    "cargo_lock_required": true,
+    "cargo_commands_require_locked": true,
+    "offline_smoke_sets": "CARGO_NET_OFFLINE=true",
+    "network_clients_in_product": false
+  },
+  "github_actions": {
+    "checkout": "actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8",
+    "rust_toolchain": "actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659",
+    "workflow_toolchain": "1.88.0"
+  },
+  "fixtures": {
+    "manifest": "fixtures/manifest.json",
+    "check": "python3 scripts/fixture-manifest.py check"
+  }
+}
