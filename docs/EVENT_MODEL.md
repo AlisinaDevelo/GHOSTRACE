@@ -27,6 +27,31 @@ ordering, UTF-8 byte limits, and other invariants JSON Schema cannot express
 portably. A structural or semantic breaking change creates a new schema version and migration
 rule; consumers must not guess at unknown fields.
 
+## Semantic identifier and digest contract
+
+Event v1 does not accept arbitrary metadata in identifier-shaped fields. The
+serialized Rust boundary remains a string for compatibility, but each string has the
+following frozen semantic type and constructor validation. Values are ASCII-only so
+there is no Unicode normalization or alternate-encoding ambiguity. Rejections never
+echo the candidate value.
+
+| Fields | Semantic type | Canonical encoding and bound | Sensitivity classification |
+| --- | --- | --- | --- |
+| `event_id`, `parent_event_id` | UUID | RFC 4122 hyphenated UUID; non-nil; `parent_event_id` is nullable | Random journal pseudonym; linkable metadata |
+| `root_id`, `repository_id`, `session_id`, `shell_kind`, `browser`, `bookmark_id`, `folder_id`, `collector_instance`, `instance_label`, `provenance_version`, `policy_profile_id` | Opaque identifier | Lowercase ASCII token `[a-z0-9][a-z0-9._-]*[a-z0-9]`, no `..`, 1–128 bytes; nullable only where the schema says so | Potentially identifying or policy metadata; retained only as bounded labels |
+| `app_id`, `previous_app_id` | Application identifier | Lowercase reverse-DNS labels (`com.example.app`), each label 1–63 bytes, total 1–255 bytes | Potentially identifying software metadata |
+| `branch` | Git branch name | ASCII Git ref label, 1–255 bytes; `/` is allowed for namespaces, but empty components, traversal (`..`), `//`, `@{`, ref metacharacters, and `.lock` suffixes are rejected | Repository context; may reveal project or workflow names |
+| `head_oid` | Git object ID | Lowercase hexadecimal, exactly 40 or 64 bytes | Public-derived repository identity; linkable |
+| `path_digest`, `snapshot_digest` | SHA-256 digest | Tagged lowercase form `sha256:` plus exactly 64 lowercase hexadecimal bytes (71 bytes total) | Derived, potentially dictionary-linkable; never a plaintext path or snapshot |
+| `source_cursor`, `from_cursor`, `to_cursor` | Source cursor token | Lowercase ASCII token, 1–256 bytes, no `..`; nullable where shown | Source position and coverage metadata; may reveal collection state |
+| `reason_code` | Reason code | Lower snake case `[a-z][a-z0-9_]*`, 1–128 bytes | Bounded operational/policy category; must not contain the denied value |
+| `url` | Sanitized URL | `http` or `https`, host required, at most 8192 bytes; userinfo, query, and fragment are removed | Potentially identifying origin metadata; private contexts are refused |
+
+The JSON Schema uses the same patterns and bounds as Rust validation. `EventEnvelope::new`
+and envelope deserialization are the acceptance constructors; payloads are accepted only
+after the envelope invokes the same semantic checks. The M1 wrapper task can strengthen
+the Rust API to distinct newtypes without changing these wire encodings.
+
 ## Evidence levels
 
 - **Direct:** the source reported the fact itself, such as a fixture event containing

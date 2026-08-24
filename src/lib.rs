@@ -27,7 +27,9 @@ pub use model::{
     EventPayload, EventSource, Evidence, FileOperation, FilesystemChangedPayload,
     FrontmostAppChangedPayload, GapPayload, GitSnapshotPayload, PathClass,
     PolicyBlockedSummaryPayload, SanitizedUrl, ShellFinishedPayload, ShellStartedPayload,
-    ShellStatus, Source, SourceErrorPayload, EVENT_SCHEMA_VERSION, PROVENANCE_VERSION,
+    ShellStatus, Source, SourceErrorPayload, EVENT_SCHEMA_VERSION, MAX_APP_IDENTIFIER_BYTES,
+    MAX_BRANCH_BYTES, MAX_BROWSER_URL_BYTES, MAX_CURSOR_BYTES, MAX_EVENT_PAYLOAD_BYTES,
+    MAX_IDENTIFIER_BYTES, PROVENANCE_VERSION, SHA256_DIGEST_BYTES,
 };
 pub use policy::{PolicyDecision, PolicyProfile, PolicyReason};
 

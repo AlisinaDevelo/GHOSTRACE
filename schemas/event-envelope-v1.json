@@ -32,10 +32,10 @@
     "source": { "$ref": "#/$defs/source" },
     "kind": { "$ref": "#/$defs/kind" },
     "payload": { "type": "object" },
-    "collector_instance": { "$ref": "#/$defs/bounded_string" },
-    "source_cursor": { "$ref": "#/$defs/nullable_bounded_string" },
-    "provenance_version": { "$ref": "#/$defs/bounded_string" },
-    "policy_profile_id": { "$ref": "#/$defs/bounded_string" },
+    "collector_instance": { "$ref": "#/$defs/opaque_identifier" },
+    "source_cursor": { "$ref": "#/$defs/nullable_cursor_id" },
+    "provenance_version": { "$ref": "#/$defs/opaque_identifier" },
+    "policy_profile_id": { "$ref": "#/$defs/opaque_identifier" },
     "policy_profile_version": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
     "evidence": {
       "enum": ["direct", "contextual", "inferred", "unknown"]
@@ -247,15 +247,61 @@
         "source_error"
       ]
     },
-    "bounded_string": {
+    "opaque_identifier": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 4096,
-      "pattern": "^(?=.*\\S)[^\\u0000-\\u001F\\u007F]+$"
+      "maxLength": 128,
+      "pattern": "^(?!.*\\.\\.)[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$"
     },
-    "nullable_bounded_string": {
+    "nullable_opaque_identifier": {
       "oneOf": [
-        { "$ref": "#/$defs/bounded_string" },
+        { "$ref": "#/$defs/opaque_identifier" },
+        { "type": "null" }
+      ]
+    },
+    "app_identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^(?!.*\\.\\.)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$"
+    },
+    "nullable_app_identifier": {
+      "oneOf": [
+        { "$ref": "#/$defs/app_identifier" },
+        { "type": "null" }
+      ]
+    },
+    "branch_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^(?![./])(?!.*(?:\\.\\.|//|@\\{|[\\\\:?*\\[\\]~^%]))(?!.*(?:^|/)\\.(?:/|$))(?!.*\\.lock$)[A-Za-z0-9](?:[A-Za-z0-9._/-]*[A-Za-z0-9])?$"
+    },
+    "sha256_digest": {
+      "type": "string",
+      "minLength": 71,
+      "maxLength": 71,
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "nullable_sha256_digest": {
+      "oneOf": [
+        { "$ref": "#/$defs/sha256_digest" },
+        { "type": "null" }
+      ]
+    },
+    "git_object_id": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+    },
+    "cursor_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^(?!.*\\.\\.)[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$"
+    },
+    "nullable_cursor_id": {
+      "oneOf": [
+        { "$ref": "#/$defs/cursor_id" },
         { "type": "null" }
       ]
     },
@@ -283,13 +329,13 @@
             "size_bytes"
           ],
           "properties": {
-            "root_id": { "$ref": "#/$defs/bounded_string" },
+            "root_id": { "$ref": "#/$defs/opaque_identifier" },
             "path_class": {
               "enum": ["workspace_relative", "home_relative", "absolute_redacted", "unknown"]
             },
             "operation": { "enum": ["created", "modified", "deleted", "renamed"] },
             "entry_kind": { "enum": ["file", "directory", "symlink", "unknown"] },
-            "path_digest": { "$ref": "#/$defs/nullable_bounded_string" },
+            "path_digest": { "$ref": "#/$defs/nullable_sha256_digest" },
             "size_bytes": {
               "oneOf": [
                 { "type": "integer", "minimum": 0, "maximum": 18446744073709551615 },
@@ -311,9 +357,9 @@
           "additionalProperties": false,
           "required": ["app_id", "change", "previous_app_id"],
           "properties": {
-            "app_id": { "$ref": "#/$defs/bounded_string" },
+            "app_id": { "$ref": "#/$defs/app_identifier" },
             "change": { "enum": ["launched", "activated", "deactivated", "terminated"] },
-            "previous_app_id": { "$ref": "#/$defs/nullable_bounded_string" }
+            "previous_app_id": { "$ref": "#/$defs/nullable_app_identifier" }
           }
         }
       }
@@ -329,8 +375,8 @@
           "additionalProperties": false,
           "required": ["session_id", "shell_kind"],
           "properties": {
-            "session_id": { "$ref": "#/$defs/bounded_string" },
-            "shell_kind": { "$ref": "#/$defs/bounded_string" }
+            "session_id": { "$ref": "#/$defs/opaque_identifier" },
+            "shell_kind": { "$ref": "#/$defs/opaque_identifier" }
           }
         }
       }
@@ -346,7 +392,7 @@
           "additionalProperties": false,
           "required": ["session_id", "status", "exit_code", "duration_ms"],
           "properties": {
-            "session_id": { "$ref": "#/$defs/bounded_string" },
+            "session_id": { "$ref": "#/$defs/opaque_identifier" },
             "status": { "enum": ["succeeded", "failed", "signaled", "unknown"] },
             "exit_code": {
               "oneOf": [
@@ -381,19 +427,16 @@
             "snapshot_digest"
           ],
           "properties": {
-            "repository_id": { "$ref": "#/$defs/bounded_string" },
-            "branch": { "$ref": "#/$defs/bounded_string" },
-            "head_oid": {
-              "type": "string",
-              "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
-            },
+            "repository_id": { "$ref": "#/$defs/opaque_identifier" },
+            "branch": { "$ref": "#/$defs/branch_name" },
+            "head_oid": { "$ref": "#/$defs/git_object_id" },
             "dirty": { "type": "boolean" },
             "changed_file_count": {
               "type": "integer",
               "minimum": 0,
               "maximum": 18446744073709551615
             },
-            "snapshot_digest": { "$ref": "#/$defs/nullable_bounded_string" }
+            "snapshot_digest": { "$ref": "#/$defs/nullable_sha256_digest" }
           }
         }
       }
@@ -409,7 +452,7 @@
           "additionalProperties": false,
           "required": ["browser", "url", "private_context"],
           "properties": {
-            "browser": { "$ref": "#/$defs/bounded_string" },
+            "browser": { "$ref": "#/$defs/opaque_identifier" },
             "url": {
               "type": "string",
               "minLength": 1,
@@ -433,8 +476,8 @@
           "additionalProperties": false,
           "required": ["browser", "bookmark_id", "change", "url", "folder_id", "private_context"],
           "properties": {
-            "browser": { "$ref": "#/$defs/bounded_string" },
-            "bookmark_id": { "$ref": "#/$defs/bounded_string" },
+            "browser": { "$ref": "#/$defs/opaque_identifier" },
+            "bookmark_id": { "$ref": "#/$defs/opaque_identifier" },
             "change": { "enum": ["created", "updated", "deleted"] },
             "url": {
               "type": "string",
@@ -443,7 +486,7 @@
               "format": "uri",
               "pattern": "^https?://[^/?#@\\s]+(?:/[^?#\\s]*)?$"
             },
-            "folder_id": { "$ref": "#/$defs/nullable_bounded_string" },
+            "folder_id": { "$ref": "#/$defs/nullable_opaque_identifier" },
             "private_context": { "const": false }
           }
         }
@@ -455,7 +498,7 @@
       "required": ["collector", "instance_label"],
       "properties": {
         "collector": { "$ref": "#/$defs/source" },
-        "instance_label": { "$ref": "#/$defs/bounded_string" }
+        "instance_label": { "$ref": "#/$defs/opaque_identifier" }
       }
     },
     "collector_started": {
@@ -494,8 +537,8 @@
               "minimum": 0,
               "maximum": 18446744073709551615
             },
-            "from_cursor": { "$ref": "#/$defs/nullable_bounded_string" },
-            "to_cursor": { "$ref": "#/$defs/nullable_bounded_string" }
+            "from_cursor": { "$ref": "#/$defs/nullable_cursor_id" },
+            "to_cursor": { "$ref": "#/$defs/nullable_cursor_id" }
           }
         }
       }

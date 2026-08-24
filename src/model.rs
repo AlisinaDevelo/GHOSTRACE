@@ -16,6 +16,16 @@ pub const PROVENANCE_VERSION: &str = "fixture-v1";
 pub const MAX_EVENT_PAYLOAD_BYTES: usize = 64 * 1024;
 pub const MAX_METADATA_FIELD_BYTES: usize = 4 * 1024;
 pub const MAX_BROWSER_URL_BYTES: usize = 8 * 1024;
+/// Maximum UTF-8 byte length for an opaque semantic identifier.
+pub const MAX_IDENTIFIER_BYTES: usize = 128;
+/// Maximum UTF-8 byte length for an application bundle identifier.
+pub const MAX_APP_IDENTIFIER_BYTES: usize = 255;
+/// Maximum UTF-8 byte length for a Git branch name.
+pub const MAX_BRANCH_BYTES: usize = 255;
+/// Maximum UTF-8 byte length for a source cursor token.
+pub const MAX_CURSOR_BYTES: usize = 256;
+/// Canonical tagged SHA-256 digest length (`sha256:` plus 64 lowercase hex bytes).
+pub const SHA256_DIGEST_BYTES: usize = 71;
 
 pub type EventId = Uuid;
 pub type Source = EventSource;
@@ -438,51 +448,44 @@ impl EventPayload {
     fn validate(&self) -> Result<(), GhostraceError> {
         match self {
             Self::FilesystemChanged(payload) => {
-                validate_metadata("root_id", &payload.root_id)?;
-                validate_optional_metadata("path_digest", payload.path_digest.as_deref())?;
+                validate_identifier("root_id", &payload.root_id)?;
+                validate_optional_digest("path_digest", payload.path_digest.as_deref())?;
             }
             Self::FrontmostAppChanged(payload) => {
-                validate_metadata("app_id", &payload.app_id)?;
-                validate_optional_metadata("previous_app_id", payload.previous_app_id.as_deref())?;
+                validate_app_identifier("app_id", &payload.app_id)?;
+                validate_optional_app_identifier(
+                    "previous_app_id",
+                    payload.previous_app_id.as_deref(),
+                )?;
             }
             Self::ShellStarted(payload) => {
-                validate_metadata("session_id", &payload.session_id)?;
-                validate_metadata("shell_kind", &payload.shell_kind)?;
+                validate_identifier("session_id", &payload.session_id)?;
+                validate_identifier("shell_kind", &payload.shell_kind)?;
             }
             Self::ShellFinished(payload) => {
-                validate_metadata("session_id", &payload.session_id)?;
+                validate_identifier("session_id", &payload.session_id)?;
             }
             Self::GitSnapshot(payload) => {
-                validate_metadata("repository_id", &payload.repository_id)?;
-                validate_metadata("branch", &payload.branch)?;
-                if !matches!(payload.head_oid.len(), 40 | 64)
-                    || !payload
-                        .head_oid
-                        .bytes()
-                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-                {
-                    return Err(GhostraceError::InvalidEvent(
-                        "head_oid must be a lowercase 40- or 64-character hexadecimal object ID"
-                            .to_owned(),
-                    ));
-                }
-                validate_optional_metadata("snapshot_digest", payload.snapshot_digest.as_deref())?;
+                validate_identifier("repository_id", &payload.repository_id)?;
+                validate_branch("branch", &payload.branch)?;
+                validate_git_object_id(&payload.head_oid)?;
+                validate_optional_digest("snapshot_digest", payload.snapshot_digest.as_deref())?;
             }
             Self::BrowserNavigation(payload) => {
-                validate_metadata("browser", &payload.browser)?;
+                validate_identifier("browser", &payload.browser)?;
             }
             Self::BrowserBookmarkChanged(payload) => {
-                validate_metadata("browser", &payload.browser)?;
-                validate_metadata("bookmark_id", &payload.bookmark_id)?;
-                validate_optional_metadata("folder_id", payload.folder_id.as_deref())?;
+                validate_identifier("browser", &payload.browser)?;
+                validate_identifier("bookmark_id", &payload.bookmark_id)?;
+                validate_optional_identifier("folder_id", payload.folder_id.as_deref())?;
             }
             Self::CollectorStarted(payload) | Self::CollectorStopped(payload) => {
-                validate_metadata("instance_label", &payload.instance_label)?;
+                validate_identifier("instance_label", &payload.instance_label)?;
             }
             Self::Gap(payload) => {
                 validate_reason_code(&payload.reason_code)?;
-                validate_optional_metadata("from_cursor", payload.from_cursor.as_deref())?;
-                validate_optional_metadata("to_cursor", payload.to_cursor.as_deref())?;
+                validate_optional_cursor("from_cursor", payload.from_cursor.as_deref())?;
+                validate_optional_cursor("to_cursor", payload.to_cursor.as_deref())?;
             }
             Self::PolicyBlockedSummary(payload) => {
                 validate_reason_code(&payload.reason_code)?;
@@ -495,21 +498,129 @@ impl EventPayload {
     }
 }
 
-fn validate_metadata(name: &str, value: &str) -> Result<(), GhostraceError> {
-    if value.trim().is_empty()
-        || value.len() > MAX_METADATA_FIELD_BYTES
-        || value.chars().any(char::is_control)
+fn invalid_identifier(name: &str, contract: &str) -> GhostraceError {
+    // Never include the rejected value: identifiers can contain customer names,
+    // paths, or credential material and errors are routinely surfaced in logs.
+    GhostraceError::InvalidEvent(format!("{name} is not a canonical {contract}"))
+}
+
+pub(crate) fn validate_identifier(name: &str, value: &str) -> Result<(), GhostraceError> {
+    if value.is_empty()
+        || value.len() > MAX_IDENTIFIER_BYTES
+        || !value.is_ascii()
+        || !value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
+        })
+        || !value.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
+        || !value.as_bytes().last().is_some_and(u8::is_ascii_alphanumeric)
+        || value.contains("..")
     {
-        return Err(GhostraceError::InvalidEvent(format!(
-            "{name} must be non-empty, bounded metadata without control characters"
-        )));
+        return Err(invalid_identifier(name, "opaque identifier"));
     }
     Ok(())
 }
 
-fn validate_optional_metadata(name: &str, value: Option<&str>) -> Result<(), GhostraceError> {
+fn validate_optional_identifier(name: &str, value: Option<&str>) -> Result<(), GhostraceError> {
     if let Some(value) = value {
-        validate_metadata(name, value)?;
+        validate_identifier(name, value)?;
+    }
+    Ok(())
+}
+
+fn validate_app_identifier(name: &str, value: &str) -> Result<(), GhostraceError> {
+    if value.is_empty() || value.len() > MAX_APP_IDENTIFIER_BYTES || !value.is_ascii() {
+        return Err(invalid_identifier(name, "application identifier"));
+    }
+    for label in value.split('.') {
+        if label.is_empty()
+            || label.len() > 63
+            || !label.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
+            || !label.as_bytes().last().is_some_and(u8::is_ascii_alphanumeric)
+            || !label
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        {
+            return Err(invalid_identifier(name, "application identifier"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_optional_app_identifier(name: &str, value: Option<&str>) -> Result<(), GhostraceError> {
+    if let Some(value) = value {
+        validate_app_identifier(name, value)?;
+    }
+    Ok(())
+}
+
+fn validate_branch(name: &str, value: &str) -> Result<(), GhostraceError> {
+    let invalid = value.is_empty()
+        || value.len() > MAX_BRANCH_BYTES
+        || !value.is_ascii()
+        || !value.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
+        || !value.as_bytes().last().is_some_and(u8::is_ascii_alphanumeric)
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'/' | b'-'))
+        || value.contains("..")
+        || value.contains("//")
+        || value.contains("@{")
+        || value.split('/').any(|component| component.is_empty() || component == ".")
+        || value.ends_with(".lock");
+    if invalid {
+        return Err(invalid_identifier(name, "Git branch name"));
+    }
+    Ok(())
+}
+
+fn validate_git_object_id(value: &str) -> Result<(), GhostraceError> {
+    if !matches!(value.len(), 40 | 64)
+        || !value.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(invalid_identifier("head_oid", "Git object ID"));
+    }
+    Ok(())
+}
+
+fn validate_digest(name: &str, value: &str) -> Result<(), GhostraceError> {
+    let Some(hex) = value.strip_prefix("sha256:") else {
+        return Err(invalid_identifier(name, "SHA-256 digest"));
+    };
+    if value.len() != SHA256_DIGEST_BYTES
+        || hex.len() != 64
+        || !hex.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(invalid_identifier(name, "SHA-256 digest"));
+    }
+    Ok(())
+}
+
+fn validate_optional_digest(name: &str, value: Option<&str>) -> Result<(), GhostraceError> {
+    if let Some(value) = value {
+        validate_digest(name, value)?;
+    }
+    Ok(())
+}
+
+fn validate_cursor(name: &str, value: &str) -> Result<(), GhostraceError> {
+    if value.is_empty()
+        || value.len() > MAX_CURSOR_BYTES
+        || !value.is_ascii()
+        || !value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
+        })
+        || !value.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
+        || !value.as_bytes().last().is_some_and(u8::is_ascii_alphanumeric)
+        || value.contains("..")
+    {
+        return Err(invalid_identifier(name, "source cursor"));
+    }
+    Ok(())
+}
+
+fn validate_optional_cursor(name: &str, value: Option<&str>) -> Result<(), GhostraceError> {
+    if let Some(value) = value {
+        validate_cursor(name, value)?;
     }
     Ok(())
 }
@@ -651,59 +762,15 @@ impl EventEnvelope {
                 "ingested_at must not precede observed_at".to_owned(),
             ));
         }
-        if self.collector_instance.trim().is_empty() {
-            return Err(GhostraceError::InvalidEvent(
-                "collector_instance must not be empty".to_owned(),
-            ));
-        }
-        if self.collector_instance.len() > MAX_METADATA_FIELD_BYTES
-            || self.collector_instance.chars().any(char::is_control)
-        {
-            return Err(GhostraceError::InvalidEvent(
-                "collector_instance exceeds the metadata limit".to_owned(),
-            ));
-        }
-        if self.provenance_version.trim().is_empty() {
-            return Err(GhostraceError::InvalidEvent(
-                "provenance_version must not be empty".to_owned(),
-            ));
-        }
-        if self.provenance_version.len() > MAX_METADATA_FIELD_BYTES
-            || self.provenance_version.chars().any(char::is_control)
-        {
-            return Err(GhostraceError::InvalidEvent(
-                "provenance_version exceeds the metadata limit".to_owned(),
-            ));
-        }
-        if self.policy_profile_id.trim().is_empty() {
-            return Err(GhostraceError::InvalidEvent(
-                "policy_profile_id must not be empty".to_owned(),
-            ));
-        }
-        if self.policy_profile_id.len() > MAX_METADATA_FIELD_BYTES
-            || self.policy_profile_id.chars().any(char::is_control)
-        {
-            return Err(GhostraceError::InvalidEvent(
-                "policy_profile_id exceeds the metadata limit".to_owned(),
-            ));
-        }
+        validate_identifier("collector_instance", &self.collector_instance)?;
+        validate_identifier("provenance_version", &self.provenance_version)?;
+        validate_identifier("policy_profile_id", &self.policy_profile_id)?;
         if self.policy_profile_version == 0 {
             return Err(GhostraceError::InvalidEvent(
                 "policy_profile_version must be greater than zero".to_owned(),
             ));
         }
-        if self.source_cursor.as_deref().is_some_and(str::is_empty) {
-            return Err(GhostraceError::InvalidEvent(
-                "source_cursor must be omitted or non-empty".to_owned(),
-            ));
-        }
-        if self.source_cursor.as_deref().is_some_and(|cursor| {
-            cursor.len() > MAX_METADATA_FIELD_BYTES || cursor.chars().any(char::is_control)
-        }) {
-            return Err(GhostraceError::InvalidEvent(
-                "source_cursor exceeds the metadata limit".to_owned(),
-            ));
-        }
+        validate_optional_cursor("source_cursor", self.source_cursor.as_deref())?;
         if self.parent_event_id == Some(self.event_id) {
             return Err(GhostraceError::InvalidEvent(
                 "parent_event_id must differ from event_id".to_owned(),

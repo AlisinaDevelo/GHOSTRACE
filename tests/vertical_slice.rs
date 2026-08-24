@@ -37,7 +37,10 @@ fn filesystem_event(id: u128, parent_event_id: Option<Uuid>) -> EventEnvelope {
             path_class: PathClass::WorkspaceRelative,
             operation: FileOperation::Modified,
             entry_kind: EntryKind::File,
-            path_digest: Some("fixture_secret_not_plaintext".to_owned()),
+            path_digest: Some(
+                "sha256:abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd"
+                    .to_owned(),
+            ),
             size_bytes: Some(42),
         }),
         "fixture-fs",
@@ -249,6 +252,109 @@ fn invalid_schema_and_parent_are_rejected() {
     let mut value = serde_json::to_value(gap).expect("JSON");
     value["payload"]["data"]["source"] = json!("browser");
     assert!(serde_json::from_value::<EventEnvelope>(value).is_err());
+}
+
+#[test]
+fn semantic_identifier_contract_rejects_paths_credentials_controls_and_ambiguous_encodings() {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/causal-chain.jsonl");
+    let source = fs::read_to_string(&fixture).expect("fixture");
+    let cases = [
+        (2usize, "/Users/alice/project", "session_id"),
+        (2usize, "alice:password@example.test", "session_id"),
+        (2usize, "session-\u{202e}1", "session_id"),
+        (3usize, "file:///repo", "repository_id"),
+        (3usize, "../../main", "branch"),
+        (3usize, "ABCDEF0123456789ABCDEF0123456789ABCDEF01", "head_oid"),
+        (
+            3usize,
+            "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeG",
+            "snapshot_digest",
+        ),
+        (5usize, "cursor/../secret", "from_cursor"),
+        (0usize, "fixture\ninstance", "collector_instance"),
+    ];
+
+    for (line_index, rejected, field) in cases {
+        let mut value: serde_json::Value =
+            serde_json::from_str(source.lines().nth(line_index).expect("fixture line"))
+                .expect("fixture JSON");
+        let target = match field {
+            "session_id" => &mut value["payload"]["data"]["session_id"],
+            "repository_id" => &mut value["payload"]["data"]["repository_id"],
+            "branch" => &mut value["payload"]["data"]["branch"],
+            "head_oid" => &mut value["payload"]["data"]["head_oid"],
+            "snapshot_digest" => &mut value["payload"]["data"]["snapshot_digest"],
+            "from_cursor" => &mut value["payload"]["data"]["from_cursor"],
+            "collector_instance" => &mut value["collector_instance"],
+            _ => unreachable!("test field is mapped above"),
+        };
+        *target = json!(rejected);
+        let error = serde_json::from_value::<EventEnvelope>(value).expect_err("must reject");
+        assert!(
+            !error.to_string().contains(rejected),
+            "rejection for {field} echoed untrusted content"
+        );
+    }
+
+    let constructor_error = EventEnvelope::new(
+        Uuid::from_u128(90),
+        timestamp(1_735_689_600),
+        timestamp(1_735_689_600),
+        EventSource::Filesystem,
+        EventKind::FilesystemChanged,
+        EventPayload::FilesystemChanged(FilesystemChangedPayload {
+            root_id: "root-a".to_owned(),
+            path_class: PathClass::WorkspaceRelative,
+            operation: FileOperation::Modified,
+            entry_kind: EntryKind::File,
+            path_digest: Some("sha256:fixture-secret".to_owned()),
+            size_bytes: None,
+        }),
+        "fixture-fs",
+        Some("cursor-0090".to_owned()),
+        "fixture-v1",
+        "fixture-default-v1",
+        1,
+        Evidence::Direct,
+        None,
+    )
+    .expect_err("constructor must apply the digest contract");
+    assert!(!constructor_error.to_string().contains("fixture-secret"));
+}
+
+#[test]
+fn semantic_identifier_schema_and_rust_validation_stay_in_parity_at_boundaries() {
+    let schema: serde_json::Value = serde_json::from_str(EVENT_SCHEMA_JSON).expect("schema JSON");
+    let validator = jsonschema::options()
+        .should_validate_formats(true)
+        .build(&schema)
+        .expect("valid JSON Schema");
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/causal-chain.jsonl");
+    let base: serde_json::Value = serde_json::from_str(
+        fs::read_to_string(&fixture).expect("fixture").lines().nth(3).expect("filesystem event"),
+    )
+    .expect("fixture JSON");
+    let valid_digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    let invalid_values = [
+        ("root_id", json!("a".repeat(129))),
+        ("root_id", json!("../root")),
+        ("path_digest", json!(valid_digest.to_ascii_uppercase())),
+        ("path_digest", json!("sha256:short")),
+    ];
+    for (field, rejected) in invalid_values {
+        let mut value = base.clone();
+        value["payload"]["data"][field] = rejected;
+        assert!(!validator.is_valid(&value), "schema accepted invalid {field}");
+        assert!(
+            serde_json::from_value::<EventEnvelope>(value).is_err(),
+            "Rust accepted invalid {field}"
+        );
+    }
+
+    let mut valid = base;
+    valid["payload"]["data"]["path_digest"] = json!(valid_digest);
+    assert!(validator.is_valid(&valid));
+    serde_json::from_value::<EventEnvelope>(valid).expect("Rust accepts canonical digest");
 }
 
 #[test]
