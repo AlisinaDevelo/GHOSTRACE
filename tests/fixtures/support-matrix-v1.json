@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "contract_id": "ghostrace-support-matrix-v1",
+  "product": "GHOSTRACE",
+  "platform": "macOS",
+  "support_floor": {
+    "major": 15,
+    "codename": "Sequoia",
+    "status": "target",
+    "release_rule": "A release may promise the floor only after the annual beta/RC validation evidence is retained for every target architecture."
+  },
+  "architectures": {
+    "target": ["arm64", "x86_64"],
+    "verified": ["arm64"],
+    "unavailable_for_current_run": ["x86_64"]
+  },
+  "platform_matrix": [
+    {
+      "os_major": 15,
+      "codename": "Sequoia",
+      "architecture": "arm64",
+      "status": "target-unverified",
+      "evidence": "Required by the release gate; no macOS 15 device was available for this run.",
+      "limitation": "Do not call this row a passing device result until a macOS 15 beta or release-candidate run is retained."
+    },
+    {
+      "os_major": 15,
+      "codename": "Sequoia",
+      "architecture": "x86_64",
+      "status": "no-go-unavailable-hardware",
+      "evidence": "No Intel Mac is available in the current device lab.",
+      "limitation": "Intel compatibility is a declared target, not a tested claim."
+    },
+    {
+      "os_major": 26,
+      "codename": "Tahoe",
+      "architecture": "arm64",
+      "status": "verified",
+      "evidence": "GHOSTRACE-0045-DEVICE-20260824",
+      "limitation": "This verifies the current Apple-silicon device only; it does not substitute for the macOS 15 floor run."
+    },
+    {
+      "os_major": 26,
+      "codename": "Tahoe",
+      "architecture": "x86_64",
+      "status": "no-go-unavailable-hardware",
+      "evidence": "No Intel Mac is available in the current device lab.",
+      "limitation": "Intel compatibility is a declared target, not a tested claim."
+    }
+  ],
+  "collectors": [
+    {
+      "id": "fixture",
+      "status": "available",
+      "permissions": {
+        "required": [],
+        "optional": [],
+        "prohibited": ["root", "full_disk_access", "accessibility", "automation", "network"],
+        "refusal": {
+          "code": "capture_disabled",
+          "when": "A caller asks the fixture-only binary to start ambient capture or to widen its input scope.",
+          "observable": "The command exits non-zero with a bounded refusal; no permission prompt, journal write, or network connection occurs."
+        }
+      }
+    },
+    {
+      "id": "fsevents",
+      "status": "planned",
+      "permissions": {
+        "required": ["explicit_selected_root_consent"],
+        "optional": [],
+        "prohibited": ["root", "privileged_helper", "accessibility", "automation", "file_contents"],
+        "refusal": {
+          "code": "selected_root_not_authorized",
+          "when": "Consent is absent or revoked, the root cannot be canonicalized, or the source reports an inaccessible scope.",
+          "observable": "The collector stays stopped, emits a redacted refusal/gap record, and retains no event from the unauthorized scope."
+        }
+      }
+    },
+    {
+      "id": "endpoint-security",
+      "status": "deferred",
+      "permissions": {
+        "required": ["endpoint_security_entitlement", "explicit_user_consent"],
+        "optional": [],
+        "prohibited": ["silent_entitlement_activation", "unconsented_capture", "automatic_fsevents_fallback"],
+        "refusal": {
+          "code": "collector_deferred",
+          "when": "The entitlement, consent, attribution policy, or privacy evidence is missing.",
+          "observable": "No Endpoint Security client is created; the product reports a bounded deferred/no-go result instead of falling back silently."
+        }
+      }
+    },
+    {
+      "id": "shell",
+      "status": "planned",
+      "permissions": {
+        "required": ["explicit_user_opt_in"],
+        "optional": [],
+        "prohibited": ["keylogging", "command_argument_contents", "environment_secret_contents", "network"],
+        "refusal": {
+          "code": "shell_capture_not_authorized",
+          "when": "The wrapper is not explicitly installed and consent is not active.",
+          "observable": "No wrapper is installed or spawned, and the refusal contains no command, argument, or environment value."
+        }
+      }
+    },
+    {
+      "id": "git",
+      "status": "planned",
+      "permissions": {
+        "required": ["explicit_repository_opt_in"],
+        "optional": [],
+        "prohibited": ["working_tree_file_contents", "remote_network_access", "credential_contents"],
+        "refusal": {
+          "code": "repository_not_authorized",
+          "when": "The repository has not been explicitly selected or its metadata cannot be read safely.",
+          "observable": "No Git hook or snapshot is written, and diagnostics contain only a stable refusal code."
+        }
+      }
+    },
+    {
+      "id": "frontmost",
+      "status": "deferred",
+      "permissions": {
+        "required": ["explicit_frontmost_opt_in"],
+        "optional": [],
+        "prohibited": ["accessibility", "screen_recording", "window_title_contents", "private_contexts"],
+        "refusal": {
+          "code": "frontmost_permission_missing",
+          "when": "The selected frontmost-app capability is unavailable or the user has not consented.",
+          "observable": "No Accessibility or screen-recording prompt is triggered; the collector emits a bounded refusal/gap."
+        }
+      }
+    },
+    {
+      "id": "chromium-navigation",
+      "status": "deferred",
+      "permissions": {
+        "required": ["explicit_browser_pairing", "declared_extension_permission"],
+        "optional": [],
+        "prohibited": ["incognito_contexts", "page_contents", "cookies", "passwords", "network_upload"],
+        "refusal": {
+          "code": "browser_pairing_missing",
+          "when": "The extension/native-host pairing is absent, stale, or the browser reports a private context.",
+          "observable": "The message is rejected without retaining a URL/content payload and the refusal reason is stable and redacted."
+        }
+      }
+    },
+    {
+      "id": "browser-bookmarks",
+      "status": "deferred",
+      "permissions": {
+        "required": ["explicit_bookmark_opt_in", "browser_profile_selection"],
+        "optional": [],
+        "prohibited": ["private_profiles", "passwords", "history_beyond_selected_snapshot", "network_upload"],
+        "refusal": {
+          "code": "browser_profile_not_authorized",
+          "when": "The selected profile is private, unavailable, or consent has been revoked.",
+          "observable": "No profile database is opened and no bookmark value is retained; only the bounded refusal is returned."
+        }
+      }
+    },
+    {
+      "id": "safari-webextension",
+      "status": "deferred",
+      "permissions": {
+        "required": ["explicit_extension_permission", "explicit_profile_opt_in"],
+        "optional": [],
+        "prohibited": ["private_browsing", "page_contents", "passwords", "network_upload"],
+        "refusal": {
+          "code": "safari_permission_missing",
+          "when": "Safari has not granted the declared extension permission or the context is private.",
+          "observable": "The adapter remains disabled and returns a redacted refusal without requesting broader macOS permissions."
+        }
+      }
+    }
+  ],
+  "annual_validation": {
+    "owner": "maintainer",
+    "cadence": ["once per year", "each macOS beta cycle", "each macOS release candidate"],
+    "evidence": {
+      "format": "docs/evidence/<task-id>-<platform>-<date>.md plus a machine-readable run manifest",
+      "required_fields": ["commit", "device_model", "os_build", "architecture", "toolchain", "permissions", "commands", "logs", "artifact_digests", "limitations", "go_no-go_decision"],
+      "retention": "Keep the run manifest and log digest with the release record; link it from the relevant task and issue."
+    },
+    "retirement_rule": "Retire a row only after two consecutive release cycles without support, with a dated decision record, migration notice, and an explicit no-go entry replacing the old promise."
+  }
+}

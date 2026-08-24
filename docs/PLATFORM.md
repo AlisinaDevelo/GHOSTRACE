@@ -15,6 +15,12 @@ boundary.
 | Distribution | No signed, notarized, or bundled release artifact is shipped in the headstart |
 | Permissions | The fixture path requests none; live permissions are a future, explicit decision |
 
+The complete, machine-readable support and permission contract is in the
+[support matrix](SUPPORT_MATRIX.md). It records target versus verified macOS
+major-version/architecture rows, explicit unavailable-hardware no-go rows, and
+the required/optional/prohibited permissions plus observable refusal for every
+planned collector.
+
 ## Permission boundary
 
 The baseline does not require root, Full Disk Access, Accessibility, or Automation.
