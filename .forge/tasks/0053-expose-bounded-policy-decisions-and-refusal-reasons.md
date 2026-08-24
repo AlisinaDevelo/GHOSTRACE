@@ -1,7 +1,7 @@
 ---
 id: 0053
 title: Expose bounded policy decisions and refusal reasons
-status: ready
+status: done
 agent: security-auditor
 model: human
 release: M1
@@ -19,12 +19,14 @@ platform: any
 Make allow, deny, redact, summarize, and refuse outcomes explainable without logging the rejected sensitive observation.
 
 ## Acceptance criteria
-- [ ] Decision records use a finite reason-code registry and bounded public metadata.
-- [ ] Diagnostics distinguish policy denial, malformed input, unsupported scope, and internal failure.
-- [ ] Adversarial tests prove errors and debug output do not echo paths, secrets, or rejected payloads.
+- [x] Decision records use a finite reason-code registry and bounded public metadata.
+- [x] Diagnostics distinguish policy denial, malformed input, unsupported scope, and internal failure.
+- [x] Adversarial tests prove errors and debug output do not echo paths, secrets, or rejected payloads.
 
 ## Context
 A visible refusal must still preserve the data-minimization boundary.
 
 ## Notes
-Planned in the 2026–2031 GHOSTRACE program. Completion requires the acceptance evidence above; issue closure alone is not evidence.
+Implemented in `b4ae45fbd5958a79e60da85bff33f06cf128a01b` and verified in
+`docs/evidence/0053-bounded-policy-decisions.md`. Completion evidence covers finite
+outcomes, diagnostic classes, and adversarial non-echo behavior.
