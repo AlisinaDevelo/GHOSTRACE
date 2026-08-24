@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::{
     error::GhostraceError,
     journal::Journal,
-    model::{EventEnvelope, EventKind, PROVENANCE_VERSION},
+    model::{EventEnvelope, EventKind},
     policy::PolicyProfile,
 };
 
@@ -85,13 +85,14 @@ pub fn ingest_fixture(
     policy: &PolicyProfile,
 ) -> Result<FixtureIngestReport, GhostraceError> {
     let events = read_fixture(path)?;
-    if events.iter().any(|event| {
-        event.provenance_version != PROVENANCE_VERSION
-            || !event.collector_instance.starts_with("fixture-")
-    }) {
-        return Err(GhostraceError::FixtureProvenance);
-    }
-    let ingest_sequences = journal.ingest_batch(&events, policy)?;
+    let origin = crate::model::IngestionOrigin::fixture();
+    let ingest_sequences =
+        journal.ingest_batch(&origin, &events, policy).map_err(|error| match error {
+            GhostraceError::OriginRejected
+            | GhostraceError::OriginCapabilityMismatch
+            | GhostraceError::OriginEventClass => GhostraceError::FixtureProvenance,
+            error => error,
+        })?;
     let event_ids = events.iter().map(|event| event.event_id).collect();
     let gap_event_ids = events
         .iter()

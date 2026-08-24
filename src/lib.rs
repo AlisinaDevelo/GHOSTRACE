@@ -24,12 +24,14 @@ pub use journal::{Journal, StoredEvent};
 pub use model::{
     AppChange, BookmarkChange, BrowserBookmarkChangedPayload, BrowserNavigationPayload, BrowserUrl,
     CollectorLifecyclePayload, Confidence, EntryKind, EventEnvelope, EventId, EventKind,
-    EventPayload, EventSource, Evidence, FileOperation, FilesystemChangedPayload,
-    FrontmostAppChangedPayload, GapPayload, GitSnapshotPayload, PathClass,
-    PolicyBlockedSummaryPayload, SanitizedUrl, ShellFinishedPayload, ShellStartedPayload,
-    ShellStatus, Source, SourceErrorPayload, EVENT_SCHEMA_VERSION, MAX_APP_IDENTIFIER_BYTES,
-    MAX_BRANCH_BYTES, MAX_BROWSER_URL_BYTES, MAX_CURSOR_BYTES, MAX_EVENT_PAYLOAD_BYTES,
-    MAX_IDENTIFIER_BYTES, PROVENANCE_VERSION, SHA256_DIGEST_BYTES,
+    EventPayload, EventSource, Evidence, FileOperation, FilesystemChangedPayload, FixtureOrigin,
+    FrontmostAppChangedPayload, GapPayload, GitSnapshotPayload, ImportOrigin, IngestionOrigin,
+    IngestionOriginKind, LiveOrigin, PathClass, PolicyBlockedSummaryPayload, RepairOrigin,
+    SanitizedUrl, ShellFinishedPayload, ShellStartedPayload, ShellStatus, Source,
+    SourceErrorPayload, EVENT_SCHEMA_VERSION, IMPORT_PROVENANCE_VERSION, LIVE_PROVENANCE_VERSION,
+    MAX_APP_IDENTIFIER_BYTES, MAX_BRANCH_BYTES, MAX_BROWSER_URL_BYTES, MAX_CURSOR_BYTES,
+    MAX_EVENT_PAYLOAD_BYTES, MAX_IDENTIFIER_BYTES, PROVENANCE_VERSION, REPAIR_PROVENANCE_VERSION,
+    SHA256_DIGEST_BYTES,
 };
 pub use policy::{PolicyDecision, PolicyProfile, PolicyReason};
 

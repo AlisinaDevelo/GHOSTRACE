@@ -48,6 +48,18 @@ pub enum GhostraceError {
     #[error("fixture event provenance is invalid")]
     FixtureProvenance,
 
+    #[error("ingestion origin does not authorize event")]
+    OriginRejected,
+
+    #[error("ingestion origin capability is not bound to this event")]
+    OriginCapabilityMismatch,
+
+    #[error("ingestion origin does not allow this event class")]
+    OriginEventClass,
+
+    #[error("an origin instance is required to construct an event")]
+    OriginInstanceRequired,
+
     #[error("live capture is intentionally disabled until policy/cursor/Keychain gates land")]
     LiveCaptureDisabled,
 

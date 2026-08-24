@@ -69,7 +69,7 @@ plaintext chosen by the user.
 
 | Category | Example threat | Mitigation | State |
 | --- | --- | --- | --- |
-| Spoofing | A fixture or future adapter claims another source or policy | Versioned source identity, provenance, policy IDs, and validation | Fixture checks now; live source attestation is future work |
+| Spoofing | A fixture or future adapter claims another source or policy | Sealed typed origin capabilities, versioned provenance namespaces, policy IDs, and validation | Fixture boundary and deserialized-fixture refusal now; live adapter attestation remains future work |
 | Tampering | A local process edits journal rows or an export | Authenticated payloads; future integrity chain; explicit integrity status | Keychain encryption and chain verification are roadmap gates |
 | Repudiation | An explanation hides a denied interval or restart | First-class gaps, source status, cursor metadata, event IDs, deterministic output | Contract documented; live recovery tests required |
 | Information disclosure | Logs, WAL files, exports, or errors reveal paths or payloads | Minimized fields, redaction, no sensitive diagnostics, explicit export, file permissions | Fixture checks now; production storage hardening is not shipped |

@@ -6,8 +6,8 @@ use ghostrace::{
     BookmarkChange, BrowserBookmarkChangedPayload, BrowserNavigationPayload,
     DeterministicKeyProvider, EntryKind, EventEnvelope, EventKind, EventPayload, EventSource,
     Evidence, ExportPolicyProfile, FileOperation, FilesystemChangedPayload,
-    FrontmostAppChangedPayload, Journal, PathClass, PolicyDecision, PolicyProfile, SanitizedUrl,
-    ShellFinishedPayload, ShellStatus, SourceErrorPayload, EVENT_SCHEMA_JSON,
+    FrontmostAppChangedPayload, IngestionOrigin, Journal, PathClass, PolicyDecision, PolicyProfile,
+    SanitizedUrl, ShellFinishedPayload, ShellStatus, SourceErrorPayload, EVENT_SCHEMA_JSON,
 };
 use serde_json::json;
 use tempfile::tempdir;
@@ -26,7 +26,9 @@ fn make_private(path: &std::path::Path) {
 }
 
 fn filesystem_event(id: u128, parent_event_id: Option<Uuid>) -> EventEnvelope {
+    let origin = IngestionOrigin::fixture_instance("fixture-fs").expect("fixture origin");
     EventEnvelope::new(
+        &origin,
         Uuid::from_u128(id),
         timestamp(1_735_689_600),
         timestamp(1_735_689_600),
@@ -43,9 +45,7 @@ fn filesystem_event(id: u128, parent_event_id: Option<Uuid>) -> EventEnvelope {
             ),
             size_bytes: Some(42),
         }),
-        "fixture-fs",
         Some(format!("cursor-{id}")),
-        "fixture-v1",
         "fixture-default-v1",
         1,
         Evidence::Direct,
@@ -67,16 +67,16 @@ fn fixture_event(
     kind: EventKind,
     payload: EventPayload,
 ) -> EventEnvelope {
+    let origin = IngestionOrigin::fixture_instance("fixture-schema").expect("fixture origin");
     EventEnvelope::new(
+        &origin,
         Uuid::from_u128(id),
         timestamp(1_735_689_600),
         timestamp(1_735_689_600),
         source,
         kind,
         payload,
-        "fixture-schema",
         None,
-        "fixture-v1",
         "fixture-default-v1",
         1,
         Evidence::Direct,
@@ -105,7 +105,8 @@ fn encrypted_payload_is_not_plaintext_at_rest() {
     let journal =
         Journal::in_memory(DeterministicKeyProvider::from_seed("at-rest-test")).expect("journal");
     let event = filesystem_event(1, None);
-    let ciphertext = journal.ingest(&event, &filesystem_test_policy()).expect("ingest");
+    let origin = IngestionOrigin::fixture();
+    let ciphertext = journal.ingest(&origin, &event, &filesystem_test_policy()).expect("ingest");
     assert_eq!(ciphertext, 1);
     let bytes = journal.raw_payload_ciphertext(event.event_id).expect("ciphertext");
     assert!(!String::from_utf8_lossy(&bytes).contains("fixture_secret_not_plaintext"));
@@ -119,8 +120,9 @@ fn plaintext_metadata_is_authenticated_with_the_payload() {
     let path = directory.path().join("journal.sqlite3");
     let key = DeterministicKeyProvider::from_seed("metadata-auth-test");
     let event = filesystem_event(1, None);
+    let origin = IngestionOrigin::fixture();
     let journal = Journal::open_fixture(&path, key.clone()).expect("open");
-    journal.ingest(&event, &filesystem_test_policy()).expect("ingest");
+    journal.ingest(&origin, &event, &filesystem_test_policy()).expect("ingest");
     drop(journal);
 
     let connection = rusqlite::Connection::open(&path).expect("tamper connection");
@@ -188,11 +190,12 @@ fn policy_versions_are_immutable() {
     let first = filesystem_event(1, None);
     let second = filesystem_event(2, None);
     let policy = filesystem_test_policy();
-    journal.ingest(&first, &policy).expect("first policy use");
+    let origin = IngestionOrigin::fixture();
+    journal.ingest(&origin, &first, &policy).expect("first policy use");
 
     let mut changed_policy = policy;
     changed_policy.enable_source(EventSource::Browser);
-    assert!(journal.ingest(&second, &changed_policy).is_err());
+    assert!(journal.ingest(&origin, &second, &changed_policy).is_err());
 }
 
 #[test]
@@ -233,7 +236,8 @@ fn invalid_schema_and_parent_are_rejected() {
     let event = filesystem_event(1, Some(Uuid::from_u128(99)));
     let journal =
         Journal::in_memory(DeterministicKeyProvider::from_seed("parent-test")).expect("journal");
-    assert!(journal.ingest(&event, &filesystem_test_policy()).is_err());
+    let origin = IngestionOrigin::fixture();
+    assert!(journal.ingest(&origin, &event, &filesystem_test_policy()).is_err());
 
     let mut value = serde_json::to_value(filesystem_event(2, None)).expect("JSON");
     value["schema_version"] = json!(99);
@@ -296,7 +300,9 @@ fn semantic_identifier_contract_rejects_paths_credentials_controls_and_ambiguous
         );
     }
 
+    let origin = IngestionOrigin::fixture_instance("fixture-fs").expect("fixture origin");
     let constructor_error = EventEnvelope::new(
+        &origin,
         Uuid::from_u128(90),
         timestamp(1_735_689_600),
         timestamp(1_735_689_600),
@@ -310,9 +316,7 @@ fn semantic_identifier_contract_rejects_paths_credentials_controls_and_ambiguous
             path_digest: Some("sha256:fixture-secret".to_owned()),
             size_bytes: None,
         }),
-        "fixture-fs",
         Some("cursor-0090".to_owned()),
-        "fixture-v1",
         "fixture-default-v1",
         1,
         Evidence::Direct,
@@ -365,7 +369,9 @@ fn fixture_and_event_size_limits_fail_closed() {
         .expect("write oversized fixture");
     assert!(ghostrace::read_fixture(&fixture).is_err());
 
+    let origin = IngestionOrigin::fixture_instance("fixture-fs").expect("fixture origin");
     let oversized = EventEnvelope::new(
+        &origin,
         Uuid::from_u128(88),
         timestamp(1_735_689_600),
         timestamp(1_735_689_600),
@@ -379,9 +385,7 @@ fn fixture_and_event_size_limits_fail_closed() {
             path_digest: Some("x".repeat(ghostrace::model::MAX_EVENT_PAYLOAD_BYTES)),
             size_bytes: None,
         }),
-        "fixture-fs",
         None,
-        "fixture-v1",
         "fixture-default-v1",
         1,
         Evidence::Direct,
@@ -412,6 +416,25 @@ fn fixture_ingest_rejects_spoofed_provenance_without_echoing_it() {
     let display = error.to_string();
     assert_eq!(display, "fixture event provenance is invalid");
     assert!(!display.contains("sensitive"));
+    assert!(journal.events().expect("events").is_empty());
+}
+
+#[test]
+fn deserialized_fixture_cannot_claim_live_collector_identity() {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/causal-chain.jsonl");
+    let fixture_text = fs::read_to_string(fixture).expect("fixture");
+    let first_line = fixture_text.lines().next().expect("first line");
+    let mut event: serde_json::Value = serde_json::from_str(first_line).expect("JSON");
+    event["collector_instance"] = json!("live-filesystem-1");
+    event["provenance_version"] = json!("live-v1");
+    let deserialized: EventEnvelope = serde_json::from_value(event).expect("valid envelope");
+
+    let journal = Journal::in_memory(DeterministicKeyProvider::from_seed("origin-capability-test"))
+        .expect("journal");
+    let error = journal
+        .ingest(&IngestionOrigin::fixture(), &deserialized, &PolicyProfile::fixture_default())
+        .expect_err("fixture capability must reject live provenance");
+    assert_eq!(error.to_string(), "ingestion origin does not authorize event");
     assert!(journal.events().expect("events").is_empty());
 }
 

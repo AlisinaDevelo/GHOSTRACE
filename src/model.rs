@@ -93,6 +93,222 @@ impl fmt::Display for EventKind {
     }
 }
 
+/// The adapter boundary that is allowed to create or persist an event.
+///
+/// The variants are deliberately separate from [`EventSource`].  A source is
+/// what an event describes; an origin is the adapter capability that is
+/// allowed to assert the event's provenance.  Live, import, and repair
+/// capabilities are crate-owned until their adapters are implemented.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IngestionOriginKind {
+    Fixture,
+    Live,
+    Import,
+    Repair,
+}
+
+/// The four provenance versions are owned by their adapter boundary.  They
+/// are not caller-supplied strings.
+pub const LIVE_PROVENANCE_VERSION: &str = "live-v1";
+pub const IMPORT_PROVENANCE_VERSION: &str = "import-v1";
+pub const REPAIR_PROVENANCE_VERSION: &str = "repair-v1";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FixtureOrigin {
+    token: Uuid,
+    collector_instance: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveOrigin {
+    token: Uuid,
+    collector_instance: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportOrigin {
+    token: Uuid,
+    collector_instance: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepairOrigin {
+    token: Uuid,
+    collector_instance: String,
+}
+
+/// A sealed adapter-origin capability for journal ingestion.
+///
+/// `Fixture` is the only origin constructible by downstream callers.  The
+/// other variants can only be created by their future in-crate adapters.  The
+/// private token binds events built in memory to the capability that built
+/// them; deserializing an envelope never creates a live/import/repair token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IngestionOrigin {
+    Fixture(FixtureOrigin),
+    Live(LiveOrigin),
+    Import(ImportOrigin),
+    Repair(RepairOrigin),
+}
+
+impl FixtureOrigin {
+    /// Creates a fixture capability that accepts checked-in or otherwise
+    /// deserialized fixture envelopes whose instance starts with `fixture-`.
+    pub fn any() -> Self {
+        Self { token: Uuid::new_v4(), collector_instance: None }
+    }
+
+    /// Creates a fixture capability bound to one synthetic collector instance.
+    pub fn for_instance(collector_instance: impl Into<String>) -> Result<Self, GhostraceError> {
+        Ok(Self {
+            token: Uuid::new_v4(),
+            collector_instance: Some(validate_origin_instance(
+                "fixture-",
+                collector_instance.into(),
+            )?),
+        })
+    }
+}
+
+#[allow(dead_code)]
+impl IngestionOrigin {
+    /// The public fixture ingestion path.  Its instance is intentionally
+    /// wildcarded because one fixture can contain several synthetic adapters.
+    pub fn fixture() -> Self {
+        Self::Fixture(FixtureOrigin::any())
+    }
+
+    /// Creates a fixture capability for an event constructed by that adapter.
+    pub fn fixture_instance(collector_instance: impl Into<String>) -> Result<Self, GhostraceError> {
+        Ok(Self::Fixture(FixtureOrigin::for_instance(collector_instance)?))
+    }
+
+    /// Creates a live capability for an in-crate collector adapter.
+    pub(crate) fn live(collector_instance: impl Into<String>) -> Result<Self, GhostraceError> {
+        Ok(Self::Live(LiveOrigin {
+            token: Uuid::new_v4(),
+            collector_instance: validate_origin_instance("live-", collector_instance.into())?,
+        }))
+    }
+
+    /// Creates an import capability for an in-crate adapter.
+    pub(crate) fn import(collector_instance: impl Into<String>) -> Result<Self, GhostraceError> {
+        Ok(Self::Import(ImportOrigin {
+            token: Uuid::new_v4(),
+            collector_instance: validate_origin_instance("import-", collector_instance.into())?,
+        }))
+    }
+
+    /// Creates a repair capability for an in-crate recovery adapter.
+    pub(crate) fn repair(collector_instance: impl Into<String>) -> Result<Self, GhostraceError> {
+        Ok(Self::Repair(RepairOrigin {
+            token: Uuid::new_v4(),
+            collector_instance: validate_origin_instance("repair-", collector_instance.into())?,
+        }))
+    }
+
+    pub fn kind(&self) -> IngestionOriginKind {
+        match self {
+            Self::Fixture(_) => IngestionOriginKind::Fixture,
+            Self::Live(_) => IngestionOriginKind::Live,
+            Self::Import(_) => IngestionOriginKind::Import,
+            Self::Repair(_) => IngestionOriginKind::Repair,
+        }
+    }
+
+    fn provenance_version(&self) -> &'static str {
+        match self {
+            Self::Fixture(_) => PROVENANCE_VERSION,
+            Self::Live(_) => LIVE_PROVENANCE_VERSION,
+            Self::Import(_) => IMPORT_PROVENANCE_VERSION,
+            Self::Repair(_) => REPAIR_PROVENANCE_VERSION,
+        }
+    }
+
+    fn collector_instance(&self) -> Option<&str> {
+        match self {
+            Self::Fixture(origin) => origin.collector_instance.as_deref(),
+            Self::Live(origin) => Some(&origin.collector_instance),
+            Self::Import(origin) => Some(&origin.collector_instance),
+            Self::Repair(origin) => Some(&origin.collector_instance),
+        }
+    }
+
+    fn instance_prefix(&self) -> &'static str {
+        match self {
+            Self::Fixture(_) => "fixture-",
+            Self::Live(_) => "live-",
+            Self::Import(_) => "import-",
+            Self::Repair(_) => "repair-",
+        }
+    }
+
+    fn token(&self) -> Uuid {
+        match self {
+            Self::Fixture(origin) => origin.token,
+            Self::Live(origin) => origin.token,
+            Self::Import(origin) => origin.token,
+            Self::Repair(origin) => origin.token,
+        }
+    }
+
+    fn collector_instance_for_event(&self) -> Result<&str, GhostraceError> {
+        self.collector_instance().ok_or(GhostraceError::OriginInstanceRequired)
+    }
+
+    fn allows_kind(&self, kind: EventKind) -> bool {
+        match self.kind() {
+            IngestionOriginKind::Fixture | IngestionOriginKind::Live => true,
+            IngestionOriginKind::Import => {
+                !matches!(kind, EventKind::CollectorStarted | EventKind::CollectorStopped)
+            }
+            IngestionOriginKind::Repair => matches!(
+                kind,
+                EventKind::Gap | EventKind::PolicyBlockedSummary | EventKind::SourceError
+            ),
+        }
+    }
+
+    /// Checks the adapter capability before policy or storage work begins.
+    pub(crate) fn validate_event(&self, event: &EventEnvelope) -> Result<(), GhostraceError> {
+        if event.provenance_version != self.provenance_version()
+            || !event.collector_instance.starts_with(self.instance_prefix())
+            || self
+                .collector_instance()
+                .is_some_and(|instance| instance != event.collector_instance)
+        {
+            return Err(GhostraceError::OriginRejected);
+        }
+        if event.source == EventSource::Fixture && self.kind() != IngestionOriginKind::Fixture {
+            return Err(GhostraceError::OriginEventClass);
+        }
+        if !self.allows_kind(event.kind) {
+            return Err(GhostraceError::OriginEventClass);
+        }
+        if self.kind() != IngestionOriginKind::Fixture
+            && !matches!(
+                event.origin_binding,
+                OriginBinding::Capability { kind, token }
+                    if kind == self.kind() && token == self.token()
+            )
+        {
+            return Err(GhostraceError::OriginCapabilityMismatch);
+        }
+        Ok(())
+    }
+}
+
+fn validate_origin_instance(
+    prefix: &str,
+    collector_instance: String,
+) -> Result<String, GhostraceError> {
+    if !collector_instance.starts_with(prefix) {
+        return Err(GhostraceError::OriginRejected);
+    }
+    validate_identifier("collector_instance", &collector_instance)?;
+    Ok(collector_instance)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Evidence {
@@ -648,13 +864,22 @@ pub struct EventEnvelope {
     pub source: EventSource,
     pub kind: EventKind,
     pub payload: EventPayload,
-    pub collector_instance: String,
+    collector_instance: String,
     pub source_cursor: Option<String>,
-    pub provenance_version: String,
+    provenance_version: String,
     pub policy_profile_id: String,
     pub policy_profile_version: u32,
     pub evidence: Evidence,
     pub parent_event_id: Option<Uuid>,
+    #[serde(skip)]
+    origin_binding: OriginBinding,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OriginBinding {
+    Capability { kind: IngestionOriginKind, token: Uuid },
+    Deserialized,
+    Stored,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -697,6 +922,7 @@ impl TryFrom<UncheckedEventEnvelope> for EventEnvelope {
             policy_profile_version: raw.policy_profile_version,
             evidence: raw.evidence,
             parent_event_id: raw.parent_event_id,
+            origin_binding: OriginBinding::Deserialized,
         };
         event.validate().map_err(|error| error.to_string())?;
         Ok(event)
@@ -716,38 +942,83 @@ impl<'de> Deserialize<'de> for EventEnvelope {
 impl EventEnvelope {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        origin: &IngestionOrigin,
         event_id: Uuid,
         observed_at: DateTime<Utc>,
         ingested_at: DateTime<Utc>,
         source: EventSource,
         kind: EventKind,
         payload: EventPayload,
-        collector_instance: impl Into<String>,
         source_cursor: Option<String>,
-        provenance_version: impl Into<String>,
         policy_profile_id: impl Into<String>,
         policy_profile_version: u32,
         evidence: Evidence,
         parent_event_id: Option<Uuid>,
     ) -> Result<Self, GhostraceError> {
-        let event = Self {
-            schema_version: EVENT_SCHEMA_VERSION,
+        let event = Self::from_parts(
+            EVENT_SCHEMA_VERSION,
             event_id,
             observed_at,
             ingested_at,
             source,
             kind,
             payload,
-            collector_instance: collector_instance.into(),
+            origin.collector_instance_for_event()?.to_owned(),
             source_cursor,
-            provenance_version: provenance_version.into(),
-            policy_profile_id: policy_profile_id.into(),
+            origin.provenance_version().to_owned(),
+            policy_profile_id.into(),
             policy_profile_version,
             evidence,
             parent_event_id,
-        };
+            OriginBinding::Capability { kind: origin.kind(), token: origin.token() },
+        );
         event.validate()?;
         Ok(event)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_parts(
+        schema_version: u32,
+        event_id: Uuid,
+        observed_at: DateTime<Utc>,
+        ingested_at: DateTime<Utc>,
+        source: EventSource,
+        kind: EventKind,
+        payload: EventPayload,
+        collector_instance: String,
+        source_cursor: Option<String>,
+        provenance_version: String,
+        policy_profile_id: String,
+        policy_profile_version: u32,
+        evidence: Evidence,
+        parent_event_id: Option<Uuid>,
+        origin_binding: OriginBinding,
+    ) -> Self {
+        Self {
+            schema_version,
+            event_id,
+            observed_at,
+            ingested_at,
+            source,
+            kind,
+            payload,
+            collector_instance,
+            source_cursor,
+            provenance_version,
+            policy_profile_id,
+            policy_profile_version,
+            evidence,
+            parent_event_id,
+            origin_binding,
+        }
+    }
+
+    pub fn collector_instance(&self) -> &str {
+        &self.collector_instance
+    }
+
+    pub fn provenance_version(&self) -> &str {
+        &self.provenance_version
     }
 
     pub fn validate(&self) -> Result<(), GhostraceError> {
@@ -831,5 +1102,28 @@ impl EventEnvelope {
     pub fn to_json_line(&self) -> Result<String, GhostraceError> {
         self.validate()?;
         Ok(serde_json::to_string(self)?)
+    }
+}
+
+#[cfg(test)]
+mod origin_tests {
+    use super::*;
+
+    #[test]
+    fn origin_construction_paths_bind_prefixes_and_event_classes() {
+        assert!(IngestionOrigin::fixture_instance("live-filesystem-1").is_err());
+
+        let live = IngestionOrigin::live("live-filesystem-1").expect("live origin");
+        let import = IngestionOrigin::import("import-snapshot-1").expect("import origin");
+        let repair = IngestionOrigin::repair("repair-replay-1").expect("repair origin");
+
+        assert_eq!(live.kind(), IngestionOriginKind::Live);
+        assert_eq!(import.kind(), IngestionOriginKind::Import);
+        assert_eq!(repair.kind(), IngestionOriginKind::Repair);
+        assert!(live.allows_kind(EventKind::CollectorStarted));
+        assert!(!import.allows_kind(EventKind::CollectorStarted));
+        assert!(import.allows_kind(EventKind::FilesystemChanged));
+        assert!(repair.allows_kind(EventKind::Gap));
+        assert!(!repair.allows_kind(EventKind::FilesystemChanged));
     }
 }

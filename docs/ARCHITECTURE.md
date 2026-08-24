@@ -16,6 +16,9 @@ source adapter
 bounded normalization
         │
         v
+      typed origin capability
+        │
+        v
 consent + capture policy (deny by default)
         │
         v
@@ -43,7 +46,7 @@ one.
 | Fixture adapter | Read synthetic JSONL and validate the event contract | Available |
 | Source adapters | Translate bounded platform observations into the envelope | Live adapters not shipped |
 | Policy gate | Apply consent, selected scope, exclusions, private-context rules, and redaction | Required before live capture |
-| Event envelope | Preserve source facts, provenance, evidence level, and schema version | Versioned contract is documented |
+| Event envelope | Preserve source facts, provenance, evidence level, and schema version | Versioned contract is documented; journal ingestion requires an origin capability |
 | Ingest writer | Bound memory, serialize writes, and commit event plus cursor atomically | Fixture path is the current exercise; live gate remains |
 | Journal | Store local event metadata and encrypted payloads when the production key path exists | SQLite/WAL design documented; Keychain production path not shipped |
 | Explain/export | Produce deterministic evidence-linked explanations and explicit exports | Fixture surface available |
@@ -56,9 +59,9 @@ one.
 3. The policy gate decides whether the observation is allowed, denied, or converted
    to a gap/status record. Policy decisions have a version and reason.
 4. An accepted event receives a stable identifier and provenance, including the
-   immutable policy profile ID and version. The envelope
-   retains what the source actually established, not what a caller wished it had
-   established.
+   immutable policy profile ID and version. A typed adapter-origin capability owns
+   the provenance version and collector namespace; the envelope retains what the
+   source actually established, not what a caller wished it had established.
 5. The bounded writer persists the event and source cursor in one transaction when
    the live path is enabled. Queue pressure and unrecoverable source history become
    visible gaps.
