@@ -51,7 +51,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0045 | Publish the supported macOS and permission test matrix | M0 | ready | foundation | platform-engineer | — | 0002 |
 | 0046 | Freeze semantic identifier and digest contracts | M0 | done | foundation | security-auditor | — | 0004, 0006 |
 | 0047 | Define program outcomes and the release evidence register | M0 | done | foundation | tech-lead | — | 0001, 0004 |
-| 0048 | Pin the reproducible developer and fixture toolchain | M0 | ready | foundation | devops-engineer | — | 0003, 0006 |
+| 0048 | Pin the reproducible developer and fixture toolchain | M0 | done | foundation | devops-engineer | — | 0003, 0006 |
 | 0049 | Make ingestion origin an explicit capability | M1 | ready | storage | security-auditor | 0010 | 0004, 0006 |
 | 0050 | Introduce semantic wrappers for retained fields | M1 | ready | foundation | implementation-engineer | — | 0004, 0006 |
 | 0051 | Version and migrate capture-policy documents | M1 | ready | privacy | architect | 0007 | 0004, 0006 |
