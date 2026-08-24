@@ -17,23 +17,27 @@ part of another change.
 
 ## Local setup
 
-Install Rust 1.88 or newer:
+Install the pinned Rust toolchain and its checked-in components:
 
 ~~~sh
-rustup toolchain install 1.88.0
-rustup default 1.88.0
+rustup toolchain install --profile minimal --component clippy --component rustfmt 1.88.0
+rustc +1.88.0 --version --verbose
+cargo +1.88.0 --version
 ~~~
 
 Run the checks locally:
 
 ~~~sh
-cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-targets --all-features
+cargo +1.88.0 fmt --all -- --check
+cargo +1.88.0 clippy --locked --all-targets --all-features -- -D warnings
+cargo +1.88.0 test --locked --all-targets --all-features
 python3 scripts/roadmap.py check
+python3 scripts/reproducibility.py check
+python3 scripts/fixture-manifest.py check
 python3 -m unittest discover -s tests -p 'test_roadmap.py' -v
 python3 scripts/roadmap.py index > /tmp/ghostrace-roadmap-index.md
 diff -u .forge/tasks/README.md /tmp/ghostrace-roadmap-index.md
+scripts/reproducibility-test.sh
 ~~~
 
 The fixture demo must not require a network connection or macOS privacy permission.

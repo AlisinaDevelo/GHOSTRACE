@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "generator": {
+    "version": "ghostrace-fixture-manifest-v1",
+    "seed": "ghostrace-fixture-seed-v1",
+    "algorithm": "sha256(seed) for manifest binding; no runtime randomness",
+    "command": "python3 scripts/fixture-manifest.py check"
+  },
+  "fixtures": [
+    {
+      "path": "fixtures/causal-chain.jsonl",
+      "format": "jsonl",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "22c4e9df8520cbd5b14b343ea2f6c5cca3bcdf0de34433384f6e069b7984bdc8",
+      "bytes": 4740
+    },
+    {
+      "path": "tests/fixtures/privacy-regression-v1.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "9c83a4c94be3498980f396c265958bf3eee7978edad9f94547fbaa4e46e72bde",
+      "bytes": 607
+    },
+    {
+      "path": "tests/fixtures/support-matrix-v1.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "4e7583fb843a1faac177ea14d6a7f6e4e61363178228fbf6a1c60858bbd0c462",
+      "bytes": 8044
+    }
+  ],
+  "privacy": {
+    "synthetic_only": true,
+    "user_data_included": false,
+    "network_required": false
+  }
+}
