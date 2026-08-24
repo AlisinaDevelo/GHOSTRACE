@@ -15,7 +15,9 @@ use uuid::Uuid;
 use crate::{
     crypto::{decrypt_payload, encrypt_payload, KeyProvider, SharedKeyProvider},
     error::GhostraceError,
-    model::{EventEnvelope, EventSource, Evidence, EVENT_SCHEMA_VERSION},
+    model::{
+        EventEnvelope, EventSource, Evidence, IngestionOrigin, OriginBinding, EVENT_SCHEMA_VERSION,
+    },
     policy::PolicyProfile,
 };
 
@@ -137,10 +139,11 @@ impl Journal {
 
     pub fn ingest(
         &self,
+        origin: &IngestionOrigin,
         event: &EventEnvelope,
         policy: &PolicyProfile,
     ) -> Result<u64, GhostraceError> {
-        Ok(self.ingest_batch(std::slice::from_ref(event), policy)?[0])
+        Ok(self.ingest_batch(origin, std::slice::from_ref(event), policy)?[0])
     }
 
     /// Inserts accepted events and cursor progress in one SQLite transaction.
@@ -148,11 +151,13 @@ impl Journal {
     /// batch; a missing parent is rejected before commit.
     pub fn ingest_batch(
         &self,
+        origin: &IngestionOrigin,
         events: &[EventEnvelope],
         policy: &PolicyProfile,
     ) -> Result<Vec<u64>, GhostraceError> {
         let mut ids = HashSet::with_capacity(events.len());
         for event in events {
+            origin.validate_event(event)?;
             event.validate()?;
             policy.authorize(event)?;
             if !ids.insert(event.event_id) {
@@ -286,9 +291,9 @@ fn insert_events(
                 event.ingested_at.to_rfc3339(),
                 event.source.to_string(),
                 event.kind.to_string(),
-                event.collector_instance,
+                event.collector_instance(),
                 event.source_cursor,
-                event.provenance_version,
+                event.provenance_version(),
                 event.policy_profile_id,
                 event.policy_profile_version,
                 serde_json::to_string(&event.evidence)?,
@@ -305,7 +310,7 @@ fn insert_events(
                      updated_at=excluded.updated_at",
                 params![
                     event.source.to_string(),
-                    event.collector_instance,
+                    event.collector_instance(),
                     cursor,
                     event.ingested_at.to_rfc3339()
                 ],
@@ -377,7 +382,8 @@ fn decode_stored(
         raw.parent_event_id.map(|id| Uuid::parse_str(&id)).transpose().map_err(|_| {
             GhostraceError::InvalidEvent("stored parent_event_id is invalid".to_owned())
         })?;
-    let event = EventEnvelope::new(
+    let event = EventEnvelope::from_parts(
+        EVENT_SCHEMA_VERSION,
         event_id,
         observed_at,
         ingested_at,
@@ -391,7 +397,9 @@ fn decode_stored(
         raw.policy_profile_version,
         evidence,
         parent_event_id,
-    )?;
+        OriginBinding::Stored,
+    );
+    event.validate()?;
     Ok(StoredEvent { ingest_seq: raw.ingest_seq, event })
 }
 
@@ -429,9 +437,9 @@ fn associated_data(event: &EventEnvelope) -> Result<Vec<u8>, GhostraceError> {
         ingested_at: &ingested_at,
         source: &source,
         kind: &kind,
-        collector_instance: &event.collector_instance,
+        collector_instance: event.collector_instance(),
         source_cursor: event.source_cursor.as_deref(),
-        provenance_version: &event.provenance_version,
+        provenance_version: event.provenance_version(),
         policy_profile_id: &event.policy_profile_id,
         policy_profile_version: event.policy_profile_version,
         evidence: &evidence,

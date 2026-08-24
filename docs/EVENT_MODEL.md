@@ -27,6 +27,30 @@ ordering, UTF-8 byte limits, and other invariants JSON Schema cannot express
 portably. A structural or semantic breaking change creates a new schema version and migration
 rule; consumers must not guess at unknown fields.
 
+## Ingestion origin capabilities
+
+An event's `source` says what the observation describes; it does not grant a caller
+permission to assert that provenance. The journal therefore requires an
+`IngestionOrigin` capability for every `ingest` and `ingest_batch` call. The capability
+owns the provenance version and collector-instance namespace instead of accepting those
+values as caller-supplied strings.
+
+The four origin paths are deliberately separate:
+
+| Origin | Construction boundary | Allowed event classes |
+| --- | --- | --- |
+| Fixture | Public `IngestionOrigin::fixture()` path | All normalized fixture event kinds, including lifecycle and gap/status records |
+| Live | In-crate collector adapter | All live normalized event kinds, with a `live-` instance and `live-v1` provenance |
+| Import | In-crate import adapter | Normalized observations and status records; imported lifecycle assertions are refused |
+| Repair | In-crate recovery adapter | Gap, policy-blocked-summary, and source-error records only |
+
+Live, import, and repair capabilities carry a private token. Events constructed in
+memory retain that token outside the wire format, so deserializing a fixture never
+creates a live capability binding. The fixture path accepts deserialized envelopes only
+when their provenance remains `fixture-v1` and their collector instance remains in the
+`fixture-` namespace. A caller cannot relabel a fixture as a live collector through the
+generic journal API.
+
 ## Semantic identifier and digest contract
 
 Event v1 does not accept arbitrary metadata in identifier-shaped fields. The

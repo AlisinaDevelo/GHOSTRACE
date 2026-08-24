@@ -94,6 +94,10 @@ quality. A gap is a first-class record. Explanations cite the observations they 
 and state when the source cannot establish completeness. See
 [Architecture](docs/ARCHITECTURE.md) and [Event model](docs/EVENT_MODEL.md).
 
+Journal ingestion also requires a typed adapter-origin capability. Fixture, live,
+import, and repair paths own separate provenance namespaces and allowed event classes;
+deserializing a fixture cannot grant a live-collector capability.
+
 ## Trust contract
 
 GHOSTRACE is designed around a narrow local boundary:
