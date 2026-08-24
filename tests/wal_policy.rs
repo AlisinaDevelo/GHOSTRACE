@@ -1,6 +1,7 @@
 use std::{
     fs,
     path::PathBuf,
+    process::Command,
     sync::mpsc,
     thread,
     time::{Duration, Instant},
@@ -10,6 +11,7 @@ use ghostrace::{
     ingest_fixture, CheckpointMode, DeterministicKeyProvider, GhostraceError, Journal,
     PolicyProfile, WalPolicy,
 };
+use rusqlite::OptionalExtension;
 use tempfile::tempdir;
 
 fn fixture_path() -> PathBuf {
@@ -128,6 +130,8 @@ fn database_snapshot_rejects_sidecars_and_reopens_after_truncate_checkpoint() {
     let sidecar = directory.path().join("invalid.sqlite3-wal");
     let error = journal.backup_snapshot(&sidecar).expect_err("sidecar backup");
     assert!(matches!(error, GhostraceError::SidecarBackupRefused));
+    let shutdown = journal.shutdown().expect("bounded shutdown checkpoint");
+    assert!(shutdown.within_policy());
 }
 
 #[test]
@@ -165,4 +169,56 @@ fn invalid_policy_and_in_memory_boundaries_fail_closed() {
         journal.backup_snapshot("/tmp/ghostrace-invalid-memory-backup.sqlite3"),
         Err(GhostraceError::BackupUnavailable)
     ));
+}
+
+#[test]
+fn abrupt_child_exit_recovers_without_uncommitted_schema_or_unbounded_wal() {
+    if std::env::var_os("GHOSTRACE_WAL_CRASH_CHILD").is_some() {
+        let path = std::env::var("GHOSTRACE_WAL_CRASH_PATH").expect("crash path");
+        let connection = rusqlite::Connection::open(path).expect("child open");
+        connection
+            .execute_batch(
+                "BEGIN IMMEDIATE;
+                 CREATE TABLE crash_marker(uncommitted INTEGER NOT NULL);",
+            )
+            .expect("uncommitted transaction");
+        std::process::exit(137);
+    }
+
+    let directory = private_directory();
+    let path = directory.path().join("journal.sqlite3");
+    let journal = Journal::open_fixture_with_policy(
+        &path,
+        DeterministicKeyProvider::from_seed("wal-policy-crash"),
+        policy(64 * 1024, 500),
+    )
+    .expect("open journal");
+    let child = Command::new(std::env::current_exe().expect("test executable"))
+        .arg("--exact")
+        .arg("abrupt_child_exit_recovers_without_uncommitted_schema_or_unbounded_wal")
+        .arg("--nocapture")
+        .env("GHOSTRACE_WAL_CRASH_CHILD", "1")
+        .env("GHOSTRACE_WAL_CRASH_PATH", &path)
+        .status()
+        .expect("spawn abrupt child");
+    assert!(!child.success(), "child must terminate before committing");
+    drop(journal);
+
+    let reopened = Journal::open_fixture_with_policy(
+        &path,
+        DeterministicKeyProvider::from_seed("wal-policy-crash"),
+        policy(64 * 1024, 500),
+    )
+    .expect("reopen after abrupt child exit");
+    assert!(reopened.shutdown().expect("recovery checkpoint").within_policy());
+    let connection = rusqlite::Connection::open(&path).expect("inspect recovered database");
+    let marker: Option<String> = connection
+        .query_row(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'crash_marker'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .expect("inspect schema");
+    assert!(marker.is_none(), "uncommitted table survived abrupt exit");
 }

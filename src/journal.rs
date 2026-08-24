@@ -227,6 +227,13 @@ impl Journal {
         Ok(report)
     }
 
+    /// Perform the bounded shutdown checkpoint. Callers that keep the journal
+    /// open may use `checkpoint` directly; shutdown always requests truncation
+    /// so a clean close does not leave an unbounded sidecar behind.
+    pub fn shutdown(&self) -> Result<WalCheckpointReport, GhostraceError> {
+        self.checkpoint(CheckpointMode::Truncate)
+    }
+
     /// Execute a read-only transaction on a separate connection for a
     /// file-backed journal. The transaction is rolled back when its elapsed
     /// lifetime exceeds the configured reader limit so it cannot pin the WAL.
