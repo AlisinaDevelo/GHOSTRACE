@@ -151,7 +151,12 @@ fn write_jsonl<T: Serialize>(writer: &mut impl Write, value: &T) -> Result<(), G
 fn build_manifest(events: &[StoredEvent]) -> ExportManifest {
     let policy_profiles = events
         .iter()
-        .map(|stored| (stored.event.policy_profile_id.clone(), stored.event.policy_profile_version))
+        .map(|stored| {
+            (
+                stored.event.policy_profile_id.as_str().to_owned(),
+                stored.event.policy_profile_version,
+            )
+        })
         .collect::<BTreeSet<_>>()
         .into_iter()
         .map(|(id, version)| ExportPolicyProfile { id, version })
@@ -163,7 +168,7 @@ fn build_manifest(events: &[StoredEvent]) -> ExportManifest {
                 Some(ExportGap {
                     event_id: stored.event.event_id,
                     source: *source,
-                    reason_code: reason_code.clone(),
+                    reason_code: reason_code.as_str().to_owned(),
                     dropped_count: *dropped_count,
                 })
             }

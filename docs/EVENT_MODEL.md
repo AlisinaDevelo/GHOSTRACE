@@ -73,8 +73,10 @@ echo the candidate value.
 
 The JSON Schema uses the same patterns and bounds as Rust validation. `EventEnvelope::new`
 and envelope deserialization are the acceptance constructors; payloads are accepted only
-after the envelope invokes the same semantic checks. The M1 wrapper task can strengthen
-the Rust API to distinct newtypes without changing these wire encodings.
+after the envelope invokes the same semantic checks. The M1 semantic wrappers now expose
+distinct fallible constructors for these retained values. Serde uses those same
+constructors, so a value cannot enter a payload through a deserialization shortcut, and
+the wrappers serialize back to the unchanged string wire encoding.
 
 ## Evidence levels
 

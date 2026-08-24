@@ -16,7 +16,8 @@ use crate::{
     crypto::{decrypt_payload, encrypt_payload, KeyProvider, SharedKeyProvider},
     error::GhostraceError,
     model::{
-        EventEnvelope, EventSource, Evidence, IngestionOrigin, OriginBinding, EVENT_SCHEMA_VERSION,
+        CollectorInstanceId, EventEnvelope, EventSource, Evidence, IngestionOrigin, OriginBinding,
+        PolicyProfileId, ProvenanceVersion, SourceCursor, EVENT_SCHEMA_VERSION,
     },
     policy::PolicyProfile,
 };
@@ -292,9 +293,9 @@ fn insert_events(
                 event.source.to_string(),
                 event.kind.to_string(),
                 event.collector_instance(),
-                event.source_cursor,
+                event.source_cursor(),
                 event.provenance_version(),
-                event.policy_profile_id,
+                event.policy_profile_id.as_str(),
                 event.policy_profile_version,
                 serde_json::to_string(&event.evidence)?,
                 event.parent_event_id.map(|id| id.to_string()),
@@ -302,7 +303,7 @@ fn insert_events(
             ],
         )?;
         let sequence = transaction.last_insert_rowid();
-        if let Some(cursor) = &event.source_cursor {
+        if let Some(cursor) = event.source_cursor() {
             transaction.execute(
                 "INSERT INTO cursors(source, collector_instance, source_cursor, updated_at)
                  VALUES (?1, ?2, ?3, ?4)
@@ -382,6 +383,10 @@ fn decode_stored(
         raw.parent_event_id.map(|id| Uuid::parse_str(&id)).transpose().map_err(|_| {
             GhostraceError::InvalidEvent("stored parent_event_id is invalid".to_owned())
         })?;
+    let collector_instance = CollectorInstanceId::try_from(raw.collector_instance)?;
+    let source_cursor = raw.source_cursor.map(SourceCursor::try_from).transpose()?;
+    let provenance_version = ProvenanceVersion::try_from(raw.provenance_version)?;
+    let policy_profile_id = PolicyProfileId::try_from(raw.policy_profile_id)?;
     let event = EventEnvelope::from_parts(
         EVENT_SCHEMA_VERSION,
         event_id,
@@ -390,10 +395,10 @@ fn decode_stored(
         source,
         kind,
         payload,
-        raw.collector_instance,
-        raw.source_cursor,
-        raw.provenance_version,
-        raw.policy_profile_id,
+        collector_instance,
+        source_cursor,
+        provenance_version,
+        policy_profile_id,
         raw.policy_profile_version,
         evidence,
         parent_event_id,
@@ -438,9 +443,9 @@ fn associated_data(event: &EventEnvelope) -> Result<Vec<u8>, GhostraceError> {
         source: &source,
         kind: &kind,
         collector_instance: event.collector_instance(),
-        source_cursor: event.source_cursor.as_deref(),
+        source_cursor: event.source_cursor(),
         provenance_version: event.provenance_version(),
-        policy_profile_id: &event.policy_profile_id,
+        policy_profile_id: event.policy_profile_id.as_str(),
         policy_profile_version: event.policy_profile_version,
         evidence: &evidence,
         parent_event_id: parent_event_id.as_deref(),
