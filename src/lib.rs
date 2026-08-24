@@ -16,6 +16,7 @@ pub mod keychain;
 pub mod model;
 pub mod policy;
 pub(crate) mod storage;
+pub mod wal;
 
 pub use consent::{ConsentReceipt, ConsentState, ConsentStateMachine, ConsentTransitionKind};
 pub use crypto::{decrypt_payload, encrypt_payload, DeterministicKeyProvider, KeyProvider};
@@ -25,7 +26,7 @@ pub use export::{
     export_fixture, export_journal, ExportManifest, ExportPolicyProfile, EXPORT_VERSION,
 };
 pub use fixture::{ingest_fixture, read_fixture, FixtureIngestReport};
-pub use journal::{Journal, StoredEvent};
+pub use journal::{BackupReceipt, Journal, StoredEvent};
 #[cfg(target_os = "macos")]
 pub use keychain::{MacOsKeychainProvider, JOURNAL_KEYCHAIN_ACCOUNT, JOURNAL_KEYCHAIN_SERVICE};
 pub use model::{
@@ -48,6 +49,7 @@ pub use policy::{
     PolicyHistory, PolicyMigration, PolicyMigrationOutcome, PolicyOutcome, PolicyProfile,
     PolicyReason, POLICY_DOCUMENT_SCHEMA_VERSION,
 };
+pub use wal::{CheckpointMode, WalCheckpointReport, WalPolicy};
 
 pub const EVENT_SCHEMA_JSON: &str = include_str!("../schemas/event-envelope-v1.json");
 pub const POLICY_DOCUMENT_SCHEMA_JSON: &str = include_str!("../schemas/policy-document-v1.json");

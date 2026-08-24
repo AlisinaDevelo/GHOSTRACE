@@ -1,7 +1,7 @@
 ---
 id: 0058
 title: Define WAL, SHM, checkpoint, and reader policy
-status: backlog
+status: review
 agent: database-expert
 model: human
 release: M1
@@ -27,4 +27,9 @@ Bound WAL growth and sidecar exposure while preserving one-writer and read-only 
 SQLite WAL permits concurrent readers but one writer, can grow under long readers, and is not suitable for network filesystems.
 
 ## Notes
-Planned in the 2026–2031 GHOSTRACE program. Completion requires the acceptance evidence above; issue closure alone is not evidence.
+Implementation is under review in the 0058 pull request. The file-backed Journal now
+applies an explicit WAL policy, reports passive/truncate checkpoint frames and
+sidecar bytes, bounds read-only snapshot lifetimes, and copies only a checkpointed
+database for backups. The source-device pipe and the required merged-main rerun are
+retained in `docs/evidence/0058-wal-policy.md`; the task remains `review` until the
+merged-main receipt is appended.

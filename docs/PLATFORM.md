@@ -32,6 +32,12 @@ modes, parent traversal, and path-component replacement fail closed. These check
 storage invariants, not a substitute for the future signed/notarized distribution
 and Keychain entitlement gates.
 
+File-backed journals use the WAL policy in [ADR 0003](adr/0003-sqlite-wal-active-journal.md):
+bounded busy waits and read snapshots, automatic checkpoints, and an observed sidecar
+limit. A long reader or over-limit WAL produces a bounded refusal. Database snapshots
+are made only after a truncate checkpoint and never by copying a `-wal` or `-shm`
+sidecar independently.
+
 ## Permission boundary
 
 The baseline does not require root, Full Disk Access, Accessibility, or Automation.

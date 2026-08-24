@@ -90,6 +90,13 @@ symlink, hard-link substitution, non-regular file, unsafe mode, or parent replac
 These checks reduce local path-confusion risk but cannot prevent a privileged process,
 filesystem snapshot, crash dump, or a user from copying an explicit export.
 
+The active WAL has an explicit privacy and resource policy: automatic checkpoints,
+bounded busy waits, a maximum read-transaction lifetime, and a maximum sidecar size.
+Passive checkpoints report remaining frames and refuse when the configured bound is
+not met. A database snapshot requires a truncate checkpoint and copies only the
+database file; `-wal`, `-shm`, rollback-journal, temporary, and backup sidecars are
+never accepted as standalone backups.
+
 Export is an explicit user action. The CLI refuses to overwrite an existing
 destination without --force. An export may contain sensitive plaintext and is the
 user's responsibility once written outside the protected journal directory.

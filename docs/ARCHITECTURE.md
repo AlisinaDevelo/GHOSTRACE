@@ -101,7 +101,11 @@ The active journal is planned as one local SQLite database in WAL mode with one
 writer and read-only readers. WAL improves reader/writer concurrency, but it is not
 an encryption boundary and it does not make a source complete. SQLite metadata,
 temporary files, backups, and operating-system filesystem behavior remain part of
-the threat model. See [ADR 0003](adr/0003-sqlite-wal-active-journal.md).
+the threat model. The file-backed implementation applies the explicit policy in
+[ADR 0003](adr/0003-sqlite-wal-active-journal.md): bounded busy waits and reader
+snapshots, observable passive/truncate checkpoints, and refusal when remaining
+frames or sidecar bytes exceed the configured limit. A database snapshot is made
+only after a truncate checkpoint and never by copying a `-wal` or `-shm` file.
 
 Production sensitive payloads require authenticated encryption with a macOS Keychain
 backing key. That key path is not represented as shipped live-capture capability in
@@ -128,7 +132,10 @@ opens the path. Every committed file-backed ingest rechecks the database and any
 sidecars, so a mode or inode change becomes a bounded error rather than an implicit
 write to a different location. Exports use the same regular-file, ownership, link,
 and `0600` contract; a forced export can repair the mode of a single-link regular
-file but never replaces a symlink or hard link.
+file but never replaces a symlink or hard link. WAL and SHM sidecars are checked
+after every file-backed write; they are not independent backups. The backup helper
+first runs a truncate checkpoint and copies only the database file, refusing a
+sidecar destination.
 
 ## Explanation boundary
 
