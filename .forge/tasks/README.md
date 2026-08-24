@@ -48,7 +48,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0042 | Evaluate optional Endpoint Security actor attribution | M6 | backlog | release-scale | maintainer | — | 0017, 0019, 0037, 0124 |
 | 0043 | Build the prohibited-data privacy regression corpus | M0 | done | privacy | test-engineer | 0005 | 0004, 0006 |
 | 0044 | Enforce an offline network-denial CI lane | M0 | done | privacy | security-auditor | 0005 | 0003, 0004 |
-| 0045 | Publish the supported macOS and permission test matrix | M0 | ready | foundation | platform-engineer | — | 0002 |
+| 0045 | Publish the supported macOS and permission test matrix | M0 | done | foundation | platform-engineer | — | 0002 |
 | 0046 | Freeze semantic identifier and digest contracts | M0 | done | foundation | security-auditor | — | 0004, 0006 |
 | 0047 | Define program outcomes and the release evidence register | M0 | done | foundation | tech-lead | — | 0001, 0004 |
 | 0048 | Pin the reproducible developer and fixture toolchain | M0 | done | foundation | devops-engineer | — | 0003, 0006 |
