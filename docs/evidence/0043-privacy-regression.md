@@ -3,7 +3,8 @@
 Artifact IDs: `GHOSTRACE-0043-PRIVACY-CORPUS-V1`,
 `GHOSTRACE-0043-PREMERGE-AFC0E3B`, `GHOSTRACE-0043-MERGED-AC7B4CC`,
 `GHOSTRACE-0043-LOCAL-PIPELINE-98420EE`, `GHOSTRACE-0043-LOCAL-AUDIT`,
-`GHOSTRACE-0043-LOCAL-DENY`, and `GHOSTRACE-0043-LOCAL-NETWORK`.
+`GHOSTRACE-0043-LOCAL-DENY`, `GHOSTRACE-0043-LOCAL-NETWORK`, and
+`GHOSTRACE-0043-MERGED-LOCAL-20260824`.
 
 This is the retained target-device record for the prohibited-data regression
 corpus. The same reproduction has been rerun against merged `main`; the roadmap
@@ -100,3 +101,18 @@ policy tools were installed into task-scoped temporary paths and passed; their
 logs and digests are recorded above. No hardware is required for this task.
 The corresponding GitHub issue must link these artifacts, logs, digests,
 limitations, and the merged commit before closure.
+
+## Latest merged-main device rerun
+
+The complete local pipe was rerun against merged `main` commit
+`b0442e91cdfd449f59bdc762ea550346ffd18a0b` on the same MacBook Pro M1 using
+macOS 26.6.2 arm64, Rust/Cargo 1.88.0, and no GitHub Actions evidence. The
+retained log is `/tmp/ghostrace-main-device-corrected-20260824-095638.log` with
+SHA-256 `560548b20f1ccf23467cb4595f949d769a3cd7cc6a1105470d49a13462cba279`.
+
+The run passed formatting, debug and release all-target/feature tests (19 each),
+the focused privacy corpus, Clippy, actionlint, roadmap validation and 23 Python
+roadmap tests, generated-index parity, schema/demo/export, export overwrite
+refusal and `--force` recovery, and explicit live-capture refusal. `cargo-audit`
+and `cargo-deny` were not installed on this device and are recorded as
+unavailable rather than replaced by CI claims.

@@ -66,6 +66,17 @@ CI runs formatting, Clippy, tests on macOS and Linux, the MSRV check, dependency
 review, advisory checks, and license/source policy checks. A maintainer may request
 additional platform or privacy evidence.
 
+## Completion evidence contract
+
+An issue is not complete because CI is green. Before closure, the pull request and issue must
+link every acceptance criterion to a retained evidence or artifact ID, record the exact commit,
+device, OS, architecture, and toolchain, and include the relevant happy-path, negative/privacy,
+failure, recovery, and resource checks performed on the target device. The change must be pushed,
+reviewed, and merged to protected `main`; the same reproduction must then be rerun against the
+merged SHA. Record logs, measurements, artifact digests, limitations, and the merged SHA. If
+required hardware or a platform surface is unavailable, record an explicit blocked/no-go result;
+do not substitute a CI result.
+
 ## Reporting security issues
 
 Do not open a public issue for a vulnerability. Follow [SECURITY.md](SECURITY.md).
