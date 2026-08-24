@@ -60,10 +60,10 @@ retained log is `/tmp/ghostrace-0045-full.VoSZPU/pipeline.log` with SHA-256
 
 ## Required rerun record
 
-After this branch is reviewed and merged, rerun the exact matrix test and full
-device pipe against the merged `main` SHA, then append the merged SHA, log,
-commands, artifact digests, limitations, and final decision here.
-No issue closure is valid before that post-merge rerun.
+The original implementation was reviewed and merged, and the exact matrix test
+and full device pipe were rerun against the then-current merged `main` SHA below.
+The continuation rerun after later GHOSTRACE merges is retained in the next
+section so this task remains anchored to the current protected-main state.
 
 ## Post-merge device rerun
 
@@ -86,3 +86,26 @@ log is `/tmp/ghostrace-0045-merged-full.cKsI9X/pipeline.log` with SHA-256
 Decision: the support-matrix implementation is reproducible and green on the merged
 main commit for the verified macOS 26 arm64 row. The macOS 15 floor and Intel row remain
 explicit release-gate limitations, not claims of device coverage.
+
+## Current-main continuation rerun
+
+The protected main branch subsequently gained the consent, policy-decision, and
+data-protection Keychain slices. To keep this task's evidence current, the complete
+device pipe was rerun against `cdb04cdaa4156360b60122d23bf23566bda60d9d` on the same
+target device.
+
+- Device: MacBook Pro 17,1, Apple M1, 8 GB, arm64
+- OS: macOS 26.6.2 (25G83)
+- Toolchain: Rust/Cargo 1.88.0
+- Sanitized log: `/private/tmp/ghostrace-0045-current-main-final-20260824.log`
+- Log SHA-256: `73b41b037c85bc55b5589105eadaa7634bf846103bfcab424b52d0e30ff4b230`
+- Contract SHA-256: `4e7583fb843a1faac177ea14d6a7f6e4e61363178228fbf6a1c60858bbd0c462`
+
+The zero-exit local pipe passed locked offline metadata, formatting, debug and
+release all-target/all-feature suites, doctests, support-matrix tests, privacy
+regression, vertical slice (including the macOS Keychain refusal path), Clippy,
+reproducibility, the sandboxed offline-network canary, docs, ShellCheck,
+actionlint, roadmap, fixture, reproducibility, task-digest, and diff checks.
+`cargo-audit` and `cargo-deny` remain unavailable on this device; no hosted result
+is substituted. The final decision is unchanged: macOS 26 arm64 is verified on
+this device; macOS 15 and Intel remain explicit no-go/unverified release gates.
