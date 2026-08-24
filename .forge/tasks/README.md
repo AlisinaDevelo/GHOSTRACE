@@ -61,7 +61,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0055 | Specify key rotation, recovery, and destruction | M1 | backlog | storage | security-auditor | 0008 | 0054 |
 | 0056 | Test locked-session and background key behavior | M1 | backlog | storage | test-engineer | 0008 | 0054 |
 | 0057 | Harden persistent journal path creation | M1 | done | storage | security-auditor | 0009 | 0003, 0004 |
-| 0058 | Define WAL, SHM, checkpoint, and reader policy | M1 | review | storage | database-expert | 0009 | 0057 |
+| 0058 | Define WAL, SHM, checkpoint, and reader policy | M1 | done | storage | database-expert | 0009 | 0057 |
 | 0059 | Checksum migrations and refuse unsafe downgrade | M1 | backlog | storage | database-expert | 0009 | 0006, 0057 |
 | 0060 | Specify bounded writer queue and acknowledgement semantics | M1 | backlog | storage | concurrency-specialist | 0010 | 0049, 0051, 0057 |
 | 0061 | Enforce cursor monotonicity and idempotent replay | M1 | backlog | storage | concurrency-specialist | 0010 | 0059, 0060 |
