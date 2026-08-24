@@ -82,6 +82,14 @@ metadata even when payloads are encrypted. The production design therefore treat
 the key, plaintext buffers, export destination, and temporary files as separate
 assets.
 
+The file-backed path boundary is fail-closed: the journal directory is created and
+verified as user-owned mode `0700`; the database and SQLite sidecars are verified as
+user-owned, single-link regular files mode `0600`; and exports and temporary output
+files are forced to mode `0600`. No-follow opens and identity rechecks reject a
+symlink, hard-link substitution, non-regular file, unsafe mode, or parent replacement.
+These checks reduce local path-confusion risk but cannot prevent a privileged process,
+filesystem snapshot, crash dump, or a user from copying an explicit export.
+
 Export is an explicit user action. The CLI refuses to overwrite an existing
 destination without --force. An export may contain sensitive plaintext and is the
 user's responsibility once written outside the protected journal directory.

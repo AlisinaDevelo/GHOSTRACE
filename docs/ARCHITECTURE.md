@@ -115,6 +115,21 @@ and the data-protection requirement are checked before returning key bytes, so a
 unsigned CLI, locked session, duplicate item, or malformed item fails closed without
 falling back to the legacy file keychain.
 
+### Persistent path boundary
+
+The fixture file-backed journal now exercises the production path boundary. Its
+containing directory is created one component at a time with mode `0700`; existing
+components are checked for directory type and current-user ownership, and an
+attacker-controlled symlink, parent replacement, or `..` traversal is refused. The
+database and SQLite sidecars (`-wal`, `-shm`, rollback journal, temporary, and backup
+artifacts) must be regular, current-user-owned, single-link files with mode `0600`.
+The database open uses no-follow flags plus identity checks before and after SQLite
+opens the path. Every committed file-backed ingest rechecks the database and any
+sidecars, so a mode or inode change becomes a bounded error rather than an implicit
+write to a different location. Exports use the same regular-file, ownership, link,
+and `0600` contract; a forced export can repair the mode of a single-link regular
+file but never replaces a symlink or hard link.
+
 ## Explanation boundary
 
 The explanation layer is deterministic and evidence-linked. It may describe a

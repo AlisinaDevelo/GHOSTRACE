@@ -2,7 +2,6 @@
 
 use std::{
     collections::BTreeSet,
-    fs,
     io::{BufWriter, Write},
     path::{Path, PathBuf},
 };
@@ -18,6 +17,7 @@ use crate::{
     journal::{Journal, StoredEvent},
     model::{EventKind, EventPayload, EventSource, GapPayload, EVENT_SCHEMA_VERSION},
     policy::PolicyProfile,
+    storage,
 };
 
 pub const EXPORT_VERSION: u32 = 1;
@@ -78,20 +78,22 @@ pub fn export_journal(
     force: bool,
 ) -> Result<ExportManifest, GhostraceError> {
     let output_path = output_path.as_ref();
-    if output_path.exists() && !force {
+    let output_exists = if force {
+        storage::validate_existing_artifact_for_overwrite(output_path)?
+    } else {
+        storage::validate_existing_artifact(output_path)?
+    };
+    if output_exists && !force {
         return Err(GhostraceError::ExportExists(output_path.to_path_buf()));
     }
     let parent = output_path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    if parent != Path::new(".") {
-        fs::create_dir_all(parent)
-            .map_err(|source| GhostraceError::Io { path: parent.to_path_buf(), source })?;
-    }
+    storage::ensure_artifact_parent(parent)?;
     let mut temporary = NamedTempFile::new_in(parent)
         .map_err(|source| GhostraceError::Io { path: parent.to_path_buf(), source })?;
-    set_output_permissions(temporary.path())?;
+    storage::set_private_file_permissions(temporary.path())?;
 
     let events = journal.events()?;
     let manifest = build_manifest(&events);
@@ -135,7 +137,7 @@ pub fn export_journal(
             }
         }
     }
-    set_output_permissions(output_path)?;
+    storage::set_private_file_permissions(output_path)?;
     Ok(manifest)
 }
 
@@ -198,14 +200,4 @@ fn build_manifest(events: &[StoredEvent]) -> ExportManifest {
         collector_status,
         gaps: gap_records,
     }
-}
-
-fn set_output_permissions(path: &Path) -> Result<(), GhostraceError> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-            .map_err(|source| GhostraceError::Io { path: path.to_path_buf(), source })?;
-    }
-    Ok(())
 }

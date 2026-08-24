@@ -36,6 +36,9 @@ uuid = { version = "1.10", features = ["serde", "v4"] }
 [dev-dependencies]
 jsonschema = { version = "0.50", default-features = false }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = { version = "3.7.0", default-features = false, features = ["OSX_10_15"] }
 

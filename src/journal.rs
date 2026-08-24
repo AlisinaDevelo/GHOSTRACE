@@ -2,13 +2,12 @@
 
 use std::{
     collections::HashSet,
-    fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -20,6 +19,7 @@ use crate::{
         PolicyProfileId, ProvenanceVersion, SourceCursor, EVENT_SCHEMA_VERSION,
     },
     policy::PolicyProfile,
+    storage,
 };
 
 const MIGRATION: &str = include_str!("../migrations/0001_init.sql");
@@ -52,9 +52,9 @@ impl Journal {
         Self::in_memory(provider)
     }
 
-    /// Opens a file-backed journal for synthetic fixture and migration tests.
-    /// This is not a production persistence API; live storage remains disabled
-    /// until a Keychain-backed provider is available.
+    /// Opens a file-backed journal through the hardened local path boundary.
+    /// Live collection remains disabled, but path creation is held to the same
+    /// ownership, mode, no-follow, and sidecar checks required by production.
     pub fn open_fixture<P, K>(path: P, provider: K) -> Result<Self, GhostraceError>
     where
         P: AsRef<Path>,
@@ -68,20 +68,7 @@ impl Journal {
         P: AsRef<Path>,
     {
         let path = path.as_ref().to_path_buf();
-        if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
-            let parent_preexisted = parent.exists();
-            fs::create_dir_all(parent)
-                .map_err(|source| GhostraceError::Io { path: parent.to_path_buf(), source })?;
-            if !parent_preexisted {
-                set_directory_permissions(parent)?;
-            }
-            verify_directory_permissions(parent)?;
-        }
-        let connection = Connection::open_with_flags(
-            &path,
-            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
-        )?;
-        set_file_permissions(&path)?;
+        let connection = storage::open_database(&path)?;
         Self::from_connection(connection, provider, Some(path))
     }
 
@@ -99,6 +86,9 @@ impl Journal {
     ) -> Result<Self, GhostraceError> {
         configure_connection(&connection, path.is_some())?;
         connection.execute_batch(MIGRATION)?;
+        if let Some(path) = path.as_deref() {
+            storage::verify_database_artifacts(path)?;
+        }
         Ok(Self { conn: Arc::new(Mutex::new(connection)), key_provider: provider, path })
     }
 
@@ -173,6 +163,9 @@ impl Journal {
         record_policy_profile(&transaction, policy)?;
         let sequences = insert_events(&transaction, events, self.key_provider.as_ref())?;
         transaction.commit()?;
+        if let Some(path) = self.path.as_deref() {
+            storage::verify_database_artifacts(path)?;
+        }
         Ok(sequences)
     }
 
@@ -497,40 +490,5 @@ fn configure_connection(connection: &Connection, file_backed: bool) -> Result<()
         connection.pragma_update(None, "journal_mode", "WAL")?;
     }
     connection.pragma_update(None, "synchronous", "FULL")?;
-    Ok(())
-}
-
-fn set_directory_permissions(path: &Path) -> Result<(), GhostraceError> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-            .map_err(|source| GhostraceError::Io { path: path.to_path_buf(), source })?;
-    }
-    Ok(())
-}
-
-fn verify_directory_permissions(path: &Path) -> Result<(), GhostraceError> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let permissions = fs::metadata(path)
-            .map_err(|source| GhostraceError::Io { path: path.to_path_buf(), source })?
-            .permissions()
-            .mode();
-        if permissions & 0o077 != 0 {
-            return Err(GhostraceError::InsecurePermissions(path.to_path_buf()));
-        }
-    }
-    Ok(())
-}
-
-fn set_file_permissions(path: &Path) -> Result<(), GhostraceError> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-            .map_err(|source| GhostraceError::Io { path: path.to_path_buf(), source })?;
-    }
     Ok(())
 }
