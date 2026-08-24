@@ -107,6 +107,14 @@ Production sensitive payloads require authenticated encryption with a macOS Keyc
 backing key. That key path is not represented as shipped live-capture capability in
 the current headstart. Missing keys or failed authentication must fail closed.
 
+The macOS key provider uses only the data-protection Keychain generic-password path:
+non-synchronizable items, `WhenUnlockedThisDeviceOnly` access control, and an explicit
+service/account identity. The default app has no access-group entitlement; a signed
+helper may use one only when its bundle entitlement matches. Login-session availability
+and the data-protection requirement are checked before returning key bytes, so an
+unsigned CLI, locked session, duplicate item, or malformed item fails closed without
+falling back to the legacy file keychain.
+
 ## Explanation boundary
 
 The explanation layer is deterministic and evidence-linked. It may describe a

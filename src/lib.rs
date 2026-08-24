@@ -11,6 +11,8 @@ pub mod explain;
 pub mod export;
 pub mod fixture;
 pub mod journal;
+#[cfg(target_os = "macos")]
+pub mod keychain;
 pub mod model;
 pub mod policy;
 
@@ -23,6 +25,8 @@ pub use export::{
 };
 pub use fixture::{ingest_fixture, read_fixture, FixtureIngestReport};
 pub use journal::{Journal, StoredEvent};
+#[cfg(target_os = "macos")]
+pub use keychain::{MacOsKeychainProvider, JOURNAL_KEYCHAIN_ACCOUNT, JOURNAL_KEYCHAIN_SERVICE};
 pub use model::{
     AppChange, ApplicationId, BookmarkChange, BookmarkId, BranchName,
     BrowserBookmarkChangedPayload, BrowserName, BrowserNavigationPayload, BrowserUrl,
