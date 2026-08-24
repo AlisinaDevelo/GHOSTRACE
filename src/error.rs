@@ -89,6 +89,26 @@ pub enum GhostraceError {
 
     #[error("migration error: {0}")]
     Migration(String),
+
+    #[error("invalid WAL policy: {0}")]
+    InvalidWalPolicy(String),
+
+    #[error(
+        "WAL checkpoint refused with {frames_remaining} uncheckpointed frame(s) and {wal_bytes} bytes; limit is {max_wal_bytes} bytes"
+    )]
+    WalCheckpointRefused { frames_remaining: u64, wal_bytes: u64, max_wal_bytes: u64 },
+
+    #[error("read snapshot exceeded its {max_ms}ms limit ({elapsed_ms}ms)")]
+    LongReader { elapsed_ms: u64, max_ms: u64 },
+
+    #[error("database snapshots are unavailable for an in-memory journal")]
+    BackupUnavailable,
+
+    #[error("database snapshot destination already exists")]
+    BackupExists,
+
+    #[error("a SQLite WAL or SHM sidecar cannot be used as an independent backup")]
+    SidecarBackupRefused,
 }
 
 /// Errors from payload encryption and authenticated decryption.

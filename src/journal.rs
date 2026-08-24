@@ -4,6 +4,7 @@ use std::{
     collections::HashSet,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
+    time::Instant,
 };
 
 use chrono::{DateTime, Utc};
@@ -20,6 +21,7 @@ use crate::{
     },
     policy::PolicyProfile,
     storage,
+    wal::{CheckpointMode, WalCheckpointReport, WalPolicy},
 };
 
 const MIGRATION: &str = include_str!("../migrations/0001_init.sql");
@@ -30,11 +32,20 @@ pub struct StoredEvent {
     pub event: EventEnvelope,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BackupReceipt {
+    pub bytes: u64,
+    pub wal_bytes: u64,
+    pub frames_in_wal: u64,
+    pub frames_checkpointed: u64,
+}
+
 #[derive(Clone)]
 pub struct Journal {
     conn: Arc<Mutex<Connection>>,
     key_provider: SharedKeyProvider,
     path: Option<PathBuf>,
+    wal_policy: WalPolicy,
 }
 
 impl Journal {
@@ -60,40 +71,76 @@ impl Journal {
         P: AsRef<Path>,
         K: KeyProvider + 'static,
     {
-        Self::open_with_provider(path, Arc::new(provider))
+        Self::open_fixture_with_policy(path, provider, WalPolicy::default())
     }
 
-    fn open_with_provider<P>(path: P, provider: SharedKeyProvider) -> Result<Self, GhostraceError>
+    pub fn open_fixture_with_policy<P, K>(
+        path: P,
+        provider: K,
+        wal_policy: WalPolicy,
+    ) -> Result<Self, GhostraceError>
+    where
+        P: AsRef<Path>,
+        K: KeyProvider + 'static,
+    {
+        Self::open_with_provider(path, Arc::new(provider), wal_policy)
+    }
+
+    fn open_with_provider<P>(
+        path: P,
+        provider: SharedKeyProvider,
+        wal_policy: WalPolicy,
+    ) -> Result<Self, GhostraceError>
     where
         P: AsRef<Path>,
     {
         let path = path.as_ref().to_path_buf();
         let connection = storage::open_database(&path)?;
-        Self::from_connection(connection, provider, Some(path))
+        Self::from_connection(connection, provider, Some(path), wal_policy)
     }
 
     pub fn in_memory<K>(provider: K) -> Result<Self, GhostraceError>
     where
         K: KeyProvider + 'static,
     {
-        Self::from_connection(Connection::open_in_memory()?, Arc::new(provider), None)
+        Self::in_memory_with_policy(provider, WalPolicy::default())
+    }
+
+    pub fn in_memory_with_policy<K>(
+        provider: K,
+        wal_policy: WalPolicy,
+    ) -> Result<Self, GhostraceError>
+    where
+        K: KeyProvider + 'static,
+    {
+        Self::from_connection(Connection::open_in_memory()?, Arc::new(provider), None, wal_policy)
     }
 
     fn from_connection(
         connection: Connection,
         provider: SharedKeyProvider,
         path: Option<PathBuf>,
+        wal_policy: WalPolicy,
     ) -> Result<Self, GhostraceError> {
-        configure_connection(&connection, path.is_some())?;
+        configure_connection(&connection, path.is_some(), wal_policy)?;
         connection.execute_batch(MIGRATION)?;
         if let Some(path) = path.as_deref() {
             storage::verify_database_artifacts(path)?;
         }
-        Ok(Self { conn: Arc::new(Mutex::new(connection)), key_provider: provider, path })
+        Ok(Self {
+            conn: Arc::new(Mutex::new(connection)),
+            key_provider: provider,
+            path,
+            wal_policy,
+        })
     }
 
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
+    }
+
+    pub fn wal_policy(&self) -> WalPolicy {
+        self.wal_policy
     }
 
     /// Returns the SQLite mode.  File-backed journals should report `wal`; an
@@ -126,6 +173,106 @@ impl Journal {
     pub fn schema_version_count(&self) -> Result<u64, GhostraceError> {
         let connection = self.lock_connection()?;
         Ok(connection.query_row("SELECT COUNT(*) FROM schema_versions", [], |row| row.get(0))?)
+    }
+
+    pub fn wal_autocheckpoint_pages(&self) -> Result<u64, GhostraceError> {
+        let connection = self.lock_connection()?;
+        Ok(connection.query_row("PRAGMA wal_autocheckpoint", [], |row| row.get(0))?)
+    }
+
+    pub fn busy_timeout_ms(&self) -> Result<u64, GhostraceError> {
+        let connection = self.lock_connection()?;
+        Ok(connection.query_row("PRAGMA busy_timeout", [], |row| row.get(0))?)
+    }
+
+    pub fn journal_size_limit_bytes(&self) -> Result<u64, GhostraceError> {
+        let connection = self.lock_connection()?;
+        let value: i64 = connection.query_row("PRAGMA journal_size_limit", [], |row| row.get(0))?;
+        Ok(value.max(0) as u64)
+    }
+
+    /// Run a bounded checkpoint and return the SQLite frame counts plus the
+    /// observed `-wal` sidecar size. A checkpoint that cannot bring the WAL
+    /// back under policy is an actionable refusal, not a silent best effort.
+    pub fn checkpoint(&self, mode: CheckpointMode) -> Result<WalCheckpointReport, GhostraceError> {
+        let Some(path) = self.path.as_deref() else {
+            return Ok(WalCheckpointReport::memory(mode, self.wal_policy.max_wal_bytes));
+        };
+        let connection = self.lock_connection()?;
+        let (busy, frames_in_wal, frames_checkpointed): (i64, i64, i64) = connection.query_row(
+            &format!("PRAGMA wal_checkpoint({})", mode.pragma_name()),
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        let wal_bytes = storage::wal_size_bytes(path)?;
+        storage::verify_database_artifacts(path)?;
+        let frames_in_wal = frames_in_wal.max(0) as u64;
+        let frames_checkpointed = frames_checkpointed.max(0) as u64;
+        let report = WalCheckpointReport {
+            mode,
+            busy: busy != 0,
+            frames_in_wal,
+            frames_checkpointed,
+            frames_remaining: frames_in_wal.saturating_sub(frames_checkpointed),
+            wal_bytes,
+            max_wal_bytes: self.wal_policy.max_wal_bytes,
+        };
+        if report.wal_bytes > report.max_wal_bytes || report.frames_remaining > 0 {
+            return Err(GhostraceError::WalCheckpointRefused {
+                frames_remaining: report.frames_remaining,
+                wal_bytes: report.wal_bytes,
+                max_wal_bytes: report.max_wal_bytes,
+            });
+        }
+        Ok(report)
+    }
+
+    /// Execute a read-only transaction on a separate connection for a
+    /// file-backed journal. The transaction is rolled back when its elapsed
+    /// lifetime exceeds the configured reader limit so it cannot pin the WAL.
+    pub fn with_read_snapshot<T, F>(&self, reader: F) -> Result<T, GhostraceError>
+    where
+        F: FnOnce(&Connection) -> Result<T, GhostraceError>,
+    {
+        if let Some(path) = self.path.as_deref() {
+            let connection = storage::open_read_only_database(path)?;
+            configure_reader_connection(&connection, self.wal_policy)?;
+            return run_read_snapshot(&connection, self.wal_policy, reader);
+        }
+
+        let connection = self.lock_connection()?;
+        run_read_snapshot(&connection, self.wal_policy, reader)
+    }
+
+    /// Checkpoint the active WAL, then copy only the database file. A sidecar
+    /// path is rejected because it is not a valid independent SQLite backup.
+    pub fn backup_snapshot<P: AsRef<Path>>(
+        &self,
+        destination: P,
+    ) -> Result<BackupReceipt, GhostraceError> {
+        let Some(path) = self.path.as_deref() else {
+            return Err(GhostraceError::BackupUnavailable);
+        };
+        let connection = self.lock_connection()?;
+        let (busy, frames_in_wal, frames_checkpointed): (i64, i64, i64) =
+            connection.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?;
+        let wal_bytes = storage::wal_size_bytes(path)?;
+        storage::verify_database_artifacts(path)?;
+        let frames_in_wal = frames_in_wal.max(0) as u64;
+        let frames_checkpointed = frames_checkpointed.max(0) as u64;
+        let frames_remaining = frames_in_wal.saturating_sub(frames_checkpointed);
+        if busy != 0 || frames_remaining > 0 || wal_bytes > self.wal_policy.max_wal_bytes {
+            return Err(GhostraceError::WalCheckpointRefused {
+                frames_remaining,
+                wal_bytes,
+                max_wal_bytes: self.wal_policy.max_wal_bytes,
+            });
+        }
+        let destination = destination.as_ref();
+        let bytes = storage::copy_database_snapshot(path, destination)?;
+        Ok(BackupReceipt { bytes, wal_bytes, frames_in_wal, frames_checkpointed })
     }
 
     pub fn ingest(
@@ -484,11 +631,57 @@ fn parse_kind(value: &str) -> Result<crate::model::EventKind, GhostraceError> {
         .map_err(|_| GhostraceError::InvalidEvent("stored event kind is invalid".to_owned()))
 }
 
-fn configure_connection(connection: &Connection, file_backed: bool) -> Result<(), GhostraceError> {
+fn configure_connection(
+    connection: &Connection,
+    file_backed: bool,
+    wal_policy: WalPolicy,
+) -> Result<(), GhostraceError> {
+    wal_policy.validate()?;
     connection.pragma_update(None, "foreign_keys", "ON")?;
+    connection.busy_timeout(wal_policy.busy_timeout())?;
+    connection.pragma_update(None, "wal_autocheckpoint", wal_policy.autocheckpoint_pages)?;
+    connection.pragma_update(None, "journal_size_limit", wal_policy.max_wal_bytes as i64)?;
     if file_backed {
         connection.pragma_update(None, "journal_mode", "WAL")?;
     }
     connection.pragma_update(None, "synchronous", "FULL")?;
     Ok(())
+}
+
+fn configure_reader_connection(
+    connection: &Connection,
+    wal_policy: WalPolicy,
+) -> Result<(), GhostraceError> {
+    wal_policy.validate()?;
+    connection.pragma_update(None, "foreign_keys", "ON")?;
+    connection.busy_timeout(wal_policy.busy_timeout())?;
+    Ok(())
+}
+
+fn run_read_snapshot<T, F>(
+    connection: &Connection,
+    wal_policy: WalPolicy,
+    reader: F,
+) -> Result<T, GhostraceError>
+where
+    F: FnOnce(&Connection) -> Result<T, GhostraceError>,
+{
+    let started = Instant::now();
+    connection.execute_batch("BEGIN DEFERRED")?;
+    let result = reader(connection);
+    let elapsed_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    if elapsed_ms > wal_policy.max_reader_ms {
+        let _ = connection.execute_batch("ROLLBACK");
+        return Err(GhostraceError::LongReader { elapsed_ms, max_ms: wal_policy.max_reader_ms });
+    }
+    match result {
+        Ok(value) => {
+            connection.execute_batch("COMMIT")?;
+            Ok(value)
+        }
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            Err(error)
+        }
+    }
 }

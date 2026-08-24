@@ -55,6 +55,21 @@ pub(crate) fn open_database(path: &Path) -> Result<Connection, GhostraceError> {
     Ok(connection)
 }
 
+/// Open the current database as a read-only SQLite connection after the same
+/// sidecar and ownership checks used by the writer.
+pub(crate) fn open_read_only_database(path: &Path) -> Result<Connection, GhostraceError> {
+    verify_database_artifacts(path)?;
+    let mut options = OpenOptions::new();
+    options.read(true);
+    add_no_follow(&mut options);
+    let file = options.open(path).map_err(|error| secure_open_error(path, error))?;
+    verify_file_handle(path, &file)?;
+    drop(file);
+    let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    verify_database_artifacts(path)?;
+    Ok(connection)
+}
+
 /// Ensure the journal's database directory exists and is private to the
 /// current user.  Existing path components are never followed when they are
 /// symlinks; missing components are created one at a time with mode 0700.
@@ -137,6 +152,56 @@ pub(crate) fn verify_database_artifacts(path: &Path) -> Result<(), GhostraceErro
         }
     }
     Ok(())
+}
+
+pub(crate) fn wal_size_bytes(path: &Path) -> Result<u64, GhostraceError> {
+    let wal = sidecar_path(path, "-wal")?;
+    match fs::symlink_metadata(&wal) {
+        Ok(metadata) => {
+            verify_file_metadata(&wal, &metadata)?;
+            Ok(metadata.len())
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(0),
+        Err(error) => Err(io_error(&wal, error)),
+    }
+}
+
+/// Copy only a checkpointed database file.  SQLite WAL and SHM sidecars are
+/// never independent backups because they require their matching database and
+/// live reader state.
+pub(crate) fn copy_database_snapshot(
+    source: &Path,
+    destination: &Path,
+) -> Result<u64, GhostraceError> {
+    if is_sidecar_path(destination) {
+        return Err(GhostraceError::SidecarBackupRefused);
+    }
+    if source == destination {
+        return Err(GhostraceError::BackupExists);
+    }
+    let parent = parent_directory(destination)?;
+    ensure_private_directory(parent)?;
+    verify_database_artifacts(source)?;
+    verify_private_file(source)?;
+    if fs::symlink_metadata(destination).is_ok() {
+        return Err(GhostraceError::BackupExists);
+    }
+
+    let mut input_options = OpenOptions::new();
+    input_options.read(true);
+    add_no_follow(&mut input_options);
+    let mut input = input_options.open(source).map_err(|error| secure_open_error(source, error))?;
+    let mut output_options = OpenOptions::new();
+    output_options.write(true).create_new(true);
+    add_no_follow(&mut output_options);
+    let mut output =
+        output_options.open(destination).map_err(|error| secure_open_error(destination, error))?;
+    let bytes =
+        std::io::copy(&mut input, &mut output).map_err(|error| io_error(destination, error))?;
+    output.sync_all().map_err(|error| io_error(destination, error))?;
+    set_file_mode_handle(destination, &output)?;
+    verify_private_file(destination)?;
+    Ok(bytes)
 }
 
 fn open_database_file(path: &Path) -> Result<File, GhostraceError> {
@@ -308,6 +373,13 @@ fn parent_directory(path: &Path) -> Result<&Path, GhostraceError> {
 fn sidecar_path(path: &Path, suffix: &str) -> Result<PathBuf, GhostraceError> {
     let name = path.file_name().ok_or(GhostraceError::UnsafePath)?.to_string_lossy();
     Ok(path.with_file_name(format!("{name}{suffix}")))
+}
+
+fn is_sidecar_path(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    DATABASE_ARTIFACT_SUFFIXES.iter().any(|suffix| name.ends_with(suffix))
 }
 
 fn symlink_metadata(path: &Path) -> Result<Metadata, GhostraceError> {
