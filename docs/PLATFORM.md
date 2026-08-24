@@ -21,6 +21,17 @@ major-version/architecture rows, explicit unavailable-hardware no-go rows, and
 the required/optional/prohibited permissions plus observable refusal for every
 planned collector.
 
+## Journal file boundary
+
+The local journal directory is user-owned and exactly `0700`. Database, WAL, SHM,
+rollback-journal, temporary, backup, and explicit export files are regular,
+single-link, current-user-owned files with mode `0600`. Creation is component-wise,
+uses no-follow open flags, and rechecks parent and file identities around the SQLite
+open. Symlinks, non-regular files, hard-link anomalies, foreign ownership, unsafe
+modes, parent traversal, and path-component replacement fail closed. These checks are
+storage invariants, not a substitute for the future signed/notarized distribution
+and Keychain entitlement gates.
+
 ## Permission boundary
 
 The baseline does not require root, Full Disk Access, Accessibility, or Automation.

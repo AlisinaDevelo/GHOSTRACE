@@ -15,6 +15,7 @@ pub mod journal;
 pub mod keychain;
 pub mod model;
 pub mod policy;
+pub(crate) mod storage;
 
 pub use consent::{ConsentReceipt, ConsentState, ConsentStateMachine, ConsentTransitionKind};
 pub use crypto::{decrypt_payload, encrypt_payload, DeterministicKeyProvider, KeyProvider};

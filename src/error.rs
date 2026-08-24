@@ -45,6 +45,18 @@ pub enum GhostraceError {
     #[error("journal directory permissions are not private (expected no group/world access)")]
     InsecurePermissions(PathBuf),
 
+    #[error("journal path is unsafe")]
+    UnsafePath,
+
+    #[error("journal path changed during secure open")]
+    PathRace,
+
+    #[error("journal path owner is unexpected")]
+    UnexpectedOwner,
+
+    #[error("journal path has unexpected hard links")]
+    UnexpectedHardLinks,
+
     #[error("fixture event provenance is invalid")]
     FixtureProvenance,
 

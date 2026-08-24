@@ -869,6 +869,14 @@ fn export_refuses_overwrite_without_force_and_writes_manifest() {
     assert_eq!(fs::read_to_string(&output).expect("read"), "do not overwrite");
     let manifest = export_fixture(&fixture, &output, true).expect("force export");
     assert_eq!(manifest.export_version, 1);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&output).expect("export metadata").permissions().mode() & 0o777,
+            0o600
+        );
+    }
     assert_eq!(manifest.coverage.gap_count, 1);
     assert_eq!(
         manifest.policy_profiles,

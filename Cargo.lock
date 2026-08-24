@@ -502,6 +502,7 @@ dependencies = [
  "chrono",
  "clap",
  "jsonschema",
+ "libc",
  "rand_core",
  "rusqlite",
  "security-framework",
