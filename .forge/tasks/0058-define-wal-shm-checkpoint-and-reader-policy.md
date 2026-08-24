@@ -28,7 +28,9 @@ SQLite WAL permits concurrent readers but one writer, can grow under long reader
 
 ## Notes
 Implemented in PR #198 and merged to protected `main` at
-`c9fc5bc664e105b7a002c235f6ecdab3a3d05485`. The file-backed Journal applies an
+`c9fc5bc664e105b7a002c235f6ecdab3a3d05485`; the post-merge evidence receipt was
+reviewed and merged in PR #199 at
+`8fe25394554df29dd1f2e32a752e20841698c98e`. The file-backed Journal applies an
 explicit WAL policy, reports passive/truncate checkpoint frames and sidecar bytes,
 bounds read-only snapshot lifetimes, copies only a checkpointed database for
 backups, and recovers after an abrupt child exit. Source and merged-main device
