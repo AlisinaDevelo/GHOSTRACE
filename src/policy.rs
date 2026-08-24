@@ -160,7 +160,9 @@ impl PolicyProfile {
                 reason: PolicyReason::InvalidProfile.code().to_owned(),
             });
         }
-        if event.policy_profile_id != self.id || event.policy_profile_version != self.version {
+        if event.policy_profile_id.as_str() != self.id
+            || event.policy_profile_version != self.version
+        {
             return Err(GhostraceError::PolicyDenied {
                 reason: PolicyReason::PolicyProfileMismatch.code().to_owned(),
             });

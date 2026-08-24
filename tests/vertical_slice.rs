@@ -3,11 +3,13 @@ use std::{fs, path::PathBuf, process::Command};
 use chrono::{TimeZone, Utc};
 use ghostrace::{
     capture, decrypt_payload, encrypt_payload, explain, export_fixture, ingest_fixture, AppChange,
-    BookmarkChange, BrowserBookmarkChangedPayload, BrowserNavigationPayload,
-    DeterministicKeyProvider, EntryKind, EventEnvelope, EventKind, EventPayload, EventSource,
-    Evidence, ExportPolicyProfile, FileOperation, FilesystemChangedPayload,
-    FrontmostAppChangedPayload, IngestionOrigin, Journal, PathClass, PolicyDecision, PolicyProfile,
-    SanitizedUrl, ShellFinishedPayload, ShellStatus, SourceErrorPayload, EVENT_SCHEMA_JSON,
+    ApplicationId, BookmarkChange, BookmarkId, BranchName, BrowserBookmarkChangedPayload,
+    BrowserName, BrowserNavigationPayload, DeterministicKeyProvider, EntryKind, EventEnvelope,
+    EventKind, EventPayload, EventSource, Evidence, ExportPolicyProfile, FileOperation,
+    FilesystemChangedPayload, FolderId, FrontmostAppChangedPayload, GitObjectId, IngestionOrigin,
+    Journal, PathClass, PathDigest, PolicyDecision, PolicyProfile, ReasonCode, RepositoryId,
+    RootId, SanitizedUrl, SessionId, ShellFinishedPayload, ShellKind, ShellStatus, SourceCursor,
+    SourceErrorPayload, EVENT_SCHEMA_JSON,
 };
 use serde_json::json;
 use tempfile::tempdir;
@@ -25,6 +27,58 @@ fn make_private(path: &std::path::Path) {
     }
 }
 
+fn root(value: &str) -> RootId {
+    RootId::try_from(value).expect("root id")
+}
+
+fn app(value: &str) -> ApplicationId {
+    ApplicationId::try_from(value).expect("application id")
+}
+
+fn session(value: &str) -> SessionId {
+    SessionId::try_from(value).expect("session id")
+}
+
+fn shell(value: &str) -> ShellKind {
+    ShellKind::try_from(value).expect("shell kind")
+}
+
+fn repository(value: &str) -> RepositoryId {
+    RepositoryId::try_from(value).expect("repository id")
+}
+
+fn branch(value: &str) -> BranchName {
+    BranchName::try_from(value).expect("branch")
+}
+
+fn digest(value: &str) -> PathDigest {
+    PathDigest::try_from(value).expect("path digest")
+}
+
+fn object_id(value: &str) -> GitObjectId {
+    GitObjectId::try_from(value).expect("Git object ID")
+}
+
+fn browser(value: &str) -> BrowserName {
+    BrowserName::try_from(value).expect("browser")
+}
+
+fn bookmark(value: &str) -> BookmarkId {
+    BookmarkId::try_from(value).expect("bookmark")
+}
+
+fn folder(value: &str) -> FolderId {
+    FolderId::try_from(value).expect("folder")
+}
+
+fn reason(value: &str) -> ReasonCode {
+    ReasonCode::try_from(value).expect("reason code")
+}
+
+fn cursor(value: &str) -> SourceCursor {
+    SourceCursor::try_from(value).expect("source cursor")
+}
+
 fn filesystem_event(id: u128, parent_event_id: Option<Uuid>) -> EventEnvelope {
     let origin = IngestionOrigin::fixture_instance("fixture-fs").expect("fixture origin");
     EventEnvelope::new(
@@ -35,17 +89,16 @@ fn filesystem_event(id: u128, parent_event_id: Option<Uuid>) -> EventEnvelope {
         EventSource::Filesystem,
         EventKind::FilesystemChanged,
         EventPayload::FilesystemChanged(FilesystemChangedPayload {
-            root_id: "root-a".to_owned(),
+            root_id: root("root-a"),
             path_class: PathClass::WorkspaceRelative,
             operation: FileOperation::Modified,
             entry_kind: EntryKind::File,
-            path_digest: Some(
-                "sha256:abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd"
-                    .to_owned(),
-            ),
+            path_digest: Some(digest(
+                "sha256:abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+            )),
             size_bytes: Some(42),
         }),
-        Some(format!("cursor-{id}")),
+        Some(cursor(&format!("cursor-{id}"))),
         "fixture-default-v1",
         1,
         Evidence::Direct,
@@ -300,29 +353,8 @@ fn semantic_identifier_contract_rejects_paths_credentials_controls_and_ambiguous
         );
     }
 
-    let origin = IngestionOrigin::fixture_instance("fixture-fs").expect("fixture origin");
-    let constructor_error = EventEnvelope::new(
-        &origin,
-        Uuid::from_u128(90),
-        timestamp(1_735_689_600),
-        timestamp(1_735_689_600),
-        EventSource::Filesystem,
-        EventKind::FilesystemChanged,
-        EventPayload::FilesystemChanged(FilesystemChangedPayload {
-            root_id: "root-a".to_owned(),
-            path_class: PathClass::WorkspaceRelative,
-            operation: FileOperation::Modified,
-            entry_kind: EntryKind::File,
-            path_digest: Some("sha256:fixture-secret".to_owned()),
-            size_bytes: None,
-        }),
-        Some("cursor-0090".to_owned()),
-        "fixture-default-v1",
-        1,
-        Evidence::Direct,
-        None,
-    )
-    .expect_err("constructor must apply the digest contract");
+    let constructor_error = PathDigest::try_from("sha256:fixture-secret")
+        .expect_err("constructor must apply the digest contract");
     assert!(!constructor_error.to_string().contains("fixture-secret"));
 }
 
@@ -362,6 +394,44 @@ fn semantic_identifier_schema_and_rust_validation_stay_in_parity_at_boundaries()
 }
 
 #[test]
+fn semantic_wrappers_reject_mutations_before_serialization() {
+    let invalid_opaque = ["../root", "root-secret", "root/password", "root-\u{202e}1"];
+    for value in invalid_opaque {
+        assert!(RootId::try_from(value).is_err(), "constructed invalid root {value:?}");
+        assert!(serde_json::from_value::<RootId>(json!(value)).is_err());
+        assert!(RepositoryId::try_from(value).is_err());
+        assert!(SessionId::try_from(value).is_err());
+        assert!(ShellKind::try_from(value).is_err());
+        assert!(BrowserName::try_from(value).is_err());
+        assert!(BookmarkId::try_from(value).is_err());
+        assert!(FolderId::try_from(value).is_err());
+    }
+
+    let valid_root = root("root-a");
+    assert_eq!(serde_json::to_value(&valid_root).expect("serialize root"), json!("root-a"));
+    assert_eq!(valid_root.as_str(), "root-a");
+    assert_eq!(repository("repo-a").as_str(), "repo-a");
+    assert_eq!(object_id(&"a".repeat(40)).as_str(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    assert_eq!(session("session-a").as_str(), "session-a");
+    assert_eq!(shell("zsh").as_str(), "zsh");
+    assert_eq!(branch("feature/semantic-wrappers").as_str(), "feature/semantic-wrappers");
+    assert_eq!(browser("fixture-browser").as_str(), "fixture-browser");
+    assert_eq!(bookmark("bookmark-a").as_str(), "bookmark-a");
+    assert_eq!(folder("folder-a").as_str(), "folder-a");
+    assert_eq!(cursor("cursor-a").as_str(), "cursor-a");
+    assert_eq!(reason("fixture_source_error").as_str(), "fixture_source_error");
+
+    assert!(ApplicationId::try_from("com.example.secret").is_err());
+    assert!(BranchName::try_from("feature-secret").is_err());
+    assert!(PathDigest::try_from("sha256:short").is_err());
+    assert!(SourceCursor::try_from("cursor-secret").is_err());
+    assert!(ReasonCode::try_from("credential_exposed").is_err());
+    assert!(serde_json::from_value::<ApplicationId>(json!("com.example.secret")).is_err());
+    assert!(serde_json::from_value::<BranchName>(json!("feature-secret")).is_err());
+    assert!(serde_json::from_value::<ReasonCode>(json!("credential_exposed")).is_err());
+}
+
+#[test]
 fn fixture_and_event_size_limits_fail_closed() {
     let directory = tempdir().expect("tempdir");
     let fixture = directory.path().join("oversized.jsonl");
@@ -369,29 +439,7 @@ fn fixture_and_event_size_limits_fail_closed() {
         .expect("write oversized fixture");
     assert!(ghostrace::read_fixture(&fixture).is_err());
 
-    let origin = IngestionOrigin::fixture_instance("fixture-fs").expect("fixture origin");
-    let oversized = EventEnvelope::new(
-        &origin,
-        Uuid::from_u128(88),
-        timestamp(1_735_689_600),
-        timestamp(1_735_689_600),
-        EventSource::Filesystem,
-        EventKind::FilesystemChanged,
-        EventPayload::FilesystemChanged(FilesystemChangedPayload {
-            root_id: "root-a".to_owned(),
-            path_class: PathClass::WorkspaceRelative,
-            operation: FileOperation::Modified,
-            entry_kind: EntryKind::File,
-            path_digest: Some("x".repeat(ghostrace::model::MAX_EVENT_PAYLOAD_BYTES)),
-            size_bytes: None,
-        }),
-        None,
-        "fixture-default-v1",
-        1,
-        Evidence::Direct,
-        None,
-    );
-    assert!(oversized.is_err());
+    assert!(PathDigest::try_from("x".repeat(ghostrace::model::MAX_EVENT_PAYLOAD_BYTES)).is_err());
 }
 
 #[test]
@@ -469,7 +517,7 @@ fn published_json_schema_compiles_and_matches_fixture_envelopes() {
             EventSource::FrontmostApp,
             EventKind::FrontmostAppChanged,
             EventPayload::FrontmostAppChanged(FrontmostAppChangedPayload {
-                app_id: "com.example.fixture".to_owned(),
+                app_id: app("com.example.fixture"),
                 change: AppChange::Activated,
                 previous_app_id: None,
             }),
@@ -479,7 +527,7 @@ fn published_json_schema_compiles_and_matches_fixture_envelopes() {
             EventSource::Shell,
             EventKind::ShellFinished,
             EventPayload::ShellFinished(ShellFinishedPayload {
-                session_id: "session-schema".to_owned(),
+                session_id: session("session-schema"),
                 status: ShellStatus::Succeeded,
                 exit_code: Some(0),
                 duration_ms: 10,
@@ -490,8 +538,8 @@ fn published_json_schema_compiles_and_matches_fixture_envelopes() {
             EventSource::Browser,
             EventKind::BrowserBookmarkChanged,
             EventPayload::BrowserBookmarkChanged(BrowserBookmarkChangedPayload {
-                browser: "fixture-browser".to_owned(),
-                bookmark_id: "bookmark-schema".to_owned(),
+                browser: browser("fixture-browser"),
+                bookmark_id: bookmark("bookmark-schema"),
                 change: BookmarkChange::Created,
                 url: SanitizedUrl::parse("https://example.test/schema?discard=true").expect("URL"),
                 folder_id: None,
@@ -504,7 +552,7 @@ fn published_json_schema_compiles_and_matches_fixture_envelopes() {
             EventKind::SourceError,
             EventPayload::SourceError(SourceErrorPayload {
                 source: EventSource::Git,
-                reason_code: "fixture_source_error".to_owned(),
+                reason_code: reason("fixture_source_error"),
                 retryable: true,
             }),
         ),
