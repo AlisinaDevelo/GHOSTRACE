@@ -38,6 +38,13 @@ limit. A long reader or over-limit WAL produces a bounded refusal. Database snap
 are made only after a truncate checkpoint and never by copying a `-wal` or `-shm`
 sidecar independently.
 
+Before a journal is used, its embedded migration catalog is checked against the
+on-disk ledger. The ledger binds stable migration identifiers and SHA-256 SQL
+checksums to schema versions and tool versions. Upgrade steps are transactional;
+missing, changed, reordered, future, partial, and unsupported-downgrade states are
+explicit refusals. Crash recovery and database-only backup restore are part of the
+device evidence, not inferred from a successful CI build.
+
 ## Permission boundary
 
 The baseline does not require root, Full Disk Access, Accessibility, or Automation.

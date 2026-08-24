@@ -2,6 +2,7 @@
 
 use std::{
     collections::HashSet,
+    fmt::Write as _,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Instant,
@@ -10,6 +11,7 @@ use std::{
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
@@ -24,7 +26,29 @@ use crate::{
     wal::{CheckpointMode, WalCheckpointReport, WalPolicy},
 };
 
+const MIGRATION_LEDGER: &str = include_str!("../migrations/0000_migration_ledger.sql");
 const MIGRATION: &str = include_str!("../migrations/0001_init.sql");
+const MIGRATION_METADATA: &str = include_str!("../migrations/0002_journal_metadata.sql");
+const MIGRATION_TOOL_VERSION: &str = concat!("ghostrace/", env!("CARGO_PKG_VERSION"));
+const MIGRATION_MODE_KEY: &str = "mode";
+
+#[derive(Clone, Copy, Debug)]
+struct MigrationSpec {
+    id: &'static str,
+    version: u32,
+    schema_version: u32,
+    sql: &'static str,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct AppliedMigration {
+    pub migration_id: String,
+    pub version: u32,
+    pub checksum: String,
+    pub schema_version: u32,
+    pub tool_version: String,
+    pub applied_at: String,
+}
 
 #[derive(Debug, Clone)]
 pub struct StoredEvent {
@@ -122,8 +146,9 @@ impl Journal {
         path: Option<PathBuf>,
         wal_policy: WalPolicy,
     ) -> Result<Self, GhostraceError> {
+        let mut connection = connection;
         configure_connection(&connection, path.is_some(), wal_policy)?;
-        connection.execute_batch(MIGRATION)?;
+        run_migrations(&mut connection)?;
         if let Some(path) = path.as_deref() {
             storage::verify_database_artifacts(path)?;
         }
@@ -173,6 +198,16 @@ impl Journal {
     pub fn schema_version_count(&self) -> Result<u64, GhostraceError> {
         let connection = self.lock_connection()?;
         Ok(connection.query_row("SELECT COUNT(*) FROM schema_versions", [], |row| row.get(0))?)
+    }
+
+    pub fn schema_version(&self) -> Result<u32, GhostraceError> {
+        let connection = self.lock_connection()?;
+        read_user_version(&connection)
+    }
+
+    pub fn applied_migrations(&self) -> Result<Vec<AppliedMigration>, GhostraceError> {
+        let connection = self.lock_connection()?;
+        load_applied_migrations(&connection)
     }
 
     pub fn wal_autocheckpoint_pages(&self) -> Result<u64, GhostraceError> {
@@ -637,6 +672,349 @@ fn parse_kind(value: &str) -> Result<crate::model::EventKind, GhostraceError> {
     serde_json::from_str(&format!("\"{value}\""))
         .map_err(|_| GhostraceError::InvalidEvent("stored event kind is invalid".to_owned()))
 }
+
+fn migration_specs() -> [MigrationSpec; 3] {
+    [
+        MigrationSpec {
+            id: "0000_migration_ledger",
+            version: 0,
+            schema_version: 0,
+            sql: MIGRATION_LEDGER,
+        },
+        MigrationSpec { id: "0001_init", version: 1, schema_version: 1, sql: MIGRATION },
+        MigrationSpec {
+            id: "0002_journal_metadata",
+            version: 2,
+            schema_version: 2,
+            sql: MIGRATION_METADATA,
+        },
+    ]
+}
+
+fn migration_checksum(sql: &str) -> String {
+    let digest = Sha256::digest(sql.as_bytes());
+    let mut checksum = String::with_capacity(64);
+    for byte in digest {
+        write!(&mut checksum, "{byte:02x}").expect("writing to a string cannot fail");
+    }
+    checksum
+}
+
+fn run_migrations(connection: &mut Connection) -> Result<(), GhostraceError> {
+    // The ledger is validated before any event query or write is allowed. A
+    // missing tail is safe to apply; a gap, mutation, or schema ahead of the
+    // compiled catalog is never guessed at.
+    let specs = migration_specs();
+    initialize_migration_ledger(connection, &specs)?;
+
+    let mut records = load_applied_migrations(connection)?;
+    let applied_count = validate_applied_prefix(&records, &specs)?;
+    let latest_schema = specs.last().expect("migration catalog is non-empty").schema_version;
+    let user_version = read_user_version(connection)?;
+    let schema_versions = read_schema_versions(connection)?;
+    let schema_max = schema_versions.last().copied().unwrap_or(0);
+    if user_version > latest_schema || schema_max > latest_schema {
+        return Err(GhostraceError::FutureMigration { version: user_version.max(schema_max) });
+    }
+    let record_schema =
+        specs.get(applied_count.saturating_sub(1)).map(|spec| spec.schema_version).unwrap_or(0);
+    if user_version < record_schema || schema_max < record_schema {
+        return Err(GhostraceError::UnsupportedDowngrade {
+            recorded: record_schema,
+            database: user_version.min(schema_max),
+        });
+    }
+    if user_version > record_schema || schema_max > record_schema {
+        let next = specs.get(applied_count).map(|spec| spec.id).unwrap_or("unknown");
+        return Err(GhostraceError::PartialMigration { migration_id: next.to_owned() });
+    }
+
+    for spec in specs.iter().skip(applied_count) {
+        if schema_versions.contains(&spec.schema_version) || user_version >= spec.schema_version {
+            return Err(GhostraceError::PartialMigration { migration_id: spec.id.to_owned() });
+        }
+        apply_migration(connection, spec)?;
+        records = load_applied_migrations(connection)?;
+        validate_applied_prefix(&records, &specs)?;
+    }
+
+    validate_final_schema(connection, &specs)
+}
+
+fn initialize_migration_ledger(
+    connection: &mut Connection,
+    specs: &[MigrationSpec; 3],
+) -> Result<(), GhostraceError> {
+    let ledger_exists = table_exists(connection, "migration_records")?;
+    if !ledger_exists {
+        let legacy_candidate = table_exists(connection, "schema_versions")?;
+        let mode = if legacy_candidate { "legacy-candidate" } else { "new" };
+        let transaction = connection.transaction()?;
+        transaction.execute_batch(specs[0].sql)?;
+        insert_applied_migration(&transaction, &specs[0])?;
+        transaction.execute(
+            "INSERT INTO migration_state(state_key, state_value) VALUES (?1, ?2)",
+            params![MIGRATION_MODE_KEY, mode],
+        )?;
+        transaction.commit()?;
+        if legacy_candidate {
+            adopt_legacy_v1(connection, &specs[1])?;
+        }
+        return Ok(());
+    }
+
+    let mode = migration_state(connection)?;
+    if mode == "legacy-candidate" {
+        adopt_legacy_v1(connection, &specs[1])?;
+    } else if mode != "new" && mode != "legacy-v1" {
+        return Err(GhostraceError::MigrationLedger("unknown migration mode".to_owned()));
+    }
+    Ok(())
+}
+
+fn adopt_legacy_v1(
+    connection: &mut Connection,
+    spec: &MigrationSpec,
+) -> Result<(), GhostraceError> {
+    validate_legacy_v1(connection)?;
+    let records = load_applied_migrations(connection)?;
+    if records.len() != 1 || records[0].version != 0 {
+        return Err(GhostraceError::MigrationLedger(
+            "legacy adoption requires only the ledger bootstrap record".to_owned(),
+        ));
+    }
+    let transaction = connection.transaction()?;
+    transaction.execute_batch("PRAGMA user_version = 1")?;
+    insert_applied_migration(&transaction, spec)?;
+    transaction.execute(
+        "UPDATE migration_state SET state_value = ?1 WHERE state_key = ?2",
+        params!["legacy-v1", MIGRATION_MODE_KEY],
+    )?;
+    transaction.commit()?;
+    Ok(())
+}
+
+fn validate_legacy_v1(connection: &Connection) -> Result<(), GhostraceError> {
+    let versions = read_schema_versions(connection)?;
+    if versions != [1] {
+        return Err(GhostraceError::PartialMigration { migration_id: "0001_init".to_owned() });
+    }
+    for table in ["events", "cursors", "policy_metadata", "diagnostics"] {
+        if !table_exists(connection, table)? {
+            return Err(GhostraceError::PartialMigration { migration_id: "0001_init".to_owned() });
+        }
+    }
+    let user_version = read_user_version(connection)?;
+    if user_version > 1 {
+        return Err(GhostraceError::FutureMigration { version: user_version });
+    }
+    Ok(())
+}
+
+fn apply_migration(
+    connection: &mut Connection,
+    spec: &MigrationSpec,
+) -> Result<(), GhostraceError> {
+    let transaction = connection.transaction()?;
+    transaction.execute_batch(spec.sql)?;
+    maybe_crash_after_migration_sql(spec.id);
+    if spec.version > 0 {
+        transaction.execute(
+            "INSERT OR IGNORE INTO schema_versions(version, applied_at) VALUES (?1, ?2)",
+            params![spec.schema_version, Utc::now().to_rfc3339()],
+        )?;
+    }
+    transaction.execute_batch(&format!("PRAGMA user_version = {}", spec.schema_version))?;
+    insert_applied_migration(&transaction, spec)?;
+    transaction.commit()?;
+    Ok(())
+}
+
+fn insert_applied_migration(
+    transaction: &Transaction<'_>,
+    spec: &MigrationSpec,
+) -> Result<(), GhostraceError> {
+    transaction.execute(
+        "INSERT INTO migration_records(
+            migration_id, version, checksum, schema_version, tool_version, applied_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            spec.id,
+            spec.version,
+            migration_checksum(spec.sql),
+            spec.schema_version,
+            MIGRATION_TOOL_VERSION,
+            Utc::now().to_rfc3339(),
+        ],
+    )?;
+    Ok(())
+}
+
+fn validate_applied_prefix(
+    records: &[AppliedMigration],
+    specs: &[MigrationSpec; 3],
+) -> Result<usize, GhostraceError> {
+    for (index, record) in records.iter().enumerate() {
+        let Some(spec) = specs.get(index) else {
+            return Err(GhostraceError::FutureMigration { version: record.version });
+        };
+        if record.version > spec.version {
+            if record.version > specs.last().expect("migration catalog is non-empty").version {
+                return Err(GhostraceError::FutureMigration { version: record.version });
+            }
+            return Err(GhostraceError::MigrationRecordMissing {
+                migration_id: spec.id.to_owned(),
+            });
+        }
+        if record.version != spec.version || record.migration_id != spec.id {
+            return Err(GhostraceError::MigrationOrder {
+                expected: spec.version,
+                found: record.version,
+            });
+        }
+        if record.checksum != migration_checksum(spec.sql) {
+            return Err(GhostraceError::MigrationChecksumMismatch {
+                migration_id: spec.id.to_owned(),
+            });
+        }
+        if record.schema_version != spec.schema_version || record.tool_version.is_empty() {
+            return Err(GhostraceError::MigrationLedger(
+                "migration record metadata is inconsistent".to_owned(),
+            ));
+        }
+        if record.applied_at.is_empty() {
+            return Err(GhostraceError::MigrationLedger(
+                "migration record timestamp is empty".to_owned(),
+            ));
+        }
+    }
+    Ok(records.len())
+}
+
+fn validate_final_schema(
+    connection: &Connection,
+    specs: &[MigrationSpec; 3],
+) -> Result<(), GhostraceError> {
+    let records = load_applied_migrations(connection)?;
+    if records.len() != specs.len() {
+        let next = specs.get(records.len()).map(|spec| spec.id).unwrap_or("unknown");
+        return Err(GhostraceError::MigrationRecordMissing { migration_id: next.to_owned() });
+    }
+    validate_applied_prefix(&records, specs)?;
+    let expected_versions: Vec<u32> =
+        specs.iter().filter(|spec| spec.version > 0).map(|spec| spec.schema_version).collect();
+    if read_schema_versions(connection)? != expected_versions {
+        return Err(GhostraceError::MigrationLedger(
+            "schema version rows do not match applied migrations".to_owned(),
+        ));
+    }
+    let expected_schema = specs.last().expect("migration catalog is non-empty").schema_version;
+    let user_version = read_user_version(connection)?;
+    if user_version != expected_schema {
+        if user_version < expected_schema {
+            return Err(GhostraceError::UnsupportedDowngrade {
+                recorded: expected_schema,
+                database: user_version,
+            });
+        }
+        return Err(GhostraceError::FutureMigration { version: user_version });
+    }
+    let format: Option<String> = connection
+        .query_row(
+            "SELECT metadata_value FROM journal_metadata WHERE metadata_key = 'format'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if format.as_deref() != Some("ghostrace-journal-v1") {
+        return Err(GhostraceError::PartialMigration {
+            migration_id: "0002_journal_metadata".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn load_applied_migrations(
+    connection: &Connection,
+) -> Result<Vec<AppliedMigration>, GhostraceError> {
+    let mut statement = connection.prepare(
+        "SELECT migration_id, version, checksum, schema_version, tool_version, applied_at
+         FROM migration_records ORDER BY version ASC",
+    )?;
+    let mut rows = statement.query([])?;
+    let mut records = Vec::new();
+    while let Some(row) = rows.next()? {
+        let version = row.get::<_, i64>(1)?;
+        let schema_version = row.get::<_, i64>(3)?;
+        records.push(AppliedMigration {
+            migration_id: row.get(0)?,
+            version: u32::try_from(version).map_err(|_| {
+                GhostraceError::MigrationLedger("migration version is out of range".to_owned())
+            })?,
+            checksum: row.get(2)?,
+            schema_version: u32::try_from(schema_version).map_err(|_| {
+                GhostraceError::MigrationLedger("schema version is out of range".to_owned())
+            })?,
+            tool_version: row.get(4)?,
+            applied_at: row.get(5)?,
+        });
+    }
+    Ok(records)
+}
+
+fn migration_state(connection: &Connection) -> Result<String, GhostraceError> {
+    connection
+        .query_row(
+            "SELECT state_value FROM migration_state WHERE state_key = ?1",
+            params![MIGRATION_MODE_KEY],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or_else(|| GhostraceError::MigrationLedger("migration mode is missing".to_owned()))
+}
+
+fn table_exists(connection: &Connection, table: &str) -> Result<bool, GhostraceError> {
+    let exists: i64 = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        params![table],
+        |row| row.get(0),
+    )?;
+    Ok(exists != 0)
+}
+
+fn read_schema_versions(connection: &Connection) -> Result<Vec<u32>, GhostraceError> {
+    if !table_exists(connection, "schema_versions")? {
+        return Ok(Vec::new());
+    }
+    let mut statement =
+        connection.prepare("SELECT version FROM schema_versions ORDER BY version")?;
+    let mut rows = statement.query([])?;
+    let mut versions = Vec::new();
+    while let Some(row) = rows.next()? {
+        let version = row.get::<_, i64>(0)?;
+        versions.push(u32::try_from(version).map_err(|_| {
+            GhostraceError::MigrationLedger("schema version is out of range".to_owned())
+        })?);
+    }
+    Ok(versions)
+}
+
+fn read_user_version(connection: &Connection) -> Result<u32, GhostraceError> {
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    u32::try_from(version).map_err(|_| {
+        GhostraceError::MigrationLedger("SQLite user_version is out of range".to_owned())
+    })
+}
+
+#[cfg(debug_assertions)]
+fn maybe_crash_after_migration_sql(migration_id: &str) {
+    if std::env::var("GHOSTRACE_TEST_MIGRATION_CRASH").ok().as_deref() == Some(migration_id) {
+        std::process::abort();
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn maybe_crash_after_migration_sql(_migration_id: &str) {}
 
 fn configure_connection(
     connection: &Connection,

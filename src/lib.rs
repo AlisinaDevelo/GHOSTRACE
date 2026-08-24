@@ -26,7 +26,7 @@ pub use export::{
     export_fixture, export_journal, ExportManifest, ExportPolicyProfile, EXPORT_VERSION,
 };
 pub use fixture::{ingest_fixture, read_fixture, FixtureIngestReport};
-pub use journal::{BackupReceipt, Journal, StoredEvent};
+pub use journal::{AppliedMigration, BackupReceipt, Journal, StoredEvent};
 #[cfg(target_os = "macos")]
 pub use keychain::{MacOsKeychainProvider, JOURNAL_KEYCHAIN_ACCOUNT, JOURNAL_KEYCHAIN_SERVICE};
 pub use model::{

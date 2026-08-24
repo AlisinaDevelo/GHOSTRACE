@@ -90,6 +90,29 @@ pub enum GhostraceError {
     #[error("migration error: {0}")]
     Migration(String),
 
+    #[error("migration ledger is invalid: {0}")]
+    MigrationLedger(String),
+
+    #[error("migration checksum mismatch for {migration_id}")]
+    MigrationChecksumMismatch { migration_id: String },
+
+    #[error("migration record is missing for {migration_id}")]
+    MigrationRecordMissing { migration_id: String },
+
+    #[error("migration order is invalid: expected version {expected}, found {found}")]
+    MigrationOrder { expected: u32, found: u32 },
+
+    #[error("future migration version is unsupported: {version}")]
+    FutureMigration { version: u32 },
+
+    #[error(
+        "database downgrade is unsupported: recorded schema {recorded}, database schema {database}"
+    )]
+    UnsupportedDowngrade { recorded: u32, database: u32 },
+
+    #[error("migration {migration_id} is partially applied")]
+    PartialMigration { migration_id: String },
+
     #[error("invalid WAL policy: {0}")]
     InvalidWalPolicy(String),
 
