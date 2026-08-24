@@ -64,3 +64,25 @@ After this branch is reviewed and merged, rerun the exact matrix test and full
 device pipe against the merged `main` SHA, then append the merged SHA, log,
 commands, artifact digests, limitations, and final decision here.
 No issue closure is valid before that post-merge rerun.
+
+## Post-merge device rerun
+
+The exact pipe was rerun against the merged product commit
+`039db0e47ea943d892da78d218682c670251a55c` on the same target device. The retained
+log is `/tmp/ghostrace-0045-merged-full.cKsI9X/pipeline.log` with SHA-256
+`bcfb386927da3304c64dbaaa6d3e8422dc464c77aa0de4a3fd0a4a050c6104cc`.
+
+- Device, OS, architecture, and Rust/Cargo versions are unchanged from the source run.
+- Debug and release all-target/all-feature suites, focused support-matrix and privacy
+  tests, doctests, clippy (`-D warnings`), actionlint, shellcheck, the sandboxed
+  offline-network canary, roadmap/index parity, and the CLI demo/export/refusal checks
+  all passed.
+- The repeated CLI demo remained byte-identical and the unsafe capture path remained
+  refused by policy.
+- `cargo-audit` and `cargo-deny` remain unavailable locally; no hosted check is used as
+  a substitute.
+- The temporary verification worktree was removed after the receipt was captured.
+
+Decision: the support-matrix implementation is reproducible and green on the merged
+main commit for the verified macOS 26 arm64 row. The macOS 15 floor and Intel row remain
+explicit release-gate limitations, not claims of device coverage.
