@@ -1,6 +1,6 @@
 # Task 0058 evidence: WAL, SHM, checkpoint, and reader policy
 
-Status: review pending the protected-main rerun.
+Status: complete for the verified fixture file-backed WAL policy contract.
 
 Task 0058 makes the SQLite WAL boundary explicit for the local file-backed
 journal. It does not enable live collection, add a permission, add a network
