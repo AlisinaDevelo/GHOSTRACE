@@ -71,10 +71,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Linux pinned
+          - name: Linux stable
             os: ubuntu-latest
             toolchain: 1.88.0
-          - name: macOS pinned
+          - name: macOS stable
             os: macos-latest
             toolchain: 1.88.0
           - name: Linux MSRV
