@@ -51,6 +51,7 @@ fn wal_policy_is_applied_and_checkpoint_is_observable() {
     assert_eq!(journal.journal_size_limit_bytes().expect("journal limit"), 64 * 1024);
 
     let report = journal.checkpoint(CheckpointMode::Truncate).expect("checkpoint");
+    println!("WAL_POLICY_CHECKPOINT {report:?}");
     assert!(!report.busy);
     assert!(report.wal_bytes <= configured.max_wal_bytes);
 }
@@ -85,9 +86,11 @@ fn long_reader_is_refused_and_checkpoint_reports_remaining_frames() {
     let checkpoint = journal.checkpoint(CheckpointMode::Passive);
     match checkpoint {
         Err(GhostraceError::WalCheckpointRefused { frames_remaining, .. }) => {
+            println!("WAL_POLICY_STARVATION frames_remaining={frames_remaining}");
             assert!(frames_remaining > 0, "refusal must identify uncheckpointed frames");
         }
         Ok(report) => {
+            println!("WAL_POLICY_PASSIVE {report:?}");
             assert!(
                 report.frames_checkpointed < report.frames_in_wal
                     || report.wal_bytes <= configured.max_wal_bytes,
@@ -98,6 +101,7 @@ fn long_reader_is_refused_and_checkpoint_reports_remaining_frames() {
     }
 
     let reader_result = reader_thread.join().expect("reader thread");
+    println!("WAL_POLICY_READER_RESULT {reader_result:?}");
     assert!(matches!(reader_result, Err(GhostraceError::LongReader { .. })));
 }
 
@@ -131,6 +135,7 @@ fn database_snapshot_rejects_sidecars_and_reopens_after_truncate_checkpoint() {
     let error = journal.backup_snapshot(&sidecar).expect_err("sidecar backup");
     assert!(matches!(error, GhostraceError::SidecarBackupRefused));
     let shutdown = journal.shutdown().expect("bounded shutdown checkpoint");
+    println!("WAL_POLICY_SHUTDOWN {shutdown:?}");
     assert!(shutdown.within_policy());
 }
 
@@ -150,6 +155,7 @@ fn reader_limit_is_measured_from_begin_to_commit() {
         thread::sleep(Duration::from_millis(30));
         Ok(())
     });
+    println!("WAL_POLICY_LONG_READER {result:?}");
     assert!(matches!(result, Err(GhostraceError::LongReader { .. })));
     assert!(started.elapsed() >= Duration::from_millis(30));
 }
