@@ -18,6 +18,15 @@ Apply schema migrations from an empty database, enable foreign keys, and use dur
 transaction settings appropriate to the platform. Commit the event and its source
 cursor atomically. Acknowledgement occurs only after commit.
 
+The migration catalog is an ordered, embedded SQL set. Each applied step records a
+stable identifier, ordinal, SHA-256 checksum of the exact SQL, resulting schema
+version, tool version, and timestamp in the local migration ledger. The ledger and
+each migration step commit transactionally. A legacy v1 journal is adopted only
+after its expected tables and schema-version row are verified; it then upgrades to
+the current catalog. Missing, modified, reordered, future, partially applied, or
+downgraded state refuses normal startup. The current fixture catalog contains the
+ledger bootstrap, the original schema, and a journal-format metadata upgrade.
+
 Task 0058 makes the WAL contract explicit for the fixture file-backed journal. The
 default connection policy is:
 
@@ -59,6 +68,8 @@ Positive:
 - Event and cursor commit boundaries are explicit and testable.
 - Read-only explanation does not block the writer for ordinary queries.
 - Migrations and fixture tests can run on macOS and Linux.
+- A database backup preserves the migration ledger; restore does not bypass the
+  checksum or schema-version gate.
 
 Costs:
 

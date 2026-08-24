@@ -1,7 +1,7 @@
 ---
 id: 0059
 title: Checksum migrations and refuse unsafe downgrade
-status: backlog
+status: review
 agent: database-expert
 model: human
 release: M1
@@ -27,4 +27,10 @@ Make database evolution deterministic, tamper-evident, crash-safe, and explicit 
 A privacy-sensitive local journal must not guess how to open an unknown or partially migrated schema.
 
 ## Notes
-Planned in the 2026–2031 GHOSTRACE program. Completion requires the acceptance evidence above; issue closure alone is not evidence.
+Implementation is under review in the 0059 pull request. The journal now records
+ordered migration identifiers, SHA-256 SQL checksums, schema versions, tool
+versions, and transactional application timestamps. It upgrades the legacy v1
+fixture schema and refuses modified, missing, reordered, future, partial, and
+unsupported-downgrade state. Device crash, restore, and refusal evidence is being
+retained in `docs/evidence/0059-migration-ledger.md`; the task remains `review`
+until the merged-main rerun is appended.

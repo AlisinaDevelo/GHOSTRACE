@@ -98,8 +98,13 @@ representation.
 ## Storage boundary
 
 The active journal is planned as one local SQLite database in WAL mode with one
-writer and read-only readers. WAL improves reader/writer concurrency, but it is not
-an encryption boundary and it does not make a source complete. SQLite metadata,
+writer and read-only readers. Its ordered migration catalog records each SQL
+identifier, checksum, resulting schema version, tool version, and application time
+before the journal is considered open. A missing, modified, reordered, future,
+partially applied, or downgraded migration refuses startup; legacy v1 journals are
+adopted only after their expected schema is verified. WAL improves reader/writer
+concurrency, but it is not an encryption boundary and it does not make a source
+complete. SQLite metadata,
 temporary files, backups, and operating-system filesystem behavior remain part of
 the threat model. The file-backed implementation applies the explicit policy in
 [ADR 0003](adr/0003-sqlite-wal-active-journal.md): bounded busy waits and reader
