@@ -15,6 +15,7 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 echo "reproducibility: pinned inputs"
 python3 scripts/reproducibility.py check
 python3 scripts/fixture-manifest.py check
+python3 scripts/identity-audit.py check
 
 echo "reproducibility: rustfmt"
 cargo +1.88.0 fmt --all -- --check

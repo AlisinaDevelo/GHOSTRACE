@@ -151,7 +151,7 @@ docs/adr/            Immutable architecture decisions
 - [Evaluation](docs/EVALUATION.md) — correctness, privacy, and performance gates
 - [Reproducibility](docs/REPRODUCIBILITY.md) — pinned toolchain, fixture provenance, and clean-machine smoke
 - [Research](docs/RESEARCH.md) — landscape, differentiation, and primary sources
-- [Identity audit](docs/IDENTITY.md) — preliminary naming and namespace observations
+- [Identity gate](docs/IDENTITY.md) — qualified descriptor, release identifiers, and legal-review boundary
 - [Platform](docs/PLATFORM.md) — macOS boundary and permission policy
 - [Roadmap](docs/ROADMAP.md) — 160 tasks across M0 through M11, August 2026–December 2031
 - [ADR 0001](docs/adr/0001-local-only-minimized-capture.md) — local-only minimized capture

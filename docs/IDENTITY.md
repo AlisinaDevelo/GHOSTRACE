@@ -1,42 +1,82 @@
-# Project identity audit
+# Project identity gate
 
-This is a preliminary naming and namespace audit for the M0 headstart. It is not
-trademark, domain, corporate, legal, USPTO, or EUIPO clearance.
+Status: decision recorded on 2026-08-24. This document is a naming and
+namespace decision record, not trademark, domain, corporate, USPTO, EUIPO, or
+legal clearance. The machine-checkable source is
+[`planning/identity-gate.json`](../planning/identity-gate.json), and the retained
+acceptance evidence is
+[`docs/evidence/0041-identity-gate.md`](evidence/0041-identity-gate.md).
 
-## Working identity
+## Decision
 
-Use the qualified descriptor:
+Retain the qualified public descriptor:
 
 > **GHOSTRACE — local macOS causal event journal**
 
-The exact repository namespace is [AlisinaDevelo/GHOSTRACE](https://github.com/AlisinaDevelo/GHOSTRACE).
-The final binary, crate, application bundle, and domain keep-or-rename decision
-remains the M0 issue 0041 gate.
+The bare name has a material collision with the VUSec GhostRace speculative
+race-condition research project. This repository is unrelated and must not imply
+affiliation. The descriptor is kept for continuity, while all broadly distributed
+identifiers are selected with a journal qualifier:
 
-## Namespace observations
+| Surface | Selected release identifier |
+| --- | --- |
+| Binary | `ghostrace-journal` |
+| Crate | `ghostrace-journal` |
+| Homebrew formula | `ghostrace-journal` |
+| Application bundle | `GHOSTRACE Journal.app` |
+| Bundle / reverse-DNS identifier | `com.alisinadevelo.ghostrace.journal` |
 
-- VUSec already uses **GhostRace** for research on speculative race conditions. See
-  the [VUSec project page](https://www.vusec.net/projects/ghostrace/) and its
-  [public implementation repository](https://github.com/vusec/ghostrace). GHOSTRACE
-  is unrelated and must not imply affiliation.
-- The broader GhostTrace/GhostRace search namespace is crowded across projects,
-  products, and research. Search results are not evidence of ownership or
-  permission to use a name.
-- At the time of this preliminary audit, the exact GHOSTRACE query appeared
-  unoccupied in the [crates.io search](https://crates.io/search?q=ghostrace) and
-  [Homebrew formula lookup](https://formulae.brew.sh/formula/ghostrace). These
-  observations can change and are not a reservation.
+The current fixture-only development package remains `ghostrace` with publication
+disabled. Renaming the package, binary, formula, and bundle identifiers is a
+release-boundary task; it must happen before the first broadly distributed
+artifact, not after a registry or marketplace listing exists.
 
-## Usage rules until M0 resolution
+## What was observed
 
-- Keep the descriptor attached in public documentation and release planning.
-- Do not describe the project as VUSec GhostRace, use VUSec branding, or suggest a
-  technical relationship.
-- Do not claim trademark, domain, USPTO, EUIPO, or other legal clearance.
-- Keep Cargo package publication disabled until the crate and binary names pass this gate.
-- Re-run exact repository, crate, formula, package, and domain searches before a
-  public release or distribution listing.
-- Record the keep-or-rename decision and its evidence in the M0 issue 0041 record.
+- VUSec uses **GhostRace** for speculative race-condition research and publishes
+  the [public implementation](https://github.com/vusec/ghostrace) plus a
+  [project page](https://www.vusec.net/projects/ghostrace/). The distinction is
+  documented here and in the manifest; no VUSec branding is used.
+- GitHub repository search for `ghostrace` returned 73 repositories, including
+  `vusec/ghostrace`, `lunixbochs/ghostrace`, `chriz-3656/GHOSTRACE`, and this
+  repository. The repository name is therefore not unique.
+- The crates.io exact requests returned HTTP 403 under the provider's API/search
+  policy. This is recorded as unavailable evidence, not as “no crate.”
+- The exact Homebrew formula URL returned HTTP 404. npm exact search returned zero
+  objects; the exact PyPI project endpoint returned HTTP 404. None of those results
+  reserves a name or establishes legal availability.
+- RDAP returned registered records for `ghostrace.com` and `ghostrace.net`.
+  `ghostrace.org` had no RDAP record observed; `.dev`, `.app`, and `.io` lookups
+  were unavailable from the audit environment. No registrant identity is retained
+  and no domain availability claim is made.
+- Major web results include [GhostTrace forensic tools](https://github.com/Devzinh/GhostTrace),
+  [GhostTrace AI pentesting](https://ghosttrace.ai/), a
+  [reverse-engineering workbench](https://github.com/numaera/GhostTrace),
+  [GhostTrace LLC](https://ghosttrace.net/press), and a
+  [GhostRace game](https://lifealchemist.itch.io/ghostrace).
 
-The audit intentionally records uncertainty so a namespace collision is not
-mistaken for an approval.
+## Legal review boundary
+
+The official [USPTO trademark search](https://tmsearch.uspto.gov/search/) and
+[TSDR](https://tsdr.uspto.gov/) tools were queried for the exact `GHOSTRACE`
+wordmark; the observed result count was zero. The official
+[EUIPO search tools](https://www.euipo.europa.eu/en/search-ip) and
+[eSearch plus](https://euipo.europa.eu/eSearch/) were queried for the exact
+verbal element; the observed result count was zero. These are dated search
+observations, not opinions about confusing similarity, common-law rights,
+classification overlap, national records, or future filings.
+
+The legal state remains **not cleared**. Qualified trademark counsel must review
+the descriptor and identifiers before a public release, registry publication,
+domain purchase, or paid naming commitment. The exact searches must be rerun at
+each of those boundaries.
+
+## Usage rules
+
+- Keep the qualified descriptor attached in public documentation and release copy.
+- Never describe this project as VUSec GhostRace or suggest a technical relationship.
+- Do not claim trademark, domain, USPTO, EUIPO, package, or registry clearance.
+- Keep Cargo publication disabled until the release identifiers and legal review
+  pass the release gate.
+- Rerun GitHub, registry, domain, USPTO/TSDR, EUIPO/TMview, and major web searches
+  immediately before distribution.

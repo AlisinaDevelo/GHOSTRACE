@@ -1,0 +1,231 @@
+{
+  "schema_version": 1,
+  "gate_id": "ghostrace-identity-gate-v1",
+  "project": "GHOSTRACE",
+  "repository": "AlisinaDevelo/GHOSTRACE",
+  "owner": "AlisinaDevelo",
+  "as_of": "2026-08-24",
+  "descriptor": "GHOSTRACE — local macOS causal event journal",
+  "decision": {
+    "outcome": "retain-qualified-descriptor-and-rename-distribution-identifiers",
+    "public_descriptor": "GHOSTRACE — local macOS causal event journal",
+    "rationale": [
+      "The bare GhostRace name has an established VUSec security-research collision.",
+      "The qualified descriptor distinguishes this local macOS journal without implying affiliation.",
+      "Distribution identifiers add the journal qualifier before any broadly distributed release."
+    ],
+    "distribution_gate": "blocked-until-qualified-counsel-review-and-release-rerun",
+    "legal_status": "not_cleared",
+    "qualified_counsel_required": true
+  },
+  "identifiers": {
+    "current_development": {
+      "binary": "ghostrace",
+      "crate": "ghostrace",
+      "publication": "disabled"
+    },
+    "release": {
+      "binary": "ghostrace-journal",
+      "crate": "ghostrace-journal",
+      "homebrew_formula": "ghostrace-journal",
+      "bundle_display_name": "GHOSTRACE Journal.app",
+      "bundle_identifier": "com.alisinadevelo.ghostrace.journal",
+      "reverse_dns_identifier": "com.alisinadevelo.ghostrace.journal"
+    },
+    "migration_boundary": "Rename package, binary, formula, and bundle identifiers before first broadly distributed release; keep the repository name only if counsel accepts the qualified descriptor."
+  },
+  "collision_review": [
+    {
+      "id": "vusec-ghostrace",
+      "surface": "GitHub and security research",
+      "query": "GhostRace",
+      "result_state": "collision",
+      "observed": "VUSec and collaborators use GhostRace for speculative race-condition research and publish a public implementation.",
+      "urls": [
+        "https://github.com/vusec/ghostrace",
+        "https://www.vusec.net/projects/ghostrace/"
+      ],
+      "action": "Do not imply affiliation, reuse VUSec branding, or describe this project as the VUSec work."
+    },
+    {
+      "id": "github-search",
+      "surface": "GitHub repository search",
+      "query": "ghostrace",
+      "result_state": "collision",
+      "observed": "The GitHub repository search returned 73 repositories, including multiple unrelated GhostRace/Ghostrace projects and this repository.",
+      "observed_count": 73,
+      "observed_examples": [
+        "vusec/ghostrace",
+        "lunixbochs/ghostrace",
+        "chriz-3656/GHOSTRACE",
+        "AlisinaDevelo/GHOSTRACE"
+      ],
+      "urls": [
+        "https://api.github.com/search/repositories?q=ghostrace&per_page=10",
+        "https://github.com/search?q=ghostrace&type=repositories"
+      ],
+      "action": "Treat the repository namespace as non-unique and retain the qualified descriptor."
+    },
+    {
+      "id": "crates-io",
+      "surface": "crates.io",
+      "query": "ghostrace",
+      "result_state": "blocked",
+      "http_status": 403,
+      "observed": "The exact search and API requests were rejected by the provider policy; no absence claim is made.",
+      "urls": [
+        "https://crates.io/search?q=ghostrace",
+        "https://crates.io/api/v1/crates?q=ghostrace&per_page=100"
+      ],
+      "action": "Keep publication disabled and repeat the exact registry check manually before release."
+    },
+    {
+      "id": "homebrew",
+      "surface": "Homebrew formula registry",
+      "query": "ghostrace",
+      "result_state": "no_exact_record_observed",
+      "http_status": 404,
+      "observed": "The exact formula URL returned HTTP 404 at audit time; this is not a reservation or legal clearance.",
+      "urls": [
+        "https://formulae.brew.sh/formula/ghostrace"
+      ],
+      "action": "Use ghostrace-journal as the proposed formula name and recheck Homebrew before submission."
+    },
+    {
+      "id": "npm",
+      "surface": "npm registry",
+      "query": "ghostrace",
+      "result_state": "no_exact_record_observed",
+      "observed_count": 0,
+      "observed": "The exact npm registry search returned zero objects.",
+      "urls": [
+        "https://registry.npmjs.org/-/v1/search?text=ghostrace&size=20"
+      ],
+      "action": "No npm package is planned; repeat the check if a JavaScript adapter is ever published."
+    },
+    {
+      "id": "pypi",
+      "surface": "PyPI project registry",
+      "query": "ghostrace",
+      "result_state": "no_exact_record_observed",
+      "http_status": 404,
+      "observed": "The exact PyPI project endpoint returned HTTP 404; this is not a reservation or legal clearance.",
+      "urls": [
+        "https://pypi.org/pypi/ghostrace/json"
+      ],
+      "action": "No Python package is planned; repeat the check if a Python adapter is ever published."
+    },
+    {
+      "id": "domains",
+      "surface": "Domain registration",
+      "query": "ghostrace.<tld>",
+      "result_state": "mixed",
+      "observed": "RDAP responses are recorded without retaining registrant identity. Registered domains are not available namespace signals.",
+      "urls": [
+        "https://rdap.verisign.com/com/v1/domain/ghostrace.com",
+        "https://rdap.verisign.com/net/v1/domain/ghostrace.net",
+        "https://rdap.publicinterestregistry.org/rdap/domain/ghostrace.org",
+        "https://rdap.google.com/rdap/domain/ghostrace.dev",
+        "https://rdap.google.com/rdap/domain/ghostrace.app",
+        "https://rdap.nic.io/domain/ghostrace.io"
+      ],
+      "records": [
+        {
+          "domain": "ghostrace.com",
+          "result_state": "registered",
+          "http_status": 200,
+          "url": "https://rdap.verisign.com/com/v1/domain/ghostrace.com"
+        },
+        {
+          "domain": "ghostrace.net",
+          "result_state": "registered",
+          "http_status": 200,
+          "url": "https://rdap.verisign.com/net/v1/domain/ghostrace.net"
+        },
+        {
+          "domain": "ghostrace.org",
+          "result_state": "no_rdap_record_observed",
+          "http_status": 404,
+          "url": "https://rdap.publicinterestregistry.org/rdap/domain/ghostrace.org"
+        },
+        {
+          "domain": "ghostrace.dev",
+          "result_state": "lookup_unavailable",
+          "http_status": 0,
+          "url": "https://rdap.google.com/rdap/domain/ghostrace.dev"
+        },
+        {
+          "domain": "ghostrace.app",
+          "result_state": "lookup_unavailable",
+          "http_status": 0,
+          "url": "https://rdap.google.com/rdap/domain/ghostrace.app"
+        },
+        {
+          "domain": "ghostrace.io",
+          "result_state": "lookup_unavailable",
+          "http_status": 0,
+          "url": "https://rdap.nic.io/domain/ghostrace.io"
+        }
+      ],
+      "action": "Do not infer domain availability; a domain purchase, if needed, requires a separate legal and registrar review."
+    },
+    {
+      "id": "major-search",
+      "surface": "Major web search results",
+      "query": "GhostTrace and GhostRace",
+      "result_state": "collision",
+      "observed": "Search results include forensic scanners, an AI pentesting service, a reverse-engineering workbench, an LLC, and games using GhostTrace or GhostRacer.",
+      "urls": [
+        "https://github.com/Devzinh/GhostTrace",
+        "https://ghosttrace.ai/",
+        "https://github.com/numaera/GhostTrace",
+        "https://ghosttrace.net/press",
+        "https://lifealchemist.itch.io/ghostrace"
+      ],
+      "action": "Use the journal descriptor in search-facing copy and avoid unqualified adjacent names."
+    }
+  ],
+  "legal_review": {
+    "status": "not_cleared",
+    "qualified_counsel_required": true,
+    "uspto": {
+      "official_search": "https://tmsearch.uspto.gov/search/",
+      "tsdr": "https://tsdr.uspto.gov/",
+      "query": "Wordmark GHOSTRACE, all status filters",
+      "records_reviewed": true,
+      "record_count": 0,
+      "result_state": "unresolved_manual_review",
+      "observed": "The official TMSearch service returned zero exact wordmark records for the audit request. This is an observation, not a clearance opinion; related marks, goods/services, common-law use, and later filings require counsel review.",
+      "query_endpoint": "https://tmsearch.uspto.gov/prod-stage-v1-0-0/tmsearch"
+    },
+    "euipo": {
+      "official_search": "https://www.euipo.europa.eu/en/search-ip",
+      "esearch_plus": "https://euipo.europa.eu/eSearch/",
+      "query": "MarkVerbalElementText GHOSTRACE, basic search",
+      "records_reviewed": true,
+      "record_count": 0,
+      "result_state": "unresolved_manual_review",
+      "observed": "The official eSearch plus endpoint returned zero exact mark records for the audit request. This is an observation, not a clearance opinion; similar marks, classifications, national records, and later filings require counsel review.",
+      "query_endpoint": "https://euipo.europa.eu/copla/ctmsearch/json"
+    },
+    "limitation": "No trademark, corporate, domain, or legal clearance is asserted. A qualified trademark counsel must review the proposed descriptor and release identifiers before broad distribution."
+  },
+  "rerun_policy": {
+    "required_before": [
+      "first broadly distributed release",
+      "crates.io, Homebrew, npm, or PyPI publication",
+      "domain registration or paid naming commitment"
+    ],
+    "surfaces": [
+      "GitHub repositories and organizations",
+      "crates.io",
+      "Homebrew",
+      "package registries",
+      "RDAP for intended domains",
+      "USPTO/TSDR",
+      "EUIPO eSearch plus and TMview",
+      "major web search engines"
+    ],
+    "retained_data": "Public URLs, query terms, result states, and counts only; no registrant identity, account data, or private correspondence."
+  }
+}
