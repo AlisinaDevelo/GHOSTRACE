@@ -33,10 +33,11 @@ The program is successful only if it improves all five outcomes together:
    provenance, signatures, entitlements, notarization, compatibility, privacy,
    performance, and incident evidence to the exact distributed artifacts.
 
-Task 0047 will create a release evidence register for each target, artifact, scope,
-date, result, limitation, and owner. Until that task closes, exit thresholds remain
-planned rather than established release evidence. Unknown or unavailable evidence
-remains unknown; it cannot be converted into a pass.
+Task 0047 defines the [release evidence register](RELEASE_EVIDENCE.md) for each
+target, artifact, scope, date, result, limitation, and owner. Exit thresholds remain
+planned until the register records fresh observed evidence at the complete gate
+scope. Unknown or unavailable evidence remains unknown; it cannot be converted into
+a pass.
 
 ## Milestones
 
