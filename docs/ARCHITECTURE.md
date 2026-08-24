@@ -49,6 +49,13 @@ private-context behavior is automatically interpretable. Any semantic change mus
 be explicitly reconfirmed; a failed migration leaves the previously accepted
 document active and retains no candidate observation.
 
+Consent is a separate append-only state machine over that document. Each grant, scope
+change, suspension, revocation, or deletion-intent transition emits a bounded receipt
+with policy identity/version, a scope digest, timestamp, actor code, and reason code.
+The active gate is false for every state except `active`; revocation is applied before
+asynchronous cleanup, and replay rejects gaps, out-of-order receipts, mismatched
+policy context, and non-grant attempts to reactivate collection.
+
 ## Components
 
 | Component | Responsibility | Current state |

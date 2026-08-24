@@ -4,6 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::{error::GhostraceError, model::*};
 
@@ -107,6 +108,25 @@ impl PolicyDocument {
     pub fn to_json(&self) -> Result<String, GhostraceError> {
         self.validate()?;
         Ok(serde_json::to_string(self)?)
+    }
+
+    /// Return a stable digest of the policy choices without exposing the
+    /// selected roots in a consent receipt. Identity and version are carried
+    /// separately by the receipt, so the digest represents scope semantics.
+    pub fn scope_digest(&self) -> Result<SnapshotDigest, GhostraceError> {
+        self.validate()?;
+        let canonical = serde_json::to_vec(&(
+            &self.enabled_sources,
+            &self.selected_roots,
+            self.allow_private_context,
+        ))?;
+        let digest = Sha256::digest(canonical);
+        let mut encoded = String::with_capacity(64);
+        for byte in digest {
+            use std::fmt::Write as _;
+            write!(&mut encoded, "{byte:02x}").expect("writing to a String cannot fail");
+        }
+        SnapshotDigest::try_from(format!("sha256:{encoded}"))
     }
 
     pub fn to_profile(&self) -> Result<PolicyProfile, GhostraceError> {
