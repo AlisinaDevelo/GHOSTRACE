@@ -149,14 +149,12 @@ impl PolicyProfile {
             });
         }
         if self.version == 0
-            || self.id.len() > MAX_METADATA_FIELD_BYTES
-            || self.id.chars().any(char::is_control)
+            || validate_identifier("policy_profile_id", &self.id).is_err()
             || self.selected_roots.len() > 256
-            || self.selected_roots.iter().any(|root| {
-                root.is_empty()
-                    || root.len() > MAX_METADATA_FIELD_BYTES
-                    || root.chars().any(char::is_control)
-            })
+            || self
+                .selected_roots
+                .iter()
+                .any(|root| validate_identifier("selected_root", root).is_err())
         {
             return Err(GhostraceError::PolicyDenied {
                 reason: PolicyReason::InvalidProfile.code().to_owned(),
