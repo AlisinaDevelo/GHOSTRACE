@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"id": "credential", "field": "credential", "mode": "unknown_field"},
+    {"id": "environment-variable", "field": "environment", "mode": "unknown_field"},
+    {"id": "command-argument", "field": "argv", "mode": "unknown_field"},
+    {"id": "window-title", "field": "window_title", "mode": "unknown_field"},
+    {"id": "page-content", "field": "page_content", "mode": "unknown_field"},
+    {"id": "clipboard-text", "field": "clipboard_text", "mode": "unknown_field"},
+    {"id": "private-browser-marker", "field": "private_context", "mode": "private_browser"}
+  ]
+}
