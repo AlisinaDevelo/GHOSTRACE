@@ -8,10 +8,10 @@ use ghostrace::{
     ConsentTransitionKind, DeterministicKeyProvider, EntryKind, EventEnvelope, EventKind,
     EventPayload, EventSource, Evidence, ExportPolicyProfile, FileOperation,
     FilesystemChangedPayload, FolderId, FrontmostAppChangedPayload, GitObjectId, IngestionOrigin,
-    Journal, PathClass, PathDigest, PolicyChange, PolicyDecision, PolicyDocument, PolicyHistory,
-    PolicyMigrationOutcome, PolicyProfile, ReasonCode, RepositoryId, RootId, SanitizedUrl,
-    SessionId, ShellFinishedPayload, ShellKind, ShellStatus, SourceCursor, SourceErrorPayload,
-    EVENT_SCHEMA_JSON, POLICY_DOCUMENT_SCHEMA_JSON,
+    Journal, PathClass, PathDigest, PolicyChange, PolicyDecision, PolicyDiagnostic, PolicyDocument,
+    PolicyHistory, PolicyMigrationOutcome, PolicyOutcome, PolicyProfile, PolicyReason, ReasonCode,
+    RepositoryId, RootId, SanitizedUrl, SessionId, ShellFinishedPayload, ShellKind, ShellStatus,
+    SourceCursor, SourceErrorPayload, EVENT_SCHEMA_JSON, POLICY_DOCUMENT_SCHEMA_JSON,
 };
 use serde_json::json;
 use tempfile::tempdir;
@@ -436,6 +436,40 @@ fn consent_transitions_are_bounded_revocable_and_replay_safe() {
     silent_reenable.sequence = 1;
     silent_reenable.transition = ConsentTransitionKind::ScopeChanged;
     assert!(ConsentStateMachine::replay(&[silent_reenable]).is_err());
+}
+
+#[test]
+fn policy_decision_records_are_bounded_and_diagnostics_are_finite() {
+    let profile = PolicyProfile::fixture_default();
+    let allowed = profile.decide_record(EventSource::Filesystem, Some("workspace-demo"), false);
+    assert_eq!(allowed.outcome, PolicyOutcome::Allow);
+    assert_eq!(allowed.reason_code(), "policy_allowed");
+    assert_eq!(allowed.diagnostic(), PolicyDiagnostic::Accepted);
+
+    let rejected_value = "/Users/alice/private/secret.txt";
+    let denied = profile.decide_record(EventSource::Filesystem, Some(rejected_value), false);
+    assert_eq!(denied.outcome, PolicyOutcome::Deny);
+    assert_eq!(denied.reason, PolicyReason::RootNotSelected);
+    assert_eq!(denied.diagnostic(), PolicyDiagnostic::PolicyDenied);
+    let denied_json = serde_json::to_string(&denied).expect("bounded decision JSON");
+    assert!(!denied_json.contains(rejected_value));
+    let decision = profile.decide(EventSource::Filesystem, Some(rejected_value), false);
+    assert!(!format!("{decision:?}").contains(rejected_value));
+
+    assert_eq!(denied.clone().redact().outcome, PolicyOutcome::Redact);
+    assert_eq!(denied.clone().summarize().outcome, PolicyOutcome::Summarize);
+    let refused = denied.refuse(PolicyReason::UnsupportedScope);
+    assert_eq!(refused.outcome, PolicyOutcome::Refuse);
+    assert_eq!(refused.diagnostic(), PolicyDiagnostic::UnsupportedScope);
+
+    let malformed = PolicyProfile::deny_by_default("../private");
+    let malformed_record = malformed.decide_record(EventSource::Filesystem, None, false);
+    assert_eq!(malformed_record.outcome, PolicyOutcome::Refuse);
+    assert_eq!(malformed_record.diagnostic(), PolicyDiagnostic::MalformedInput);
+    assert!(!serde_json::to_string(&malformed_record)
+        .expect("malformed decision JSON")
+        .contains("../private"));
+    assert_eq!(PolicyReason::InternalFailure.diagnostic(), PolicyDiagnostic::InternalFailure);
 }
 
 #[test]

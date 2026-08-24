@@ -56,6 +56,13 @@ The active gate is false for every state except `active`; revocation is applied 
 asynchronous cleanup, and replay rejects gaps, out-of-order receipts, mismatched
 policy context, and non-grant attempts to reactivate collection.
 
+The policy gate also emits a bounded decision record. Its finite outcomes are allow,
+deny, redact, summarize, and refuse; its diagnostics distinguish policy denial,
+malformed input, unsupported scope, and internal failure. The record reports only
+source, policy identity/version, root presence, private-context state, and a stable
+reason code. Rejected roots and observations never enter the record or its debug
+representation.
+
 ## Components
 
 | Component | Responsibility | Current state |

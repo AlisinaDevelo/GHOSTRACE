@@ -59,6 +59,13 @@ capture gate synchronously; cleanup may run afterward but cannot re-enable reten
 Receipt replay requires contiguous sequence numbers and valid state transitions, and
 only an explicit grant can return a non-active state to active.
 
+Policy decisions expose a finite outcome set (`allow`, `deny`, `redact`, `summarize`,
+or `refuse`) and finite diagnostic classes. Public decision records contain policy
+identity/version, source, root presence, private-context state, and a reason code;
+they do not contain the root string or rejected observation. Malformed input,
+unsupported scope, and internal failure remain distinguishable without echoing the
+input that caused the refusal.
+
 ## Local storage and export
 
 The intended journal is local to the user account. Filesystem permissions, SQLite
