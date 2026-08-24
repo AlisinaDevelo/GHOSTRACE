@@ -4,8 +4,9 @@ use chrono::{TimeZone, Utc};
 use ghostrace::{
     capture, decrypt_payload, encrypt_payload, explain, export_fixture, ingest_fixture, AppChange,
     ApplicationId, BookmarkChange, BookmarkId, BranchName, BrowserBookmarkChangedPayload,
-    BrowserName, BrowserNavigationPayload, DeterministicKeyProvider, EntryKind, EventEnvelope,
-    EventKind, EventPayload, EventSource, Evidence, ExportPolicyProfile, FileOperation,
+    BrowserName, BrowserNavigationPayload, ConsentState, ConsentStateMachine,
+    ConsentTransitionKind, DeterministicKeyProvider, EntryKind, EventEnvelope, EventKind,
+    EventPayload, EventSource, Evidence, ExportPolicyProfile, FileOperation,
     FilesystemChangedPayload, FolderId, FrontmostAppChangedPayload, GitObjectId, IngestionOrigin,
     Journal, PathClass, PathDigest, PolicyChange, PolicyDecision, PolicyDocument, PolicyHistory,
     PolicyMigrationOutcome, PolicyProfile, ReasonCode, RepositoryId, RootId, SanitizedUrl,
@@ -361,6 +362,80 @@ fn policy_documents_are_strict_versioned_and_fail_closed() {
     .expect("downgrade shape");
     assert!(history.apply(downgrade, true).is_err());
     assert_eq!(history.current("fixture-default-v1").expect("latest policy").version, 3);
+}
+
+#[test]
+fn consent_transitions_are_bounded_revocable_and_replay_safe() {
+    let initial = PolicyDocument::from_profile(&PolicyProfile::fixture_default())
+        .expect("fixture policy document");
+    let changed = PolicyDocument::new(
+        initial.id.clone(),
+        2,
+        initial.enabled_sources.iter().copied(),
+        ["workspace-demo", "workspace-demo-next"],
+        false,
+    )
+    .expect("changed policy document");
+
+    let mut machine = ConsentStateMachine::new();
+    assert_eq!(machine.state(), ConsentState::Inactive);
+    assert!(!machine.is_capture_allowed());
+
+    let grant = machine
+        .grant(&initial, timestamp(1_735_689_600), "human", "explicit_grant")
+        .expect("grant");
+    assert_eq!(grant.transition, ConsentTransitionKind::Grant);
+    assert_eq!(grant.state, ConsentState::Active);
+    assert_eq!(grant.policy_version, 1);
+    assert!(grant.scope_digest.as_str().starts_with("sha256:"));
+    assert!(machine.is_capture_allowed());
+
+    let scope_change = machine
+        .change_scope(&changed, timestamp(1_735_689_601), "human", "narrow_scope")
+        .expect("scope change");
+    assert_eq!(scope_change.transition, ConsentTransitionKind::ScopeChanged);
+    assert_ne!(scope_change.scope_digest, grant.scope_digest);
+    assert!(machine.is_capture_allowed());
+    let receipt_json = serde_json::to_string(&scope_change).expect("receipt JSON");
+    assert!(!receipt_json.contains("workspace-demo"));
+    assert!(!receipt_json.contains("workspace-demo-next"));
+
+    let suspended =
+        machine.suspend(timestamp(1_735_689_602), "system", "screen_locked").expect("suspend");
+    assert_eq!(suspended.state, ConsentState::Suspended);
+    assert!(!machine.is_capture_allowed());
+    assert!(machine
+        .change_scope(&changed, timestamp(1_735_689_603), "human", "scope_while_suspended")
+        .is_err());
+
+    machine
+        .grant(&changed, timestamp(1_735_689_604), "human", "explicit_resume")
+        .expect("explicit resume");
+    assert!(machine.is_capture_allowed());
+    machine.revoke(timestamp(1_735_689_605), "human", "user_revoked").expect("revoke");
+    assert_eq!(machine.state(), ConsentState::Revoked);
+    assert!(!machine.is_capture_allowed());
+    machine
+        .request_deletion(timestamp(1_735_689_606), "human", "delete_journal")
+        .expect("deletion intent");
+    assert_eq!(machine.state(), ConsentState::DeletionRequested);
+    assert!(!machine.is_capture_allowed());
+
+    let receipts = machine.receipts().to_vec();
+    let replayed = ConsentStateMachine::replay(&receipts).expect("replay receipts");
+    assert_eq!(replayed, machine);
+    assert!(!ConsentStateMachine::replay(&receipts[..5])
+        .expect("replay through revocation")
+        .is_capture_allowed());
+
+    let mut invalid_order = receipts.clone();
+    invalid_order[1].sequence = 3;
+    assert!(ConsentStateMachine::replay(&invalid_order).is_err());
+
+    let mut silent_reenable = receipts[0].clone();
+    silent_reenable.sequence = 1;
+    silent_reenable.transition = ConsentTransitionKind::ScopeChanged;
+    assert!(ConsentStateMachine::replay(&[silent_reenable]).is_err());
 }
 
 #[test]

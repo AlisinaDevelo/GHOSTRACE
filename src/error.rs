@@ -72,6 +72,9 @@ pub enum GhostraceError {
     #[error("policy document migration rejected: {0}")]
     PolicyMigration(String),
 
+    #[error("consent state transition rejected: {0}")]
+    ConsentTransition(String),
+
     #[error("migration error: {0}")]
     Migration(String),
 }

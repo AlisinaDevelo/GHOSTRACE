@@ -4,6 +4,7 @@
 //! screen/audio capture, or keylogging implementation.  The public boundary is
 //! fixture ingestion into an encrypted local SQLite journal.
 
+pub mod consent;
 pub mod crypto;
 pub mod error;
 pub mod explain;
@@ -13,6 +14,7 @@ pub mod journal;
 pub mod model;
 pub mod policy;
 
+pub use consent::{ConsentReceipt, ConsentState, ConsentStateMachine, ConsentTransitionKind};
 pub use crypto::{decrypt_payload, encrypt_payload, DeterministicKeyProvider, KeyProvider};
 pub use error::{CryptoError, GhostraceError};
 pub use explain::{explain, CoverageSummary, Explanation, ExplanationStatement};

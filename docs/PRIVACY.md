@@ -51,6 +51,14 @@ Consent is not a substitute for minimization. A user selecting a root does not
 authorize file contents, keystrokes, screenshots, clipboard values, page contents,
 or unrelated application data.
 
+Consent is represented as an append-only local state machine. Grant, scope change,
+suspension, revocation, and deletion intent each produce a bounded receipt containing
+the policy identity and version, a SHA-256 scope digest, time, actor code, and reason
+code. Receipts never contain selected roots or observations. Revocation changes the
+capture gate synchronously; cleanup may run afterward but cannot re-enable retention.
+Receipt replay requires contiguous sequence numbers and valid state transitions, and
+only an explicit grant can return a non-active state to active.
+
 ## Local storage and export
 
 The intended journal is local to the user account. Filesystem permissions, SQLite
