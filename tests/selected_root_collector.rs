@@ -1,12 +1,18 @@
-use std::{fs, path::PathBuf};
+use std::path::PathBuf;
+
+#[cfg(target_os = "macos")]
+use std::fs;
 
 use chrono::{TimeZone, Utc};
 use ghostrace::{
-    CollectorState, ConsentPreview, DeterministicKeyProvider, EventKind, EventPayload, EventSource,
-    Evidence, FseventsCollector, FseventsCollectorConfig, FseventsCollectorError, FseventsOptions,
-    Journal, PolicyDocument, SelectedRoot, WriterConfig,
+    ConsentPreview, DeterministicKeyProvider, EventSource, FseventsCollector,
+    FseventsCollectorConfig, FseventsCollectorError, FseventsOptions, Journal, PolicyDocument,
+    SelectedRoot, WriterConfig,
 };
 use tempfile::tempdir;
+
+#[cfg(target_os = "macos")]
+use ghostrace::{CollectorState, EventKind, EventPayload, Evidence};
 
 #[cfg(not(target_os = "macos"))]
 use ghostrace::FseventsError;
@@ -47,6 +53,7 @@ fn confirmation(document: &PolicyDocument) -> ghostrace::ConsentConfirmation {
     .confirm()
 }
 
+#[cfg(target_os = "macos")]
 fn has_operation(
     events: &[ghostrace::CollectedFilesystemEvent],
     operation: ghostrace::FileOperation,
