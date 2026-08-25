@@ -86,7 +86,7 @@ encryption or key-management claim.
 | Storm/lifecycle corpus and native-safe macOS receipt | Available as a bounded test contract; sleep/wake, logout, and volume detach are explicit no-go rows |
 | Reproducible filesystem benchmark corpus | Available as an offline synthetic workload contract; native results require the named macOS device and retain observed gaps/failures |
 | Event-storm backpressure and loss accounting | Available as a bounded synthetic stress contract; queue pressure exposes pending limits, an emergency status slot, auditable gaps, and recovery-required state |
-| Snapshot-consistent query pagination | Available as a bounded library API; encrypted page tokens bind policy scope, filters, the versioned ordering contract, schema, and an ingest snapshot boundary |
+| Snapshot-consistent query pagination | Available as a bounded library API; encrypted page tokens bind policy scope, filters, the versioned ordering contract, schema, and an ingest snapshot boundary; every page carries gap-aware coverage unless explicitly opted out |
 | Shell, Git, frontmost-app, or browser collectors | Not shipped |
 | macOS Keychain-backed production encryption | Not shipped |
 | Signed/notarized release artifacts | Not shipped |
@@ -189,6 +189,7 @@ docs/adr/            Immutable architecture decisions
 - [Evaluation](docs/EVALUATION.md) — correctness, privacy, and performance gates
 - [FSEvents lifecycle corpus](fixtures/fsevents-lifecycle-corpus-v1.json) — ground truth, coalescing, gaps, and guarded device rows
 - [Temporal ordering fixture](fixtures/temporal-ordering-v1.json) — clock skew, delayed delivery, tie-breaking, and missing source time
+- [Query coverage fixture](fixtures/query-gap-coverage-v1.json) — nested, adjacent, open-ended, and cross-source gap intervals
 - [Filesystem benchmark corpus](fixtures/filesystem-benchmark-corpus-v1.json) — bounded synthetic trees and native measurement contract
 - [Reproducibility](docs/REPRODUCIBILITY.md) — pinned toolchain, fixture provenance, and clean-machine smoke
 - [Research](docs/RESEARCH.md) — landscape, differentiation, and primary sources

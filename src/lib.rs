@@ -118,8 +118,9 @@ pub use policy::{
     PolicyReason, POLICY_DOCUMENT_SCHEMA_VERSION,
 };
 pub use query::{
-    QueryPage, QueryRequest, DEFAULT_QUERY_PAGE_SIZE, MAX_QUERY_PAGE_SIZE, QUERY_CONTRACT_VERSION,
-    QUERY_TOKEN_TTL_SECONDS,
+    CoverageGap, CoverageInterval, CoverageStatus, CoverageStatusKind, QueryCoverage, QueryPage,
+    QueryRequest, COVERAGE_CONTRACT_VERSION, DEFAULT_QUERY_PAGE_SIZE, MAX_COVERAGE_MARKERS,
+    MAX_QUERY_PAGE_SIZE, QUERY_CONTRACT_VERSION, QUERY_TOKEN_TTL_SECONDS,
 };
 pub use volume::{
     MountState, VolumeIdentity, VolumeIdentityError, VolumeObservation, VolumeTransition,
