@@ -97,7 +97,7 @@ encryption or key-management claim.
 | ghostrace ingest --journal ... --fixture ... | Available; persists a checked-in fixture batch |
 | ghostrace explain --journal ... --event <uuid> | Available; deterministic after reopen |
 | ghostrace demo --fixture ... --event <uuid> | Available |
-| ghostrace export --journal ... --output ... [--force] | Available |
+| ghostrace export --journal ... --output ... [--force] | Available; decrypts and writes one bounded record at a time, then atomically publishes a validated 0600 artifact |
 | ghostrace export --fixture ... --output ... [--force] | Available in-memory shortcut |
 | ghostrace validate --export ... | Available; rejects incomplete, mixed-version, or digest-drifted JSONL before consumption |
 | ghostrace schema | Available |
@@ -111,7 +111,7 @@ encryption or key-management claim.
 | Evidence-claim grammar | Available as a versioned bounded renderer; templates preserve evidence labels and cited event IDs, expose gap limits, and refuse intent, completeness, process-attribution, causality, and unsupported rename claims |
 | Cross-source correlation rule registry | Available as a versioned, policy-bounded adjacency rule; unknown coverage, unsupported scope, and clock skew abstain instead of becoming positive evidence |
 | Explanation determinism and counterexamples | Available as an offline golden/property/mutation matrix; every claim template and evidence level is exercised, ordering/page permutations are compared, and required-observation removal must downgrade or remove a claim |
-| Export schema and manifest registry | Available as six strict v1 contracts with stable IDs, golden examples, version declarations, and fail-closed export validation for mixed versions, counts, bytes, and body digests |
+| Export schema and manifest registry | Available as six strict v1 contracts with stable IDs, golden examples, version declarations, fail-closed streaming validation for mixed versions, counts, bytes, and body digests, and bounded record/metadata limits |
 | Shell, Git, frontmost-app, or browser collectors | Not shipped |
 | macOS Keychain-backed production encryption | Not shipped |
 | Signed/notarized release artifacts | Not shipped |
@@ -198,7 +198,10 @@ GHOSTRACE is designed around a narrow local boundary:
   path-race containment, cursor recovery, and release protection are incomplete; the
   library collector itself cannot start without a consumed consent confirmation.
 - **Inspectable:** exports are explicit commands. Existing destinations are not
-  overwritten unless --force is supplied.
+  overwritten unless --force is supplied. Exporting streams through private
+  bounded temporaries, fsyncs before rename, validates the complete manifest and
+  body before publication, and removes or abandons only an unmistakably
+  incomplete temporary on cancellation or write failure.
 
 The initial product does **not** use keylogging, microphones, screen recording,
 clipboard capture, window titles, page contents, or private-browsing data by default.

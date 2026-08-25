@@ -6,7 +6,8 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs,
+    fs::File,
+    io::{BufRead, BufReader},
     path::Path,
 };
 
@@ -15,7 +16,10 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     error::GhostraceError,
-    export::ExportManifest,
+    export::{
+        ExportManifest, MAX_EXPORT_EVENT_RECORDS, MAX_EXPORT_GAPS, MAX_EXPORT_POLICY_PROFILES,
+        MAX_EXPORT_RECORD_BYTES,
+    },
     model::{EventEnvelope, EventKind, EventPayload, EventSource, EVENT_SCHEMA_VERSION},
     ordering::{StableOrderKey, ORDERING_CONTRACT_VERSION},
 };
@@ -195,16 +199,13 @@ struct OwnedExportEventRecord {
 /// digest, record schema identifiers, and event schema versions.
 pub fn validate_export(path: impl AsRef<Path>) -> Result<ExportValidation, GhostraceError> {
     let path = path.as_ref();
-    let bytes =
-        fs::read(path).map_err(|source| GhostraceError::Io { path: path.to_path_buf(), source })?;
-    let text = std::str::from_utf8(&bytes)
+    let file = File::open(path)
+        .map_err(|source| GhostraceError::Io { path: path.to_path_buf(), source })?;
+    let mut reader = BufReader::with_capacity(64 * 1024, file);
+    let manifest_bytes = read_bounded_line(&mut reader, path)?
+        .ok_or_else(|| GhostraceError::ExportInvalid("export is empty".to_owned()))?;
+    let manifest_line = std::str::from_utf8(&manifest_bytes)
         .map_err(|error| GhostraceError::ExportInvalid(format!("export is not UTF-8: {error}")))?;
-    if !text.ends_with('\n') {
-        return Err(GhostraceError::ExportInvalid("export must end with a newline".to_owned()));
-    }
-    let mut lines = text.split_terminator('\n');
-    let manifest_line =
-        lines.next().ok_or_else(|| GhostraceError::ExportInvalid("export is empty".to_owned()))?;
     let manifest: ExportManifest = serde_json::from_str(manifest_line).map_err(|error| {
         GhostraceError::ExportInvalid(format!("manifest is invalid or has unknown fields: {error}"))
     })?;
@@ -238,10 +239,16 @@ pub fn validate_export(path: impl AsRef<Path>) -> Result<ExportValidation, Ghost
     let mut policy_profiles = BTreeSet::new();
     let mut gap_records = Vec::new();
     let mut collector_status = "unknown";
-    for line in lines {
-        if line.is_empty() {
+    loop {
+        let Some(line_bytes) = read_bounded_line(&mut reader, path)? else {
+            break;
+        };
+        if line_bytes.is_empty() {
             return Err(GhostraceError::ExportInvalid("blank record line".to_owned()));
         }
+        let line = std::str::from_utf8(&line_bytes).map_err(|error| {
+            GhostraceError::ExportInvalid(format!("record is not UTF-8: {error}"))
+        })?;
         let record: OwnedExportEventRecord = serde_json::from_str(line).map_err(|error| {
             GhostraceError::ExportInvalid(format!(
                 "record is invalid or has unknown fields: {error}"
@@ -262,6 +269,11 @@ pub fn validate_export(path: impl AsRef<Path>) -> Result<ExportValidation, Ghost
             ingest_seq: record.ingest_seq,
             event_id: record.event.event_id,
         };
+        if event_count >= MAX_EXPORT_EVENT_RECORDS {
+            return Err(GhostraceError::ExportInvalid(format!(
+                "export exceeds the {MAX_EXPORT_EVENT_RECORDS}-event bound"
+            )));
+        }
         if !seen_ingest_seq.insert(record.ingest_seq)
             || last_order.is_some_and(|previous| order <= previous)
         {
@@ -275,7 +287,17 @@ pub fn validate_export(path: impl AsRef<Path>) -> Result<ExportValidation, Ghost
             record.event.policy_profile_id.as_str().to_owned(),
             record.event.policy_profile_version,
         ));
+        if policy_profiles.len() > MAX_EXPORT_POLICY_PROFILES {
+            return Err(GhostraceError::ExportInvalid(format!(
+                "export exceeds the {MAX_EXPORT_POLICY_PROFILES}-profile bound"
+            )));
+        }
         if let EventPayload::Gap(gap) = &record.event.payload {
+            if gap_records.len() >= MAX_EXPORT_GAPS {
+                return Err(GhostraceError::ExportInvalid(format!(
+                    "export exceeds the {MAX_EXPORT_GAPS}-gap metadata bound"
+                )));
+            }
             gap_records.push(crate::export::ExportGap {
                 event_id: record.event.event_id,
                 source: gap.source,
@@ -289,9 +311,9 @@ pub fn validate_export(path: impl AsRef<Path>) -> Result<ExportValidation, Ghost
             _ => {}
         }
         body_bytes = body_bytes
-            .checked_add(line.len() + 1)
+            .checked_add(line_bytes.len() + 1)
             .ok_or_else(|| GhostraceError::ExportInvalid("body byte count overflow".to_owned()))?;
-        body_digest.update(line.as_bytes());
+        body_digest.update(&line_bytes);
         body_digest.update(b"\n");
     }
     let digest = hex_digest(body_digest.finalize().as_slice());
@@ -343,6 +365,47 @@ pub fn validate_export(path: impl AsRef<Path>) -> Result<ExportValidation, Ghost
         ));
     }
     Ok(ExportValidation { manifest, event_count, body_bytes, body_sha256: digest })
+}
+
+/// Read one newline-terminated record while never retaining more than the
+/// configured per-record bound. `BufRead::read_until` is intentionally not
+/// used because it can grow a vector to the size of an unterminated attacker
+/// line before reporting an error.
+fn read_bounded_line<R: BufRead>(
+    reader: &mut R,
+    path: &Path,
+) -> Result<Option<Vec<u8>>, GhostraceError> {
+    let mut line = Vec::with_capacity(1024.min(MAX_EXPORT_RECORD_BYTES));
+    loop {
+        let chunk = reader
+            .fill_buf()
+            .map_err(|source| GhostraceError::Io { path: path.to_path_buf(), source })?;
+        if chunk.is_empty() {
+            if line.is_empty() {
+                return Ok(None);
+            }
+            return Err(GhostraceError::ExportInvalid("export must end with a newline".to_owned()));
+        }
+        if let Some(newline) = chunk.iter().position(|byte| *byte == b'\n') {
+            let segment_len = newline + 1;
+            if line.len().saturating_add(segment_len) > MAX_EXPORT_RECORD_BYTES + 1 {
+                return Err(GhostraceError::ExportInvalid(format!(
+                    "JSONL record exceeds the {MAX_EXPORT_RECORD_BYTES}-byte bound"
+                )));
+            }
+            line.extend_from_slice(&chunk[..newline]);
+            reader.consume(segment_len);
+            return Ok(Some(line));
+        }
+        if line.len().saturating_add(chunk.len()) > MAX_EXPORT_RECORD_BYTES + 1 {
+            return Err(GhostraceError::ExportInvalid(format!(
+                "JSONL record exceeds the {MAX_EXPORT_RECORD_BYTES}-byte bound"
+            )));
+        }
+        line.extend_from_slice(chunk);
+        let consumed = chunk.len();
+        reader.consume(consumed);
+    }
 }
 
 pub(crate) fn hex_digest(bytes: &[u8]) -> String {

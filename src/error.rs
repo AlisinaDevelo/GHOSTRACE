@@ -48,6 +48,9 @@ pub enum GhostraceError {
     #[error("export validation failed: {0}")]
     ExportInvalid(String),
 
+    #[error("export was cancelled before publication")]
+    ExportCancelled,
+
     #[error("journal directory permissions are not private (expected no group/world access)")]
     InsecurePermissions(PathBuf),
 

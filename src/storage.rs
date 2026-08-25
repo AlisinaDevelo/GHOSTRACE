@@ -128,6 +128,23 @@ pub(crate) fn set_private_file_permissions(path: &Path) -> Result<(), GhostraceE
     verify_private_file(path).map(|_| ())
 }
 
+/// Flush directory metadata after an atomic artifact rename.  A successful
+/// rename makes the new name visible; syncing the containing directory also
+/// makes that name durable across a power loss on filesystems that support
+/// directory fsync (including macOS and other Unix targets).
+pub(crate) fn sync_directory(path: &Path) -> Result<(), GhostraceError> {
+    #[cfg(unix)]
+    {
+        File::open(path)
+            .map_err(|source| io_error(path, source))?
+            .sync_all()
+            .map_err(|source| io_error(path, source))?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
+}
+
 /// Verify the database and all known SQLite sidecars after migration or a
 /// write.  SQLite may create WAL/SHM lazily, so this check is intentionally
 /// repeatable.

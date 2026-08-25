@@ -101,14 +101,37 @@ versions, the deterministic `all_committed` query scope, policy identities,
 coverage gaps, tool version, and body-only record counts, byte lengths, and
 SHA-256 digest. Body-only accounting avoids a self-referential manifest hash.
 
-`validate_export` parses and validates the manifest before reading body records.
-It rejects unknown fields, mixed or undeclared schema IDs/versions, duplicate
-records or regressions in the shared stable order, count/byte/digest drift,
-unsupported query scope, and event schema mismatches. `tests/export_schema.rs` validates every schema and
+`validate_export` reads one newline-terminated record at a time with a bounded
+buffer; it never loads the complete plaintext export into memory. It parses and
+validates the manifest before reading body records, and rejects unknown fields,
+mixed or undeclared schema IDs/versions, duplicate records or regressions in the
+shared stable order, count/byte/digest drift, unsupported query scope, and event
+schema mismatches. `tests/export_schema.rs` validates every schema and
 golden with the JSON Schema implementation, injects unknown fields into every
 contract, checks deterministic export accounting, and exercises mixed-version and
 digest-negative cases. The registry and golden files are synthetic, offline, and
 manifest-bound.
+
+## Bounded atomic export (task 0084)
+
+Journal export now visits the stable ordered SQLite snapshot one event at a time,
+spools private JSONL body records, and computes counts and SHA-256 digests
+incrementally. A second private temporary receives the manifest and copies the
+body in 64 KiB chunks; both files are mode `0600`, synced, and removed on
+cancellation or write failure. The destination is only created or replaced after
+the complete temporary passes `validate_export`, then the containing directory is
+synced after the same-directory atomic rename. The public cancellation token
+causes a fail-closed `ExportCancelled` result and leaves an existing destination
+unchanged.
+
+Per-record JSON is bounded to 1 MiB; event records, policy-profile metadata, and
+gap metadata are bounded to 1,000,000, 4,096, and 4,096 entries respectively.
+These explicit limits keep the writer and validator memory bounded while leaving
+large event bodies on disk rather than retaining the full plaintext export in
+memory. `tests/export_streaming.rs` and the export unit matrix cover successful
+validation, pre- and mid-stream cancellation, destination preservation, bounded
+line rejection, simulated disk-full during final copy, temporary cleanup, and
+stable byte/digest accounting.
 
 ## Future live-source gates
 

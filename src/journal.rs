@@ -774,6 +774,25 @@ impl Journal {
         Ok(events)
     }
 
+    /// Visit committed events in the versioned display order without
+    /// materializing the complete journal.  The read snapshot remains open
+    /// for the duration of the callback, so callers must keep each visit
+    /// bounded and must not retain event payloads beyond the callback.
+    pub fn for_each_ordered_event<F>(&self, mut visitor: F) -> Result<(), GhostraceError>
+    where
+        F: FnMut(StoredEvent) -> Result<(), GhostraceError>,
+    {
+        self.with_read_snapshot(|connection| {
+            let mut statement = connection.prepare(EVENT_SELECT_ORDERED)?;
+            let mut rows = statement.query([])?;
+            while let Some(row) = rows.next()? {
+                let stored = decode_stored(row_to_stored(row)?, self.key_provider.as_ref())?;
+                visitor(stored)?;
+            }
+            Ok(())
+        })
+    }
+
     /// Read one bounded page from a logical ingest snapshot.  The read
     /// transaction captures the initial upper bound; subsequent pages use the
     /// authenticated token's bound and therefore ignore later ingest. Rows
@@ -1073,6 +1092,14 @@ const EVENT_SELECT_BY_CURSOR: &str =
  FROM events
  WHERE source = ?1 AND collector_instance = ?2 AND source_cursor = ?3
  ORDER BY ingest_seq ASC LIMIT 1";
+
+const EVENT_SELECT_ORDERED: &str =
+    "SELECT ingest_seq, event_id, schema_version, observed_at, ingested_at, source,
+            kind, collector_instance, source_cursor, provenance_version,
+            policy_profile_id, policy_profile_version, evidence, parent_event_id,
+            payload_ciphertext
+     FROM events
+     ORDER BY observed_at ASC, ingest_seq ASC, event_id ASC";
 
 fn same_event_semantics(left: &EventEnvelope, right: &EventEnvelope) -> bool {
     serde_json::to_vec(left).ok() == serde_json::to_vec(right).ok()
