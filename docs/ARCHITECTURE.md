@@ -135,8 +135,12 @@ live cursors to both this volume evidence and the selected per-host or per-devic
 stream mode; a matching path or collector instance cannot resume a cursor from a
 different volume. Mount observations classify unmount, remount, device
 replacement, APFS snapshot restore, and path reuse as explicit discontinuities.
-The collector deliberately does not persist an FSEvents cursor yet. Durable
-volume-bound replay, reset/wrap recovery, storm backpressure, and the ambient CLI
+The collector now persists one replay boundary per source and volume whenever a
+source cursor advances. The boundary records selected-root and exclusion digests
+plus `since_when`, latency, file-event mode, and stream identity. A changed
+setting fails closed until an explicit reset or wrap establishes a new epoch.
+Gap events are committed with their cursor advancement in the same transaction;
+durable restart recovery, first-class source-loss reasons, and the ambient CLI
 remain later gates (tasks 0015–0017 and their children).
 
 ## Policy-document boundary
@@ -238,14 +242,16 @@ refused as an unmarked skip; a first-class `Gap` event is the only intentional
 coverage discontinuity.
 
 The journal keeps cursor epoch, status (`active`, `reset`, `wrapped`, or
-`invalidated`), token kind, policy identity/version, and the last event ID in the
-cursor table. Duplicate event IDs are replayed as the original ingest sequence
-only when their complete semantic envelope matches. A different event at the
-same source/collector/cursor, a policy change without reset, a regression, an
-unknown ordering, an invalidated source, or a skipped range fails closed before
-the transaction can commit. `reset_cursor`, `wrap_cursor`, and
-`invalidate_cursor` are durable control operations; source replacement is a new
-collector identity, not an inferred reset.
+`invalidated`), token kind, policy identity/version, the last event ID, and the
+serialized replay boundary in the cursor table. Duplicate event IDs are
+replayed as the original ingest sequence only when their complete semantic
+envelope matches. A different event at the same source/collector/cursor, a
+policy or replay-setting change without reset, a regression, an unknown
+ordering, an invalidated source, or a skipped range fails closed before the
+transaction can commit. `reset_cursor_with_boundary`,
+`wrap_cursor_with_boundary`, and `invalidate_cursor` are durable control
+operations; source replacement is a new collector identity, not an inferred
+reset.
 
 ## Components
 
@@ -257,7 +263,7 @@ collector identity, not an inferred reset.
 | Policy gate | Apply consent, selected scope, exclusions, private-context rules, and redaction | Required before live capture |
 | Event envelope | Preserve source facts, provenance, evidence level, and schema version | Versioned contract is documented; journal ingestion requires an origin capability |
 | Ingest writer | Bound memory, serialize writes, and commit event, cursor, policy reference, and diagnostics atomically | Bounded fixture writer is implemented and tested; live gate remains |
-| Journal | Store local event metadata and encrypted payloads when the production key path exists | SQLite/WAL design documented; cursor contract and migration 0003 are implemented; Keychain production path not shipped |
+| Journal | Store local event metadata and encrypted payloads when the production key path exists | SQLite/WAL design documented; cursor contract migrations 0003–0004 and durable replay-boundary writes are implemented; Keychain production path not shipped |
 | Explain/export | Produce deterministic evidence-linked explanations and explicit exports | Fixture surface available |
 
 ## Event lifecycle

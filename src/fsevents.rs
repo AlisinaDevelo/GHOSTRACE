@@ -26,7 +26,11 @@ use std::sync::Mutex;
 
 use thiserror::Error;
 
-use crate::cursor::CursorStreamMode;
+use crate::{
+    cursor::{CursorStreamMode, ReplayConfiguration},
+    error::GhostraceError,
+    model::SnapshotDigest,
+};
 
 #[cfg(target_os = "macos")]
 use std::{
@@ -162,6 +166,22 @@ impl FseventsOptions {
             return Err(FseventsError::UnsupportedCallbackFlags);
         }
         Ok(())
+    }
+
+    /// Convert stream settings into the path-free durable replay contract.
+    pub fn replay_configuration(
+        &self,
+        root_scope_digest: SnapshotDigest,
+        exclusions_digest: SnapshotDigest,
+    ) -> Result<ReplayConfiguration, GhostraceError> {
+        self.validate().map_err(|error| GhostraceError::InvalidEvent(error.to_string()))?;
+        ReplayConfiguration::new(
+            root_scope_digest,
+            exclusions_digest,
+            self.since_when,
+            self.latency,
+            self.flags & FLAG_FILE_EVENTS != 0,
+        )
     }
 }
 

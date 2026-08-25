@@ -203,14 +203,14 @@ fn migration_is_idempotent_and_sqlite_safety_pragmas_are_set() {
     assert_eq!(journal.journal_mode().expect("pragma").to_ascii_lowercase(), "wal");
     assert_eq!(journal.synchronous_mode().expect("pragma"), "FULL");
     assert!(journal.foreign_keys_enabled().expect("pragma"));
-    assert_eq!(journal.schema_version_count().expect("schema"), 3);
-    assert_eq!(journal.schema_version().expect("user version"), 3);
-    assert_eq!(journal.applied_migrations().expect("migration ledger").len(), 4);
+    assert_eq!(journal.schema_version_count().expect("schema"), 4);
+    assert_eq!(journal.schema_version().expect("user version"), 4);
+    assert_eq!(journal.applied_migrations().expect("migration ledger").len(), 5);
     drop(journal);
     let reopened = Journal::open_fixture(&path, key).expect("reopen");
-    assert_eq!(reopened.schema_version_count().expect("schema"), 3);
-    assert_eq!(reopened.schema_version().expect("user version"), 3);
-    assert_eq!(reopened.applied_migrations().expect("migration ledger").len(), 4);
+    assert_eq!(reopened.schema_version_count().expect("schema"), 4);
+    assert_eq!(reopened.schema_version().expect("user version"), 4);
+    assert_eq!(reopened.applied_migrations().expect("migration ledger").len(), 5);
     assert_eq!(reopened.journal_mode().expect("pragma").to_ascii_lowercase(), "wal");
 }
 

@@ -23,8 +23,8 @@ Fixture identities remain separate and cannot be used as live volume cursors.
 classification. Unmount, mount, remount, device replacement, APFS snapshot
 restore, and path reuse are explicit outcomes. The selected-root collector
 retains volume identity in memory and includes its fingerprint in the path
-digest scope. Durable cursor persistence is intentionally left to task 0070 /
-0015, which will persist this identity with the replay boundary.
+digest scope. Task 0070 now persists this identity with the replay boundary;
+full restart recovery and source-loss repair remain task 0015 and its children.
 
 ## Acceptance mapping
 

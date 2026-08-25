@@ -35,8 +35,9 @@ unsupported, or contradictory. Unknown bits and loss boundaries lower completene
 they are never silently treated as ordinary file changes. The normalized evidence
 record is path-free. The selected-root collector performs startup canonicalization,
 lexical containment, policy authorization, and path hashing before persistence. A
-descriptor-backed no-follow walk is available for later opens; exclusions and
-cursor/recovery remain separate gates.
+descriptor-backed no-follow walk is available for later opens; exclusion changes
+and source-loss gap taxonomy remain separate gates, while the durable cursor
+boundary now persists volume, stream, scope, and FSEvents settings atomically.
 
 The published JSON Schema describes the canonical normalized serialization emitted
 by Rust, so nullable/defaulted fields are present even when their value is `null` or

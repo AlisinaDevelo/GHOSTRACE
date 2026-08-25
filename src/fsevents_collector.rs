@@ -42,6 +42,7 @@ use uuid::Uuid;
 
 use crate::{
     consent::{ConsentConfirmation, ConsentReceipt, ConsentState, ConsentStateMachine},
+    cursor::{CursorIdentity, CursorToken, ReplayBoundary},
     error::GhostraceError,
     fsevents::{
         CallbackHealth, FseventsError, FseventsEvent, FseventsOptions, FseventsStream, StreamState,
@@ -51,7 +52,8 @@ use crate::{
     model::{
         CollectorLifecyclePayload, EntryKind, EventEnvelope, EventKind, EventPayload, EventSource,
         Evidence, FileOperation, FilesystemChangedPayload, IngestionOrigin, InstanceLabel,
-        PathClass, PathDigest, PolicyBlockedSummaryPayload, ReasonCode, RootId,
+        PathClass, PathDigest, PolicyBlockedSummaryPayload, ReasonCode, RootId, SnapshotDigest,
+        SourceCursor,
     },
     policy::{PolicyDocument, PolicyProfile},
     volume::VolumeIdentity,
@@ -328,6 +330,9 @@ pub enum FseventsCollectorError {
     #[error("selected root IDs must exactly match the policy scope")]
     RootScopeMismatch,
 
+    #[error("selected roots must be on one volume for a single replay boundary")]
+    MixedRootVolumes,
+
     #[error("the policy must enable both filesystem and lifecycle events")]
     MissingPolicySource,
 
@@ -373,6 +378,7 @@ pub struct FseventsCollector {
     writer: Writer,
     journal: Journal,
     origin: IngestionOrigin,
+    replay_boundary: ReplayBoundary,
     instance_label: InstanceLabel,
     state: CollectorState,
     accepted_events: u64,
@@ -406,6 +412,22 @@ impl FseventsCollector {
 
         let roots = roots.into_iter().collect::<Vec<_>>();
         validate_roots(&roots, &policy)?;
+        if roots.windows(2).any(|pair| pair[0].volume != pair[1].volume) {
+            return Err(FseventsCollectorError::MixedRootVolumes);
+        }
+
+        let root_scope_digest = digest_root_scope(&roots)?;
+        let exclusions_digest =
+            digest_identifiers(policy.excluded_roots.iter().map(String::as_str))?;
+        let cursor_identity = CursorIdentity::for_volume(
+            EventSource::Filesystem,
+            config.collector_instance.clone(),
+            config.options.stream_mode,
+            roots[0].volume.clone(),
+        )?;
+        let replay_configuration =
+            config.options.replay_configuration(root_scope_digest, exclusions_digest)?;
+        let replay_boundary = ReplayBoundary::new(cursor_identity, replay_configuration)?;
 
         let mut consent = ConsentStateMachine::new();
         let consent_receipt = consent.grant_preview(
@@ -455,6 +477,7 @@ impl FseventsCollector {
             writer,
             journal,
             origin,
+            replay_boundary,
             instance_label,
             state: CollectorState::Created,
             accepted_events: 0,
@@ -586,13 +609,34 @@ impl FseventsCollector {
         }
         if overflowed > 0 {
             self.dropped_events = self.dropped_events.saturating_add(overflowed);
-            self.submit_gap(overflowed)?;
+            self.submit_gap(overflowed, None, None, None)?;
         }
 
         let mut committed = Vec::new();
         for event in events {
             let normalized = event.normalize_flags();
             self.record_status(&normalized.status);
+            let source_cursor = SourceCursor::try_from(format!("cursor-{}", event.event_id))?;
+            if let Some(state) = self.journal.cursor_state(&self.replay_boundary.identity)? {
+                let current = CursorToken::new(state.token.raw().clone());
+                let candidate = CursorToken::new(source_cursor.clone());
+                if let (Some(current_position), Some(candidate_position)) =
+                    (current.position(), candidate.position())
+                {
+                    let missing =
+                        candidate_position.saturating_sub(current_position.saturating_add(1));
+                    if missing > 0 {
+                        let gap_cursor =
+                            SourceCursor::try_from(format!("cursor-{}", candidate_position - 1))?;
+                        self.submit_gap(
+                            missing.min(u128::from(u64::MAX)) as u64,
+                            Some(gap_cursor),
+                            Some(state.token.raw().clone()),
+                            Some(source_cursor.clone()),
+                        )?;
+                    }
+                }
+            }
             let Some(root) = self.root_for_path(&event.path) else {
                 self.blocked_events = self.blocked_events.saturating_add(1);
                 continue;
@@ -646,7 +690,7 @@ impl FseventsCollector {
                 EventSource::Filesystem,
                 EventKind::FilesystemChanged,
                 payload,
-                None,
+                Some(source_cursor),
                 self.policy.id.clone(),
                 self.policy.version,
                 collected.evidence,
@@ -657,11 +701,12 @@ impl FseventsCollector {
             } else {
                 vec![DiagnosticRecord::new("fsevents.status", normalized.status_code())?]
             };
-            match self.writer.submit(
+            match self.writer.submit_with_boundary(
                 self.origin.clone(),
                 vec![event],
                 self.policy.clone(),
                 diagnostics,
+                Some(self.replay_boundary.clone()),
             )? {
                 WriterOutcome::Committed(_) => {
                     self.accepted_events = self.accepted_events.saturating_add(1);
@@ -720,7 +765,13 @@ impl FseventsCollector {
         }
     }
 
-    fn submit_gap(&mut self, dropped_count: u64) -> Result<(), FseventsCollectorError> {
+    fn submit_gap(
+        &mut self,
+        dropped_count: u64,
+        source_cursor: Option<SourceCursor>,
+        from_cursor: Option<SourceCursor>,
+        to_cursor: Option<SourceCursor>,
+    ) -> Result<(), FseventsCollectorError> {
         let event = EventEnvelope::new(
             &self.origin,
             Uuid::new_v4(),
@@ -732,20 +783,21 @@ impl FseventsCollector {
                 source: EventSource::Filesystem,
                 reason_code: ReasonCode::try_from("callback_queue_overflow")?,
                 dropped_count,
-                from_cursor: None,
-                to_cursor: None,
+                from_cursor,
+                to_cursor,
             }),
-            None,
+            source_cursor,
             self.policy.id.clone(),
             self.policy.version,
             Evidence::Unknown,
             None,
         )?;
-        match self.writer.submit(
+        match self.writer.submit_with_boundary(
             self.origin.clone(),
             vec![event],
             self.policy.clone(),
             Vec::new(),
+            Some(self.replay_boundary.clone()),
         )? {
             WriterOutcome::Committed(_) => Ok(()),
             WriterOutcome::Gap(gap) => {
@@ -850,6 +902,37 @@ fn validate_roots(
         return Err(FseventsCollectorError::RootScopeMismatch);
     }
     Ok(())
+}
+
+fn digest_identifiers<'a, I>(identifiers: I) -> Result<SnapshotDigest, GhostraceError>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let mut identifiers = identifiers.into_iter().map(str::to_owned).collect::<Vec<_>>();
+    identifiers.sort();
+    let canonical = serde_json::to_vec(&identifiers)?;
+    let digest = Sha256::digest(canonical);
+    let encoded = digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    SnapshotDigest::try_from(format!("sha256:{encoded}"))
+}
+
+fn digest_root_scope(roots: &[SelectedRoot]) -> Result<SnapshotDigest, GhostraceError> {
+    let mut roots = roots
+        .iter()
+        .map(|root| {
+            (
+                root.id.as_str().to_owned(),
+                root.volume.fingerprint().as_str().to_owned(),
+                root.identity.device,
+                root.identity.inode,
+            )
+        })
+        .collect::<Vec<_>>();
+    roots.sort();
+    let canonical = serde_json::to_vec(&roots)?;
+    let digest = Sha256::digest(canonical);
+    let encoded = digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    SnapshotDigest::try_from(format!("sha256:{encoded}"))
 }
 
 fn filesystem_identity(metadata: &Metadata) -> FilesystemIdentity {

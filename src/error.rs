@@ -184,6 +184,9 @@ pub enum GhostraceError {
     #[error("cursor policy changed without a reset for source {event_source}")]
     CursorPolicyMismatch { event_source: crate::model::EventSource },
 
+    #[error("replay boundary changed without an explicit reset for source {event_source}")]
+    CursorBoundaryMismatch { event_source: crate::model::EventSource },
+
     #[error("cursor is invalidated for source {event_source}")]
     CursorInvalidated { event_source: crate::model::EventSource },
 

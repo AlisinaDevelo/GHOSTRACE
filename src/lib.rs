@@ -37,7 +37,8 @@ pub use crypto::{
 };
 pub use cursor::{
     CursorIdentity, CursorKind, CursorOrder, CursorState, CursorStatus, CursorStreamMode,
-    CursorToken, CursorTransition, CURSOR_CONTRACT_VERSION,
+    CursorToken, CursorTransition, ReplayBoundary, ReplayConfiguration, CURSOR_CONTRACT_VERSION,
+    REPLAY_BOUNDARY_CONTRACT_VERSION,
 };
 pub use error::{CryptoError, GhostraceError};
 pub use exclusion::{
