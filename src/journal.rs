@@ -20,14 +20,16 @@ use crate::{
     error::GhostraceError,
     fault::{FaultPlan, FaultPoint},
     model::{
-        CollectorInstanceId, EventEnvelope, EventKind, EventSource, Evidence, IngestionOrigin,
-        OriginBinding, PolicyProfileId, ProvenanceVersion, SourceCursor, EVENT_SCHEMA_VERSION,
+        CollectorInstanceId, EventEnvelope, EventKind, EventPayload, EventSource, Evidence,
+        IngestionOrigin, OriginBinding, PolicyProfileId, ProvenanceVersion, SourceCursor,
+        EVENT_SCHEMA_VERSION,
     },
     ordering::compare_event_order,
     policy::PolicyProfile,
     query::{
-        decode_page_token, make_token, validate_token_request, QueryOrderKey, QueryPage,
-        QueryRequest, QueryTokenPayload,
+        decode_page_token, make_token, validate_token_request, CoverageGap, CoverageInterval,
+        CoverageStatus, CoverageStatusKind, QueryCoverage, QueryOrderKey, QueryPage, QueryRequest,
+        QueryTokenPayload, MAX_COVERAGE_MARKERS,
     },
     storage,
     wal::{CheckpointMode, WalCheckpointReport, WalPolicy},
@@ -1415,6 +1417,10 @@ fn read_query_page(
             .and_then(|value| u64::try_from(value).map_err(|_| GhostraceError::QueryInvalid))?,
     };
     let boundary = i64::try_from(snapshot_boundary).map_err(|_| GhostraceError::QueryInvalid)?;
+    let current_match_count = count_query_events(connection, request, boundary)?;
+    let snapshot_match_count =
+        token.map(|value| value.snapshot_match_count).unwrap_or(current_match_count);
+    let retention_deletion_detected = token.is_some() && current_match_count < snapshot_match_count;
     let source = request.source.map(|value| value.to_string());
     let kind = request.kind.map(|value| value.to_string());
     let observed_from = request.observed_from.map(|value| value.to_rfc3339());
@@ -1480,6 +1486,7 @@ fn read_query_page(
                     request,
                     storage_schema_version,
                     snapshot_boundary,
+                    snapshot_match_count,
                     Some(QueryOrderKey {
                         observed_at: stored.event.observed_at.to_rfc3339(),
                         ingest_seq: stored.ingest_seq,
@@ -1493,7 +1500,215 @@ fn read_query_page(
     } else {
         None
     };
-    Ok(QueryPage { events, next_page_token, snapshot_boundary })
+    let coverage = if request.include_coverage {
+        build_query_coverage(
+            connection,
+            provider,
+            request,
+            boundary,
+            current_match_count,
+            retention_deletion_detected,
+        )?
+    } else {
+        QueryCoverage::opted_out()
+    };
+    Ok(QueryPage { events, next_page_token, snapshot_boundary, coverage })
+}
+
+fn count_query_events(
+    connection: &Connection,
+    request: &QueryRequest,
+    boundary: i64,
+) -> Result<u64, GhostraceError> {
+    let source = request.source.map(|value| value.to_string());
+    let kind = request.kind.map(|value| value.to_string());
+    let observed_from = request.observed_from.map(|value| value.to_rfc3339());
+    let observed_until = request.observed_until.map(|value| value.to_rfc3339());
+    let count = connection.query_row(
+        "SELECT COUNT(*) FROM events
+         WHERE ingest_seq <= ?1
+           AND policy_profile_id = ?2
+           AND policy_profile_version = ?3
+           AND (?4 IS NULL OR source = ?4)
+           AND (?5 IS NULL OR kind = ?5)
+           AND (?6 IS NULL OR observed_at >= ?6)
+           AND (?7 IS NULL OR observed_at <= ?7)",
+        params![
+            boundary,
+            request.policy_profile_id.as_str(),
+            request.policy_profile_version,
+            source,
+            kind,
+            observed_from,
+            observed_until,
+        ],
+        |row| row.get::<_, i64>(0),
+    )?;
+    u64::try_from(count).map_err(|_| GhostraceError::QueryInvalid)
+}
+
+fn build_query_coverage(
+    connection: &Connection,
+    provider: &dyn KeyProvider,
+    request: &QueryRequest,
+    boundary: i64,
+    observed_event_count: u64,
+    retention_deletion_detected: bool,
+) -> Result<QueryCoverage, GhostraceError> {
+    let marker_limit = i64::try_from(MAX_COVERAGE_MARKERS.saturating_add(1))
+        .map_err(|_| GhostraceError::QueryInvalid)?;
+    let observed_until = request.observed_until.map(|value| value.to_rfc3339());
+    let mut statement = connection.prepare(
+        "SELECT ingest_seq, event_id, schema_version, observed_at, ingested_at, source,
+                kind, collector_instance, source_cursor, provenance_version,
+                policy_profile_id, policy_profile_version, evidence, parent_event_id,
+                payload_ciphertext
+         FROM events
+         WHERE ingest_seq <= ?1
+           AND policy_profile_id = ?2
+           AND policy_profile_version = ?3
+           AND (?4 IS NULL OR observed_at <= ?4)
+           AND kind IN ('gap', 'policy_blocked_summary', 'collector_started',
+                        'collector_stopped', 'source_error')
+         ORDER BY observed_at DESC, ingest_seq DESC, event_id DESC
+         LIMIT ?5",
+    )?;
+    let mut rows = statement.query(params![
+        boundary,
+        request.policy_profile_id.as_str(),
+        request.policy_profile_version,
+        observed_until,
+        marker_limit,
+    ])?;
+    let mut markers = Vec::new();
+    while let Some(row) = rows.next()? {
+        markers.push(decode_stored(row_to_stored(row)?, provider)?);
+    }
+    let markers_truncated = markers.len() > MAX_COVERAGE_MARKERS;
+    if markers_truncated {
+        markers.truncate(MAX_COVERAGE_MARKERS);
+    }
+
+    let mut statuses = Vec::new();
+    add_coverage_status(
+        &mut statuses,
+        if observed_event_count == 0 {
+            CoverageStatusKind::NoEventsObserved
+        } else {
+            CoverageStatusKind::EventsObserved
+        },
+        request.source,
+        observed_event_count,
+    );
+    let mut gaps = Vec::new();
+    let mut recognized_marker = false;
+    for stored in markers {
+        let Some(source) = coverage_marker_source(&stored.event) else {
+            continue;
+        };
+        let interval =
+            CoverageInterval { source, start: Some(stored.event.observed_at), end: None };
+        if !interval.intersects_source(
+            request.source,
+            request.observed_from,
+            request.observed_until,
+        ) {
+            continue;
+        }
+        match &stored.event.payload {
+            EventPayload::Gap(payload) => {
+                recognized_marker = true;
+                add_coverage_status(&mut statuses, CoverageStatusKind::SourceGap, Some(source), 1);
+                gaps.push(CoverageGap {
+                    event_id: stored.event.event_id,
+                    interval,
+                    reason_code: payload.reason_code.as_str().to_owned(),
+                    dropped_count: payload.dropped_count,
+                    from_cursor: payload.from_cursor.clone(),
+                    to_cursor: payload.to_cursor.clone(),
+                });
+            }
+            EventPayload::PolicyBlockedSummary(payload) => {
+                recognized_marker = true;
+                add_coverage_status(
+                    &mut statuses,
+                    CoverageStatusKind::PolicyDenied,
+                    Some(source),
+                    payload.count,
+                );
+            }
+            EventPayload::CollectorStopped(_) => {
+                recognized_marker = true;
+                add_coverage_status(
+                    &mut statuses,
+                    CoverageStatusKind::SourceDisabled,
+                    Some(source),
+                    1,
+                );
+            }
+            EventPayload::SourceError(_) => {
+                recognized_marker = true;
+                add_coverage_status(
+                    &mut statuses,
+                    CoverageStatusKind::UnknownHistory,
+                    Some(source),
+                    1,
+                );
+            }
+            EventPayload::CollectorStarted(_) => {}
+            _ => {}
+        }
+    }
+    if observed_event_count == 0 && !recognized_marker {
+        add_coverage_status(&mut statuses, CoverageStatusKind::UnknownHistory, request.source, 1);
+    }
+    if retention_deletion_detected {
+        add_coverage_status(
+            &mut statuses,
+            CoverageStatusKind::RetentionDeletion,
+            request.source,
+            1,
+        );
+    }
+    statuses.sort_by_key(|status| (status.kind, status.source));
+    gaps.sort_by_key(|gap| (gap.interval.start, gap.interval.source, gap.event_id));
+    Ok(QueryCoverage {
+        observed_event_count,
+        statuses,
+        gaps,
+        gaps_truncated: markers_truncated,
+        retention_deletion_detected,
+        marker_filter_ignored: request.kind.is_some(),
+        opted_out: false,
+        contract_version: crate::query::COVERAGE_CONTRACT_VERSION,
+    })
+}
+
+fn add_coverage_status(
+    statuses: &mut Vec<CoverageStatus>,
+    kind: CoverageStatusKind,
+    source: Option<EventSource>,
+    count: u64,
+) {
+    if let Some(existing) =
+        statuses.iter_mut().find(|status| status.kind == kind && status.source == source)
+    {
+        existing.count = existing.count.saturating_add(count);
+    } else {
+        statuses.push(CoverageStatus { kind, source, count });
+    }
+}
+
+fn coverage_marker_source(event: &EventEnvelope) -> Option<EventSource> {
+    match &event.payload {
+        EventPayload::Gap(payload) => Some(payload.source),
+        EventPayload::PolicyBlockedSummary(payload) => Some(payload.source),
+        EventPayload::CollectorStarted(payload) | EventPayload::CollectorStopped(payload) => {
+            Some(payload.collector)
+        }
+        EventPayload::SourceError(payload) => Some(payload.source),
+        _ => None,
+    }
 }
 
 fn validate_query_policy_scope(

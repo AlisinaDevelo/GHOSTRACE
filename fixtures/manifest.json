@@ -54,6 +54,14 @@
       "seed": "ghostrace-fixture-seed-v1",
       "sha256": "9092a7682a300ed51fca9e88be191feac4438e3d1223b55e55dac77d9adb19aa",
       "bytes": 2963
+    },
+    {
+      "path": "fixtures/query-gap-coverage-v1.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "685851dab390cc418653c99de144493f9e6bffdb78d46e69d6f74fca4732efe7",
+      "bytes": 1206
     }
   ],
   "privacy": {

@@ -117,6 +117,13 @@ evidence distinct. Clock rollback, leap-boundary adjustment, sleep-sized gaps,
 delayed batches, equal timestamps, and missing source time are fixture-backed;
 explanations label any ingest-sequence fallback as temporal ambiguity.
 
+Task 0079 adds a versioned coverage contract to every query page. Marker scans
+remain bounded and ignore event-kind filters so relevant source gaps, policy
+denials, and collector stops cannot disappear behind a sparse result. Open-ended
+gap intervals, retention deletion detection across page tokens, no-event versus
+unknown-history statuses, and explicit coverage opt-out are golden- and
+integration-tested.
+
 ### Explicit developer and application context
 
 M4 adds only integrations the person deliberately enables. The shell wrapper cannot
