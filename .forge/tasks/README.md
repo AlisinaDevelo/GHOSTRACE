@@ -19,7 +19,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0013 | Implement selected-root macOS FSEvents collector | M2 | done | filesystem | maintainer | — | 0002, 0007, 0010, 0012, 0063, 0064, 0065 |
 | 0014 | Enforce root canonicalization, symlink, and exclusion rules | M2 | done | filesystem | maintainer | — | 0007, 0013, 0067, 0068, 0069 |
 | 0015 | Persist FSEvents cursors and recover after restart | M2 | done | filesystem | maintainer | — | 0010, 0013, 0066, 0070, 0071, 0072 |
-| 0016 | Add event-storm backpressure and loss accounting | M2 | backlog | filesystem | maintainer | — | 0010, 0013, 0015, 0073, 0074 |
+| 0016 | Add event-storm backpressure and loss accounting | M2 | done | filesystem | maintainer | — | 0010, 0013, 0015, 0073, 0074 |
 | 0017 | Publish filesystem correctness and latency benchmarks | M2 | backlog | filesystem | maintainer | — | 0013, 0014, 0015, 0016, 0075, 0076 |
 | 0018 | Implement time-window queries and stable ordering | M3 | backlog | explain-export | maintainer | — | 0010, 0012, 0077, 0078, 0079 |
 | 0019 | Implement deterministic evidence-backed explain | M3 | backlog | explain-export | maintainer | — | 0017, 0018, 0080, 0081, 0082 |
