@@ -59,3 +59,20 @@ logs from each command.
 The locked-session Keychain lifecycle test requires explicit device Keychain
 authorization and remains reported as ignored/unavailable. No path, display
 name, account data, credential, or capture key is retained in this evidence.
+
+## Live GitHub reconciliation
+
+After issue #19 was updated with the acceptance receipt and closed, an
+independent authenticated read reported 160 repository issues (114 open, 46
+closed), 12 milestones, and 31 managed labels (45 labels total). Issue #19 is
+closed and carries `status:done`; the other managed status counts are 114
+`status:backlog` issues and no unexpected status labels.
+
+The repository metadata planner was run twice against the public API with the
+same task-tree digest
+`5068e89fc5d34f586ce3a935d0a7c41f028ff35252e8bdcaae7f00200836c4e4`. Both
+plans returned zero operations, the same plan digest
+`5fa4dc93301002d2daa55fce5fdaad9060b7ceee0d20584f38915ae70a5a22e4`, and
+byte-identical JSON receipts (SHA-256
+`5ab80a19b049aa336e484db9b3869b784a2a396a728fbdeab36ad7ffaf6a71ee`). No
+metadata apply was needed after this zero-delta result.
