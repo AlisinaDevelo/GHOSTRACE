@@ -54,6 +54,8 @@ pub const MAX_CALLBACK_PATH_BYTES: usize = 4 * 1024;
 
 /// FSEvents create flags used by the fixture and integration contracts.
 pub const FLAG_NO_DEFER: u32 = 0x0000_0002;
+/// Request a callback when a selected watch root is renamed or removed.
+pub const FLAG_WATCH_ROOT: u32 = 0x0000_0004;
 pub const FLAG_FILE_EVENTS: u32 = 0x0000_0010;
 /// Callback representation flags intentionally rejected by this raw-path adapter.
 ///
@@ -147,7 +149,7 @@ impl Default for FseventsOptions {
         Self {
             since_when: EVENT_ID_SINCE_NOW,
             latency: DEFAULT_LATENCY,
-            flags: FLAG_FILE_EVENTS | FLAG_NO_DEFER,
+            flags: FLAG_FILE_EVENTS | FLAG_NO_DEFER | FLAG_WATCH_ROOT,
             stream_mode: CursorStreamMode::PerHost,
         }
     }

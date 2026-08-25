@@ -128,8 +128,12 @@ device/filesystem fields and an optional volume-UUID digest; mutable display nam
 are excluded. Cursor identities require the same volume and stream mode before a
 resume is allowed. The durable cursor boundary stores only root and exclusion
 digests plus bounded stream settings (`since_when`, latency, and file-event mode);
-it never stores a path or display name. Any boundary change fails closed until an
-explicit reset or wrap. Ambient capture still requires the remaining release gates.
+it never stores a path or display name. Selected-root source-loss gaps add only a
+volume fingerprint, opaque root IDs, bounded cursor range, stable reason code, and
+remediation; they never retain the callback path or a rescan listing. Any boundary
+change fails closed until an explicit reset or wrap. The collector exposes
+`recovery_required` and refuses ordinary delivery after a loss until reconciliation;
+ambient capture still requires the remaining release gates.
 
 ## Local storage and export
 

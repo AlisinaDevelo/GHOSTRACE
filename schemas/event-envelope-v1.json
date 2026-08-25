@@ -538,7 +538,30 @@
               "maximum": 18446744073709551615
             },
             "from_cursor": { "$ref": "#/$defs/nullable_cursor_id" },
-            "to_cursor": { "$ref": "#/$defs/nullable_cursor_id" }
+            "to_cursor": { "$ref": "#/$defs/nullable_cursor_id" },
+            "volume_digest": {
+              "oneOf": [
+                { "$ref": "#/$defs/sha256_digest" },
+                { "type": "null" }
+              ]
+            },
+            "root_ids": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/opaque_identifier" },
+              "maxItems": 64
+            },
+            "remediation": {
+              "oneOf": [
+                {
+                  "enum": [
+                    "rescan_selected_roots",
+                    "reconcile_selected_root",
+                    "reinitialize_stream"
+                  ]
+                },
+                { "type": "null" }
+              ]
+            }
           }
         }
       }

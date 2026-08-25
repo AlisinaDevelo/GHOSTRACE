@@ -51,9 +51,9 @@ use crate::{
     journal::{DiagnosticRecord, Journal},
     model::{
         CollectorLifecyclePayload, EntryKind, EventEnvelope, EventKind, EventPayload, EventSource,
-        Evidence, FileOperation, FilesystemChangedPayload, IngestionOrigin, InstanceLabel,
-        PathClass, PathDigest, PolicyBlockedSummaryPayload, ReasonCode, RootId, SnapshotDigest,
-        SourceCursor,
+        Evidence, FileOperation, FilesystemChangedPayload, GapRemediation, IngestionOrigin,
+        InstanceLabel, PathClass, PathDigest, PolicyBlockedSummaryPayload, ReasonCode, RootId,
+        SnapshotDigest, SourceCursor,
     },
     policy::{PolicyDocument, PolicyProfile},
     volume::VolumeIdentity,
@@ -313,6 +313,9 @@ pub struct CollectorStatus {
     pub rescan_required: u64,
     pub unsupported_events: u64,
     pub contradictory_events: u64,
+    /// A source-loss gap has stopped automatic resume until a later
+    /// reconciliation stage explicitly clears this condition.
+    pub recovery_required: bool,
     pub callback_health: CallbackHealth,
 }
 
@@ -365,6 +368,17 @@ struct PendingState {
     overflowed: u64,
 }
 
+struct GapSubmission {
+    dropped_count: u64,
+    reason_code: &'static str,
+    source_cursor: Option<SourceCursor>,
+    from_cursor: Option<SourceCursor>,
+    to_cursor: Option<SourceCursor>,
+    remediation: Option<GapRemediation>,
+    root_ids: Vec<RootId>,
+    requires_reconciliation: bool,
+}
+
 /// The selected-root source adapter. It is intentionally owner-thread-bound
 /// through the contained [`FseventsStream`].
 pub struct FseventsCollector {
@@ -388,6 +402,7 @@ pub struct FseventsCollector {
     rescan_required: u64,
     unsupported_events: u64,
     contradictory_events: u64,
+    recovery_required: bool,
 }
 
 impl FseventsCollector {
@@ -487,6 +502,7 @@ impl FseventsCollector {
             rescan_required: 0,
             unsupported_events: 0,
             contradictory_events: 0,
+            recovery_required: false,
         })
     }
 
@@ -502,6 +518,7 @@ impl FseventsCollector {
             rescan_required: self.rescan_required,
             unsupported_events: self.unsupported_events,
             contradictory_events: self.contradictory_events,
+            recovery_required: self.recovery_required,
             callback_health: self.stream.callback_health(),
         }
     }
@@ -609,13 +626,41 @@ impl FseventsCollector {
         }
         if overflowed > 0 {
             self.dropped_events = self.dropped_events.saturating_add(overflowed);
-            self.submit_gap(overflowed, None, None, None)?;
+            self.submit_gap(GapSubmission {
+                dropped_count: overflowed,
+                reason_code: "callback_queue_overflow",
+                source_cursor: None,
+                from_cursor: None,
+                to_cursor: None,
+                remediation: Some(GapRemediation::RescanSelectedRoots),
+                root_ids: self.all_root_ids(),
+                requires_reconciliation: true,
+            })?;
         }
 
         let mut committed = Vec::new();
         for event in events {
+            if self.recovery_required {
+                self.dropped_events = self.dropped_events.saturating_add(1);
+                continue;
+            }
             let normalized = event.normalize_flags();
             self.record_status(&normalized.status);
+            if let Some(reason_code) = normalized.gap_reason_code() {
+                let (source_cursor, from_cursor, to_cursor, dropped_count) =
+                    self.coverage_gap_cursors(&event, &normalized);
+                self.submit_gap(GapSubmission {
+                    dropped_count,
+                    reason_code,
+                    source_cursor,
+                    from_cursor,
+                    to_cursor,
+                    remediation: Some(remediation_for(&normalized)),
+                    root_ids: self.affected_root_ids(&event.path, &normalized),
+                    requires_reconciliation: true,
+                })?;
+                continue;
+            }
             let source_cursor = SourceCursor::try_from(format!("cursor-{}", event.event_id))?;
             if let Some(state) = self.journal.cursor_state(&self.replay_boundary.identity)? {
                 let current = CursorToken::new(state.token.raw().clone());
@@ -628,12 +673,16 @@ impl FseventsCollector {
                     if missing > 0 {
                         let gap_cursor =
                             SourceCursor::try_from(format!("cursor-{}", candidate_position - 1))?;
-                        self.submit_gap(
-                            missing.min(u128::from(u64::MAX)) as u64,
-                            Some(gap_cursor),
-                            Some(state.token.raw().clone()),
-                            Some(source_cursor.clone()),
-                        )?;
+                        self.submit_gap(GapSubmission {
+                            dropped_count: missing.min(u128::from(u64::MAX)) as u64,
+                            reason_code: "cursor_jump",
+                            source_cursor: Some(gap_cursor),
+                            from_cursor: Some(state.token.raw().clone()),
+                            to_cursor: Some(source_cursor.clone()),
+                            remediation: Some(GapRemediation::RescanSelectedRoots),
+                            root_ids: self.affected_root_ids(&event.path, &normalized),
+                            requires_reconciliation: false,
+                        })?;
                     }
                 }
             }
@@ -765,13 +814,8 @@ impl FseventsCollector {
         }
     }
 
-    fn submit_gap(
-        &mut self,
-        dropped_count: u64,
-        source_cursor: Option<SourceCursor>,
-        from_cursor: Option<SourceCursor>,
-        to_cursor: Option<SourceCursor>,
-    ) -> Result<(), FseventsCollectorError> {
+    fn submit_gap(&mut self, gap: GapSubmission) -> Result<(), FseventsCollectorError> {
+        let requires_reconciliation = gap.requires_reconciliation;
         let event = EventEnvelope::new(
             &self.origin,
             Uuid::new_v4(),
@@ -781,12 +825,15 @@ impl FseventsCollector {
             EventKind::Gap,
             EventPayload::Gap(crate::model::GapPayload {
                 source: EventSource::Filesystem,
-                reason_code: ReasonCode::try_from("callback_queue_overflow")?,
-                dropped_count,
-                from_cursor,
-                to_cursor,
+                reason_code: ReasonCode::try_from(gap.reason_code)?,
+                dropped_count: gap.dropped_count,
+                from_cursor: gap.from_cursor,
+                to_cursor: gap.to_cursor,
+                volume_digest: self.roots.first().map(|root| root.volume.fingerprint()),
+                root_ids: gap.root_ids,
+                remediation: gap.remediation,
             }),
-            source_cursor,
+            gap.source_cursor,
             self.policy.id.clone(),
             self.policy.version,
             Evidence::Unknown,
@@ -799,12 +846,91 @@ impl FseventsCollector {
             Vec::new(),
             Some(self.replay_boundary.clone()),
         )? {
-            WriterOutcome::Committed(_) => Ok(()),
-            WriterOutcome::Gap(gap) => {
-                self.dropped_events = self.dropped_events.saturating_add(gap.event_count as u64);
+            WriterOutcome::Committed(_) => {
+                if requires_reconciliation {
+                    self.recovery_required = true;
+                }
+                Ok(())
+            }
+            WriterOutcome::Gap(writer_gap) => {
+                self.dropped_events =
+                    self.dropped_events.saturating_add(writer_gap.event_count as u64);
+                if requires_reconciliation {
+                    self.recovery_required = true;
+                }
                 Ok(())
             }
         }
+    }
+
+    fn all_root_ids(&self) -> Vec<RootId> {
+        let mut root_ids = self.roots.iter().map(|root| root.id.clone()).collect::<Vec<_>>();
+        root_ids.sort();
+        root_ids
+    }
+
+    fn affected_root_ids(&self, path: &Path, normalized: &NormalizedFseventsEvent) -> Vec<RootId> {
+        if matches!(
+            normalized.status,
+            FseventsEvidenceStatus::Boundary {
+                reason: crate::fsevents_flags::FseventsBoundaryReason::RootChanged
+            }
+        ) {
+            let matching = self
+                .roots
+                .iter()
+                .filter(|root| root.path() == path || root.contains_path(path))
+                .map(|root| root.id.clone())
+                .collect::<Vec<_>>();
+            if !matching.is_empty() {
+                return matching;
+            }
+            return self.all_root_ids();
+        }
+        self.root_for_path(path)
+            .map(|root| vec![root.id.clone()])
+            .unwrap_or_else(|| self.all_root_ids())
+    }
+
+    fn coverage_gap_cursors(
+        &self,
+        event: &FseventsEvent,
+        normalized: &NormalizedFseventsEvent,
+    ) -> (Option<SourceCursor>, Option<SourceCursor>, Option<SourceCursor>, u64) {
+        if matches!(
+            normalized.status,
+            FseventsEvidenceStatus::Boundary {
+                reason: crate::fsevents_flags::FseventsBoundaryReason::RootChanged
+            }
+        ) || matches!(
+            normalized.status,
+            FseventsEvidenceStatus::RescanRequired {
+                reason: crate::fsevents_flags::FseventsRescanReason::EventIdsWrapped
+            }
+        ) {
+            return (None, None, None, 0);
+        }
+        let Ok(candidate) = SourceCursor::try_from(format!("cursor-{}", event.event_id)) else {
+            return (None, None, None, 0);
+        };
+        let Some(candidate_position) = CursorToken::new(candidate.clone()).position() else {
+            return (None, None, None, 0);
+        };
+        let Some(state) = self.journal.cursor_state(&self.replay_boundary.identity).ok().flatten()
+        else {
+            return (Some(candidate.clone()), None, Some(candidate), 0);
+        };
+        let current = CursorToken::new(state.token.raw().clone());
+        let Some(current_position) = current.position() else {
+            return (None, None, None, 0);
+        };
+        if candidate_position <= current_position {
+            return (None, None, None, 0);
+        }
+        let missing = candidate_position
+            .saturating_sub(current_position.saturating_add(1))
+            .min(u128::from(u64::MAX)) as u64;
+        (Some(candidate.clone()), Some(state.token.raw().clone()), Some(candidate), missing)
     }
 
     fn submit_blocked_summary(&mut self) -> Result<(), FseventsCollectorError> {
@@ -1203,6 +1329,22 @@ fn entry_kind_for(event: &NormalizedFseventsEvent) -> EntryKind {
         EntryKind::Directory
     } else {
         EntryKind::Unknown
+    }
+}
+
+fn remediation_for(event: &NormalizedFseventsEvent) -> GapRemediation {
+    match event.status {
+        FseventsEvidenceStatus::Boundary {
+            reason: crate::fsevents_flags::FseventsBoundaryReason::RootChanged,
+        } => GapRemediation::ReconcileSelectedRoot,
+        FseventsEvidenceStatus::RescanRequired {
+            reason: crate::fsevents_flags::FseventsRescanReason::EventIdsWrapped,
+        } => GapRemediation::ReinitializeStream,
+        FseventsEvidenceStatus::RescanRequired { .. } => GapRemediation::RescanSelectedRoots,
+        FseventsEvidenceStatus::Observed
+        | FseventsEvidenceStatus::Boundary { .. }
+        | FseventsEvidenceStatus::Unsupported { .. }
+        | FseventsEvidenceStatus::Contradictory { .. } => GapRemediation::RescanSelectedRoots,
     }
 }
 

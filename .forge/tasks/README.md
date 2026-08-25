@@ -74,7 +74,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0068 | Harden symlink, hard-link, and open-race containment | M2 | done | filesystem | security-auditor | 0014 | 0013, 0057 |
 | 0069 | Version exclusion precedence and matching rules | M2 | done | filesystem | privacy-engineer | 0014 | 0007, 0050 |
 | 0070 | Persist one replay boundary per source and volume | M2 | done | filesystem | database-expert | 0015 | 0061, 0063, 0066 |
-| 0071 | Emit gaps for dropped, wrapped, and root-changed history | M2 | backlog | filesystem | macos-engineer | 0015 | 0065, 0070 |
+| 0071 | Emit gaps for dropped, wrapped, and root-changed history | M2 | done | filesystem | macos-engineer | 0015 | 0065, 0070 |
 | 0072 | Define startup history-done and invalid-cursor behavior | M2 | backlog | filesystem | macos-engineer | 0015 | 0065, 0070 |
 | 0073 | Specify coalescing, deduplication, and rename limits | M2 | backlog | filesystem | architect | 0016 | 0065, 0070, 0071 |
 | 0074 | Prevent collector feedback loops and own-event suppression errors | M2 | backlog | filesystem | security-auditor | 0016 | 0065, 0069, 0070 |
