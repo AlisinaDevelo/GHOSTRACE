@@ -122,6 +122,14 @@ The active gate is false for every state except `active`; revocation is applied 
 asynchronous cleanup, and replay rejects gaps, out-of-order receipts, mismatched
 policy context, and non-grant attempts to reactivate collection.
 
+The selected-root gate exposes a bounded `ConsentPreview` before activation. It shows
+canonical opaque root identities, exclusions, retained fields, and known coverage
+limits; an explicit confirmation is consumed by `grant_preview` to create the
+receipt. The preview is user-visible but is not copied into diagnostics or receipts,
+which retain only its immutable policy identity/version and scope digest. Revocation
+returns a `revoked` terminal receipt synchronously, so an adapter can stop observing
+before any cleanup work runs.
+
 The policy gate also emits a bounded decision record. Its finite outcomes are allow,
 deny, redact, summarize, and refuse; its diagnostics distinguish policy denial,
 malformed input, unsupported scope, and internal failure. The record reports only

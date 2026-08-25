@@ -79,6 +79,13 @@ capture gate synchronously; cleanup may run afterward but cannot re-enable reten
 Receipt replay requires contiguous sequence numbers and valid state transitions, and
 only an explicit grant can return a non-active state to active.
 
+Before a live root is eligible, `ConsentPreview` renders the canonical opaque root
+identities, exclusions, retained fields, and known coverage limits. The caller must
+explicitly confirm that preview before `grant_preview` can create an active receipt;
+preview contents are bounded and are not persisted in the receipt. A revoked or
+deletion-requested state is terminal for the current observation session and is
+reported before cleanup can proceed.
+
 Policy decisions expose a finite outcome set (`allow`, `deny`, `redact`, `summarize`,
 or `refuse`) and finite diagnostic classes. Public decision records contain policy
 identity/version, source, root presence, private-context state, and a reason code;
