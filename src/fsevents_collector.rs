@@ -13,12 +13,16 @@
 
 use std::{
     collections::{BTreeSet, VecDeque},
+    fs::Metadata,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
 #[cfg(target_os = "macos")]
 use std::time::Duration;
+
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -53,6 +57,25 @@ pub const MAX_PENDING_EVENTS: usize = 4 * 1024;
 pub struct SelectedRoot {
     id: RootId,
     canonical_path: PathBuf,
+    identity: FilesystemIdentity,
+}
+
+/// The filesystem identity used for containment, never exported as event data.
+///
+/// Device identity is deliberately part of the comparison. A lexical path
+/// prefix cannot establish that a reported path is on the selected volume when
+/// another volume is mounted below that prefix. The inode component prevents a
+/// replaced root directory from silently inheriting the old scope.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FilesystemIdentity {
+    device: u64,
+    inode: u64,
+}
+
+#[derive(Debug)]
+struct ResolvedPath {
+    canonical_existing: PathBuf,
+    identity: FilesystemIdentity,
 }
 
 impl SelectedRoot {
@@ -96,7 +119,10 @@ impl SelectedRoot {
                 reason: "selected root is not a directory",
             });
         }
-        Ok(Self { id: RootId::try_from(id.into())?, canonical_path })
+        let identity = filesystem_identity(&std::fs::metadata(&canonical_path).map_err(|_| {
+            FseventsCollectorError::InvalidRoot { reason: "root identity cannot be read" }
+        })?);
+        Ok(Self { id: RootId::try_from(id.into())?, canonical_path, identity })
     }
 
     pub fn id(&self) -> &RootId {
@@ -105,6 +131,41 @@ impl SelectedRoot {
 
     pub fn path(&self) -> &Path {
         &self.canonical_path
+    }
+
+    /// Return whether a reported path belongs to this root under the operating
+    /// system's filesystem identity rules.
+    ///
+    /// No case folding or Unicode normalization is invented here. Existing
+    /// components are resolved by `realpath`/`canonicalize`; a missing leaf is
+    /// checked through its nearest existing ancestor. This preserves the
+    /// distinction between case-sensitive, case-insensitive, and
+    /// normalization-sensitive volumes while still rejecting `..`, lexical
+    /// prefix tricks, symlink escapes, and different-device descendants.
+    pub fn contains_path(&self, path: &Path) -> bool {
+        resolve_path(path).is_some_and(|resolved| self.contains_resolved(&resolved))
+    }
+
+    /// Digest a path in this root's explicit scope. The digest is stable only
+    /// for the same root ID, root filesystem identity, OS canonicalization, and
+    /// path bytes; it is not a cross-volume or cross-scope identifier.
+    pub fn path_digest(&self, path: &Path) -> Result<PathDigest, FseventsCollectorError> {
+        if !self.contains_path(path) {
+            return Err(FseventsCollectorError::InvalidRoot {
+                reason: "path is outside the selected root",
+            });
+        }
+        digest_path_scoped(path, self)
+    }
+
+    fn contains_resolved(&self, resolved: &ResolvedPath) -> bool {
+        let root_is_current = std::fs::metadata(&self.canonical_path)
+            .ok()
+            .map(|metadata| filesystem_identity(&metadata))
+            == Some(self.identity);
+        root_is_current
+            && resolved.identity.device == self.identity.device
+            && resolved.canonical_existing.starts_with(&self.canonical_path)
     }
 }
 
@@ -434,17 +495,18 @@ impl FseventsCollector {
         for event in events {
             let normalized = event.normalize_flags();
             self.record_status(&normalized.status);
-            let Some(root_id) = self.root_for_path(&event.path).map(|root| root.id.clone()) else {
+            let Some(root) = self.root_for_path(&event.path) else {
                 self.blocked_events = self.blocked_events.saturating_add(1);
                 continue;
             };
+            let root_id = root.id.clone();
             let decision =
                 self.policy.decide(EventSource::Filesystem, Some(root_id.as_str()), false);
             if !decision.is_allowed() {
                 self.blocked_events = self.blocked_events.saturating_add(1);
                 continue;
             }
-            let path_digest = digest_path(&event.path)?;
+            let path_digest = root.path_digest(&event.path)?;
             let Some(mut operation) = operation_for(&normalized) else {
                 continue;
             };
@@ -636,7 +698,7 @@ impl FseventsCollector {
     fn root_for_path(&self, path: &Path) -> Option<&SelectedRoot> {
         self.roots
             .iter()
-            .filter(|root| path.starts_with(root.path()))
+            .filter(|root| root.contains_path(path))
             .max_by_key(|root| root.path().components().count())
     }
 
@@ -692,14 +754,59 @@ fn validate_roots(
     Ok(())
 }
 
-fn digest_path(path: &Path) -> Result<PathDigest, FseventsCollectorError> {
+fn filesystem_identity(metadata: &Metadata) -> FilesystemIdentity {
+    #[cfg(unix)]
+    {
+        FilesystemIdentity { device: metadata.dev(), inode: metadata.ino() }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = metadata;
+        FilesystemIdentity { device: 0, inode: 0 }
+    }
+}
+
+fn resolve_path(path: &Path) -> Option<ResolvedPath> {
+    if !path.is_absolute()
+        || path.components().any(|component| component == std::path::Component::ParentDir)
+    {
+        return None;
+    }
+
+    let mut candidate = path.to_path_buf();
+    loop {
+        if let Ok(canonical_existing) = std::fs::canonicalize(&candidate) {
+            let metadata = std::fs::metadata(&canonical_existing).ok()?;
+            return Some(ResolvedPath {
+                canonical_existing,
+                identity: filesystem_identity(&metadata),
+            });
+        }
+        if !candidate.pop() {
+            return None;
+        }
+    }
+}
+
+fn digest_path_scoped(
+    path: &Path,
+    root: &SelectedRoot,
+) -> Result<PathDigest, FseventsCollectorError> {
+    let digest_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     #[cfg(target_os = "macos")]
-    let digest = {
+    let path_bytes = {
         use std::os::unix::ffi::OsStrExt;
-        Sha256::digest(path.as_os_str().as_bytes())
+        digest_path.as_os_str().as_bytes().to_vec()
     };
     #[cfg(not(target_os = "macos"))]
-    let digest = Sha256::digest(path.to_string_lossy().as_bytes());
+    let path_bytes = digest_path.to_string_lossy().as_bytes().to_vec();
+    let mut hasher = Sha256::new();
+    hasher.update(b"ghostrace-fsevents-path-digest-v2\0");
+    hasher.update(root.id.as_str().as_bytes());
+    hasher.update(root.identity.device.to_le_bytes());
+    hasher.update(root.identity.inode.to_le_bytes());
+    hasher.update(path_bytes);
+    let digest = hasher.finalize();
     let encoded = digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
     Ok(PathDigest::try_from(format!("sha256:{encoded}"))?)
 }
@@ -749,15 +856,18 @@ mod tests {
 
     #[test]
     fn operation_mapping_is_deterministic_and_path_digest_is_not_path_text() {
+        let directory = tempfile::tempdir().expect("root");
+        let root = SelectedRoot::new("root-main", directory.path()).expect("root");
+        let secret_path = root.path().join("collector-secret");
         let created = crate::fsevents::FseventsEvent {
-            path: PathBuf::from("/private/tmp/collector-secret"),
+            path: secret_path.clone(),
             event_id: 1,
             flags: EVENT_FLAG_ITEM_CREATED | EVENT_FLAG_ITEM_IS_FILE,
         };
         let normalized = created.normalize_flags();
         assert_eq!(operation_for(&normalized), Some(FileOperation::Created));
         assert_eq!(entry_kind_for(&normalized), EntryKind::File);
-        let digest = digest_path(&created.path).expect("digest");
+        let digest = root.path_digest(&created.path).expect("digest");
         assert!(!digest.as_str().contains("collector-secret"));
 
         for (flags, expected) in [
@@ -788,5 +898,60 @@ mod tests {
             validate_roots(&[root, extra], &policy),
             Err(FseventsCollectorError::RootScopeMismatch)
         ));
+    }
+
+    #[test]
+    fn containment_rejects_a_lexical_prefix_trick_and_parent_traversal() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let root_path = directory.path().join("selected");
+        let sibling_path = directory.path().join("selected-sibling");
+        std::fs::create_dir(&root_path).expect("root");
+        std::fs::create_dir(&sibling_path).expect("sibling");
+        let root = SelectedRoot::new("root-main", &root_path).expect("root");
+
+        assert!(root.contains_path(&root.path().join("missing/child")));
+        assert!(!root.contains_path(&sibling_path.join("child")));
+        assert!(!root.contains_path(&root.path().join("missing/../escape")));
+    }
+
+    #[test]
+    fn mixed_volume_identity_cannot_be_overridden_by_a_matching_path_prefix() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let root = SelectedRoot::new("root-main", directory.path()).expect("root");
+        let resolved = ResolvedPath {
+            canonical_existing: root.path().join("mounted-volume").to_path_buf(),
+            identity: FilesystemIdentity {
+                device: root.identity.device.saturating_add(1),
+                inode: root.identity.inode,
+            },
+        };
+        assert!(!root.contains_resolved(&resolved));
+    }
+
+    #[test]
+    fn replacing_the_selected_root_invalidates_the_original_identity() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let root_path = directory.path().join("selected");
+        let replacement_path = directory.path().join("replacement");
+        std::fs::create_dir(&root_path).expect("root");
+        let root = SelectedRoot::new("root-main", &root_path).expect("root");
+        std::fs::rename(&root_path, &replacement_path).expect("move original root");
+        std::fs::create_dir(&root_path).expect("replacement root");
+
+        assert!(!root.contains_path(&root_path.join("new-child")));
+    }
+
+    #[test]
+    fn digest_scope_includes_root_identity_and_uses_os_canonical_bytes() {
+        let directory = tempfile::tempdir().expect("root");
+        let root = SelectedRoot::new("root-main", directory.path()).expect("root");
+        let other_scope = SelectedRoot::new("root-other", directory.path()).expect("root");
+        let path = root.path().join("café");
+        std::fs::write(&path, b"fixture").expect("file");
+
+        let first = root.path_digest(&path).expect("digest");
+        let second = other_scope.path_digest(&path).expect("digest");
+        assert_ne!(first, second);
+        assert!(!first.as_str().contains("café"));
     }
 }

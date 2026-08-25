@@ -71,9 +71,13 @@ session, and no legacy-keychain fallback is permitted.
 
 The first live-source API observes bounded filesystem metadata below explicitly selected
 roots. `FseventsCollector` requires a consumed consent confirmation, canonicalizes each
-startup root, rejects paths outside the selected lexical scope, applies the existing
-versioned policy before persistence, and retains no file contents. FSEvents does not guarantee
-process attribution, event completeness, or one notification per change. Source
+startup root, compares reported paths through the operating system's canonical path and
+device/inode identity, rejects parent traversal, lexical-prefix tricks, and different-device
+descendants, applies the existing versioned policy before persistence, and retains no file
+contents. It deliberately does not case-fold or Unicode-normalize path strings itself; the
+filesystem decides whether composed/decomposed or case variants resolve to one identity.
+FSEvents does not guarantee process attribution, event completeness, or one notification per
+change. Source
 flags, cursor state, and gaps must remain visible.
 
 The collector records start/stop lifecycle events, hashes reported paths, and routes
@@ -92,7 +96,9 @@ never allowed to unwind through the C ABI, and a native stream is released only
 after invalidation. The separate selected-root consent preview now makes canonical
 opaque roots, exclusions, retained fields, and FSEvents coverage limits explicit
 before a grant; race-resistant symlink containment, exclusions, cursor recovery, and
-release-scale persistence remain no-go gates for ambient capture.
+release-scale persistence remain no-go gates for ambient capture. Path digests use a
+versioned scope containing the opaque root ID and filesystem identity, and are stable only
+within that root's OS canonicalization and digest scope—not as cross-volume identifiers.
 
 The adapter rejects FSEvents callback modes that replace the raw C-string path
 array with CFType or extended-data values (including full-history and document-ID
