@@ -9,7 +9,7 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, types::Type, Connection, OptionalExtension, Transaction};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -331,7 +331,8 @@ impl Journal {
 
     pub fn schema_version_count(&self) -> Result<u64, GhostraceError> {
         let connection = self.lock_connection()?;
-        Ok(connection.query_row("SELECT COUNT(*) FROM schema_versions", [], |row| row.get(0))?)
+        Ok(connection
+            .query_row("SELECT COUNT(*) FROM schema_versions", [], |row| row_i64_to_u64(row, 0))?)
     }
 
     pub fn schema_version(&self) -> Result<u32, GhostraceError> {
@@ -346,12 +347,12 @@ impl Journal {
 
     pub fn wal_autocheckpoint_pages(&self) -> Result<u64, GhostraceError> {
         let connection = self.lock_connection()?;
-        Ok(connection.query_row("PRAGMA wal_autocheckpoint", [], |row| row.get(0))?)
+        Ok(connection.query_row("PRAGMA wal_autocheckpoint", [], |row| row_i64_to_u64(row, 0))?)
     }
 
     pub fn busy_timeout_ms(&self) -> Result<u64, GhostraceError> {
         let connection = self.lock_connection()?;
-        Ok(connection.query_row("PRAGMA busy_timeout", [], |row| row.get(0))?)
+        Ok(connection.query_row("PRAGMA busy_timeout", [], |row| row_i64_to_u64(row, 0))?)
     }
 
     pub fn journal_size_limit_bytes(&self) -> Result<u64, GhostraceError> {
@@ -677,7 +678,7 @@ impl Journal {
                 "SELECT epoch, boundary_json FROM cursors
                  WHERE source = ?1 AND collector_instance = ?2",
                 params![identity.source.to_string(), identity.collector_instance()],
-                |row| Ok((row.get::<_, i64>(0)? as u64, row.get::<_, Option<String>>(1)?)),
+                |row| Ok((row_i64_to_u64(row, 0)?, row.get::<_, Option<String>>(1)?)),
             )
             .optional()?;
         if let Some((_, stored_json)) = current.as_ref() {
@@ -724,7 +725,8 @@ impl Journal {
 
     pub fn diagnostic_count(&self) -> Result<u64, GhostraceError> {
         let connection = self.lock_connection()?;
-        Ok(connection.query_row("SELECT COUNT(*) FROM diagnostics", [], |row| row.get(0))?)
+        Ok(connection
+            .query_row("SELECT COUNT(*) FROM diagnostics", [], |row| row_i64_to_u64(row, 0))?)
     }
 
     pub fn event(&self, event_id: Uuid) -> Result<EventEnvelope, GhostraceError> {
@@ -1325,7 +1327,7 @@ struct RawStored {
 
 fn row_to_stored(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawStored> {
     Ok(RawStored {
-        ingest_seq: row.get(0)?,
+        ingest_seq: row_i64_to_u64(row, 0)?,
         event_id: row.get(1)?,
         schema_version: row.get(2)?,
         observed_at: row.get(3)?,
@@ -1340,6 +1342,13 @@ fn row_to_stored(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawStored> {
         evidence: row.get(12)?,
         parent_event_id: row.get(13)?,
         payload_ciphertext: row.get(14)?,
+    })
+}
+
+fn row_i64_to_u64(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<u64> {
+    let value: i64 = row.get(index)?;
+    u64::try_from(value).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(index, Type::Integer, Box::new(error))
     })
 }
 

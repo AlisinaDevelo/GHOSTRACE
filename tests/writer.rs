@@ -182,14 +182,14 @@ fn acknowledgement_follows_one_atomic_event_cursor_policy_and_diagnostic_commit(
     assert_eq!(journal.diagnostic_count().expect("diagnostics"), 1);
     let (events, cursors, policies, diagnostics) = journal
         .with_read_snapshot(|connection| {
-            let events: u64 =
+            let events: i64 =
                 connection.query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))?;
-            let cursors: u64 =
+            let cursors: i64 =
                 connection.query_row("SELECT COUNT(*) FROM cursors", [], |row| row.get(0))?;
-            let policies: u64 =
+            let policies: i64 =
                 connection
                     .query_row("SELECT COUNT(*) FROM policy_metadata", [], |row| row.get(0))?;
-            let diagnostics: u64 =
+            let diagnostics: i64 =
                 connection.query_row("SELECT COUNT(*) FROM diagnostics", [], |row| row.get(0))?;
             Ok((events, cursors, policies, diagnostics))
         })
