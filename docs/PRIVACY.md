@@ -81,6 +81,14 @@ semantic migration changes, so a changed exclusion requires reconfirmation. The
 document parser accepts the omission of this optional v1 field for backwards
 compatibility, while duplicate, malformed, or oversized values remain fail-closed.
 
+The versioned exclusion matcher adds root, subtree, file-kind, application,
+temporary-file, VCS, and user-pattern rules without retaining the matched value in
+diagnostics. Deny is always stronger than redact, summarize, or allow; rule class
+and literal specificity then resolve overlaps. Empty, traversal, malformed-escape,
+and oversized patterns are rejected before a policy can be installed. Policy history
+keeps the old version available for existing evidence and evaluates only future
+observations against a newly installed version.
+
 ## Local storage and export
 
 The intended journal is local to the user account. Filesystem permissions, SQLite
@@ -134,6 +142,10 @@ exclusion precedence, redaction, versioned migration, receipt replay, contiguous
 sequence numbers, monotonic timestamps, failed-command immutability, and rejection
 of forged non-grant reactivation. The fixed generator makes failures reproducible on
 the target device without downloading a test framework.
+
+The exclusion corpus additionally covers nested and case-variant paths, escaped
+wildcards, every rule class and outcome, order-independent digests, malformed and
+empty patterns, versioned future-only updates, and repeated maximum-size matching.
 
 See [EVALUATION.md](EVALUATION.md) for the evidence expected before a live source is
 enabled.

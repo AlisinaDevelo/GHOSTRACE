@@ -8,6 +8,7 @@ pub mod consent;
 pub mod crypto;
 pub mod cursor;
 pub mod error;
+pub mod exclusion;
 pub mod explain;
 pub mod export;
 pub mod fault;
@@ -29,6 +30,12 @@ pub use cursor::{
     CursorTransition, CURSOR_CONTRACT_VERSION,
 };
 pub use error::{CryptoError, GhostraceError};
+pub use exclusion::{
+    ExclusionAction, ExclusionDecision, ExclusionKind, ExclusionPolicy, ExclusionPolicyHistory,
+    ExclusionReason, ExclusionRule, ExclusionSubject, EXCLUSION_POLICY_SCHEMA_VERSION,
+    MAX_EXCLUSION_PATTERN_BYTES, MAX_EXCLUSION_POLICY_VERSIONS, MAX_EXCLUSION_RULES,
+    MAX_EXCLUSION_SUBJECT_BYTES,
+};
 pub use explain::{explain, CoverageSummary, Explanation, ExplanationStatement};
 pub use export::{
     export_fixture, export_journal, ExportManifest, ExportPolicyProfile, EXPORT_VERSION,
@@ -72,6 +79,7 @@ pub use writer::{
 
 pub const EVENT_SCHEMA_JSON: &str = include_str!("../schemas/event-envelope-v1.json");
 pub const POLICY_DOCUMENT_SCHEMA_JSON: &str = include_str!("../schemas/policy-document-v1.json");
+pub const EXCLUSION_POLICY_SCHEMA_JSON: &str = include_str!("../schemas/exclusion-policy-v1.json");
 
 pub fn capture() -> Result<(), GhostraceError> {
     Err(GhostraceError::LiveCaptureDisabled)
