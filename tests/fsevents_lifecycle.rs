@@ -1,11 +1,17 @@
+use std::path::PathBuf;
+
+use ghostrace::{FseventsError, FseventsOptions, FseventsStream};
+
+#[cfg(target_os = "macos")]
 use std::{
     fs,
-    path::PathBuf,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
-use ghostrace::{FseventsError, FseventsEvent, FseventsOptions, FseventsStream, StreamState};
+#[cfg(target_os = "macos")]
+use ghostrace::{FseventsEvent, StreamState};
+#[cfg(target_os = "macos")]
 use tempfile::tempdir;
 
 #[cfg(not(target_os = "macos"))]
