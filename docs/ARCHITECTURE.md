@@ -85,6 +85,27 @@ and acknowledgement-timeout paths are covered by deterministic tests. Diagnostic
 codes are short ASCII identifiers and details are limited to 512 non-control bytes;
 payloads and paths are not accepted as diagnostic text.
 
+## Cursor contract
+
+Cursor state is part of the evidence boundary. `CursorIdentity` binds a token to
+both an `EventSource` and a collector instance; `CursorToken` distinguishes
+ordered sequence tokens (`seq-<epoch>-<position>`) from legacy numeric fixture
+tokens and opaque values. Ordered tokens compare explicitly as equal, advancing,
+or regressing. Opaque reordering is refused unless an explicit reset or wrap
+control establishes a new epoch. A non-gap event that jumps an ordered range is
+refused as an unmarked skip; a first-class `Gap` event is the only intentional
+coverage discontinuity.
+
+The journal keeps cursor epoch, status (`active`, `reset`, `wrapped`, or
+`invalidated`), token kind, policy identity/version, and the last event ID in the
+cursor table. Duplicate event IDs are replayed as the original ingest sequence
+only when their complete semantic envelope matches. A different event at the
+same source/collector/cursor, a policy change without reset, a regression, an
+unknown ordering, an invalidated source, or a skipped range fails closed before
+the transaction can commit. `reset_cursor`, `wrap_cursor`, and
+`invalidate_cursor` are durable control operations; source replacement is a new
+collector identity, not an inferred reset.
+
 ## Components
 
 | Component | Responsibility | Current state |
@@ -95,7 +116,7 @@ payloads and paths are not accepted as diagnostic text.
 | Policy gate | Apply consent, selected scope, exclusions, private-context rules, and redaction | Required before live capture |
 | Event envelope | Preserve source facts, provenance, evidence level, and schema version | Versioned contract is documented; journal ingestion requires an origin capability |
 | Ingest writer | Bound memory, serialize writes, and commit event, cursor, policy reference, and diagnostics atomically | Bounded fixture writer is implemented and tested; live gate remains |
-| Journal | Store local event metadata and encrypted payloads when the production key path exists | SQLite/WAL design documented; Keychain production path not shipped |
+| Journal | Store local event metadata and encrypted payloads when the production key path exists | SQLite/WAL design documented; cursor contract and migration 0003 are implemented; Keychain production path not shipped |
 | Explain/export | Produce deterministic evidence-linked explanations and explicit exports | Fixture surface available |
 
 ## Event lifecycle

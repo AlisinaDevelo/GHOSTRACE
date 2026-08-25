@@ -6,6 +6,7 @@
 
 pub mod consent;
 pub mod crypto;
+pub mod cursor;
 pub mod error;
 pub mod explain;
 pub mod export;
@@ -21,6 +22,10 @@ pub mod writer;
 
 pub use consent::{ConsentReceipt, ConsentState, ConsentStateMachine, ConsentTransitionKind};
 pub use crypto::{decrypt_payload, encrypt_payload, DeterministicKeyProvider, KeyProvider};
+pub use cursor::{
+    CursorIdentity, CursorKind, CursorOrder, CursorState, CursorStatus, CursorToken,
+    CursorTransition, CURSOR_CONTRACT_VERSION,
+};
 pub use error::{CryptoError, GhostraceError};
 pub use explain::{explain, CoverageSummary, Explanation, ExplanationStatement};
 pub use export::{

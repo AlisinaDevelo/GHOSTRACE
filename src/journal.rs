@@ -16,10 +16,11 @@ use uuid::Uuid;
 
 use crate::{
     crypto::{decrypt_payload, encrypt_payload, KeyProvider, SharedKeyProvider},
+    cursor::{CursorIdentity, CursorKind, CursorState, CursorStatus, CursorToken},
     error::GhostraceError,
     model::{
-        CollectorInstanceId, EventEnvelope, EventSource, Evidence, IngestionOrigin, OriginBinding,
-        PolicyProfileId, ProvenanceVersion, SourceCursor, EVENT_SCHEMA_VERSION,
+        CollectorInstanceId, EventEnvelope, EventKind, EventSource, Evidence, IngestionOrigin,
+        OriginBinding, PolicyProfileId, ProvenanceVersion, SourceCursor, EVENT_SCHEMA_VERSION,
     },
     policy::PolicyProfile,
     storage,
@@ -29,6 +30,7 @@ use crate::{
 const MIGRATION_LEDGER: &str = include_str!("../migrations/0000_migration_ledger.sql");
 const MIGRATION: &str = include_str!("../migrations/0001_init.sql");
 const MIGRATION_METADATA: &str = include_str!("../migrations/0002_journal_metadata.sql");
+const MIGRATION_CURSOR_CONTRACT: &str = include_str!("../migrations/0003_cursor_contract.sql");
 const MIGRATION_TOOL_VERSION: &str = concat!("ghostrace/", env!("CARGO_PKG_VERSION"));
 const MIGRATION_MODE_KEY: &str = "mode";
 
@@ -421,6 +423,109 @@ impl Journal {
         Ok(sequences)
     }
 
+    /// Read the durable state for one source/collector cursor identity.
+    pub fn cursor_state(
+        &self,
+        identity: &CursorIdentity,
+    ) -> Result<Option<CursorState>, GhostraceError> {
+        let connection = self.lock_connection()?;
+        read_cursor_state(&connection, identity)
+    }
+
+    /// Explicitly establish a new cursor epoch after a collector reset.  A
+    /// reset is durable control state; the first event in the new epoch is
+    /// accepted only after this operation has committed.
+    pub fn reset_cursor(
+        &self,
+        identity: &CursorIdentity,
+        cursor: &SourceCursor,
+        policy: &PolicyProfile,
+    ) -> Result<(), GhostraceError> {
+        self.control_cursor(identity, cursor, policy, CursorStatus::Reset)
+    }
+
+    /// Explicitly record a source wrap.  Wrapped cursors must use the typed
+    /// `wrap-<epoch>-<position>` representation so a wrap cannot be inferred
+    /// from an opaque token.
+    pub fn wrap_cursor(
+        &self,
+        identity: &CursorIdentity,
+        cursor: &SourceCursor,
+        policy: &PolicyProfile,
+    ) -> Result<(), GhostraceError> {
+        self.control_cursor(identity, cursor, policy, CursorStatus::Wrapped)
+    }
+
+    /// Invalidate a cursor after a source replacement or integrity failure.
+    /// Ingestion remains fail-closed until [`Journal::reset_cursor`] or
+    /// [`Journal::wrap_cursor`] establishes a new epoch.
+    pub fn invalidate_cursor(&self, identity: &CursorIdentity) -> Result<(), GhostraceError> {
+        let mut connection = self.lock_connection()?;
+        let transaction = connection.transaction()?;
+        let changed = transaction.execute(
+            "UPDATE cursors SET state = 'invalidated' WHERE source = ?1 AND collector_instance = ?2",
+            params![identity.source.to_string(), identity.collector_instance()],
+        )?;
+        if changed == 0 {
+            return Err(GhostraceError::CursorStateMissing { event_source: identity.source });
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn control_cursor(
+        &self,
+        identity: &CursorIdentity,
+        cursor: &SourceCursor,
+        policy: &PolicyProfile,
+        status: CursorStatus,
+    ) -> Result<(), GhostraceError> {
+        let token = CursorToken::new(cursor.clone());
+        if !token.is_ordered()
+            || !matches!(token.kind(), CursorKind::Reset | CursorKind::Wrap)
+            || (status == CursorStatus::Reset && token.kind() != CursorKind::Reset)
+            || (status == CursorStatus::Wrapped && token.kind() != CursorKind::Wrap)
+        {
+            return Err(GhostraceError::CursorControlInvalid);
+        }
+        let mut connection = self.lock_connection()?;
+        let transaction = connection.transaction()?;
+        record_policy_profile(&transaction, policy)?;
+        let current: Option<u64> = transaction
+            .query_row(
+                "SELECT epoch, state FROM cursors WHERE source = ?1 AND collector_instance = ?2",
+                params![identity.source.to_string(), identity.collector_instance()],
+                |row| Ok(row.get::<_, i64>(0)? as u64),
+            )
+            .optional()?;
+        let epoch = token.epoch().unwrap_or_else(|| current.map(|epoch| epoch + 1).unwrap_or(0));
+        transaction.execute(
+            "INSERT INTO cursors(
+                source, collector_instance, source_cursor, updated_at, epoch, state,
+                cursor_kind, policy_profile_id, policy_profile_version, last_event_id
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL)
+             ON CONFLICT(source, collector_instance) DO UPDATE SET
+                source_cursor=excluded.source_cursor, updated_at=excluded.updated_at,
+                epoch=excluded.epoch, state=excluded.state, cursor_kind=excluded.cursor_kind,
+                policy_profile_id=excluded.policy_profile_id,
+                policy_profile_version=excluded.policy_profile_version,
+                last_event_id=NULL",
+            params![
+                identity.source.to_string(),
+                identity.collector_instance(),
+                cursor.as_str(),
+                Utc::now().to_rfc3339(),
+                epoch as i64,
+                status.as_str(),
+                token.kind().as_str(),
+                policy.id,
+                policy.version,
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub fn diagnostic_count(&self) -> Result<u64, GhostraceError> {
         let connection = self.lock_connection()?;
         Ok(connection.query_row("SELECT COUNT(*) FROM diagnostics", [], |row| row.get(0))?)
@@ -428,13 +533,7 @@ impl Journal {
 
     pub fn event(&self, event_id: Uuid) -> Result<EventEnvelope, GhostraceError> {
         let connection = self.lock_connection()?;
-        let mut statement = connection.prepare(
-            "SELECT ingest_seq, event_id, schema_version, observed_at, ingested_at, source,
-                    kind, collector_instance, source_cursor, provenance_version,
-                    policy_profile_id, policy_profile_version, evidence, parent_event_id,
-                    payload_ciphertext
-             FROM events WHERE event_id = ?1",
-        )?;
+        let mut statement = connection.prepare(EVENT_SELECT_BY_ID)?;
         let row = statement.query_row(params![event_id.to_string()], row_to_stored).optional()?;
         match row {
             Some(raw) => decode_stored(raw, self.key_provider.as_ref()).map(|stored| stored.event),
@@ -512,6 +611,21 @@ fn insert_events(
 ) -> Result<Vec<u64>, GhostraceError> {
     let mut sequences = Vec::with_capacity(events.len());
     for event in events {
+        let existing_by_id = transaction
+            .query_row(EVENT_SELECT_BY_ID, params![event.event_id.to_string()], row_to_stored)
+            .optional()?;
+        if let Some(raw) = existing_by_id {
+            let existing = decode_stored(raw, provider)?;
+            if !same_event_semantics(&existing.event, event) {
+                return Err(GhostraceError::CursorConflict { event_source: event.source });
+            }
+            // A replay is acknowledged with its original durable sequence.  In
+            // particular, a replay after a later cursor does not regress the
+            // cursor table and does not create a second encrypted payload.
+            sequences.push(existing.ingest_seq);
+            continue;
+        }
+
         if let Some(parent_id) = event.parent_event_id {
             let exists: Option<i64> = transaction
                 .query_row(
@@ -526,6 +640,38 @@ fn insert_events(
                 )));
             }
         }
+
+        let token = event.source_cursor.as_ref().map(|cursor| CursorToken::new(cursor.clone()));
+        let current = if token.is_some() {
+            load_cursor_state_transaction(transaction, event.source, event.collector_instance())?
+        } else {
+            None
+        };
+        if let Some(token) = token.as_ref() {
+            if let Some(raw) = transaction
+                .query_row(
+                    EVENT_SELECT_BY_CURSOR,
+                    params![
+                        event.source.to_string(),
+                        event.collector_instance(),
+                        token.raw().as_str()
+                    ],
+                    row_to_stored,
+                )
+                .optional()?
+            {
+                let existing = decode_stored(raw, provider)?;
+                if same_event_semantics(&existing.event, event) {
+                    // Event IDs are part of the semantic identity, so this
+                    // branch is only possible if the database was tampered
+                    // with.  Fail closed rather than silently aliasing events.
+                    return Err(GhostraceError::CursorConflict { event_source: event.source });
+                }
+                return Err(GhostraceError::CursorConflict { event_source: event.source });
+            }
+            validate_cursor_transition(event, token, current.as_ref())?;
+        }
+
         let payload = serde_json::to_vec(&event.payload)?;
         let aad = associated_data(event)?;
         let ciphertext = encrypt_payload(provider, &aad, &payload)?;
@@ -552,24 +698,113 @@ fn insert_events(
                 ciphertext,
             ],
         )?;
-        let sequence = transaction.last_insert_rowid();
-        if let Some(cursor) = event.source_cursor() {
+        let sequence = transaction.last_insert_rowid() as u64;
+        if let Some(token) = token {
+            let epoch =
+                token.epoch().or_else(|| current.as_ref().map(|state| state.epoch)).unwrap_or(0);
             transaction.execute(
-                "INSERT INTO cursors(source, collector_instance, source_cursor, updated_at)
-                 VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(source, collector_instance) DO UPDATE SET source_cursor=excluded.source_cursor,
-                     updated_at=excluded.updated_at",
+                "INSERT INTO cursors(
+                    source, collector_instance, source_cursor, updated_at, epoch, state,
+                    cursor_kind, policy_profile_id, policy_profile_version, last_event_id
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6, ?7, ?8, ?9)
+                 ON CONFLICT(source, collector_instance) DO UPDATE SET
+                    source_cursor=excluded.source_cursor, updated_at=excluded.updated_at,
+                    epoch=excluded.epoch, state='active', cursor_kind=excluded.cursor_kind,
+                    policy_profile_id=excluded.policy_profile_id,
+                    policy_profile_version=excluded.policy_profile_version,
+                    last_event_id=excluded.last_event_id",
                 params![
                     event.source.to_string(),
                     event.collector_instance(),
-                    cursor,
-                    event.ingested_at.to_rfc3339()
+                    token.raw().as_str(),
+                    event.ingested_at.to_rfc3339(),
+                    epoch as i64,
+                    token.kind().as_str(),
+                    event.policy_profile_id.as_str(),
+                    event.policy_profile_version,
+                    event.event_id.to_string(),
                 ],
             )?;
         }
-        sequences.push(sequence as u64);
+        sequences.push(sequence);
     }
     Ok(sequences)
+}
+
+const EVENT_SELECT_BY_ID: &str =
+    "SELECT ingest_seq, event_id, schema_version, observed_at, ingested_at, source,
+        kind, collector_instance, source_cursor, provenance_version,
+        policy_profile_id, policy_profile_version, evidence, parent_event_id,
+        payload_ciphertext
+ FROM events WHERE event_id = ?1";
+
+const EVENT_SELECT_BY_CURSOR: &str =
+    "SELECT ingest_seq, event_id, schema_version, observed_at, ingested_at, source,
+        kind, collector_instance, source_cursor, provenance_version,
+        policy_profile_id, policy_profile_version, evidence, parent_event_id,
+        payload_ciphertext
+ FROM events
+ WHERE source = ?1 AND collector_instance = ?2 AND source_cursor = ?3
+ ORDER BY ingest_seq ASC LIMIT 1";
+
+fn same_event_semantics(left: &EventEnvelope, right: &EventEnvelope) -> bool {
+    serde_json::to_vec(left).ok() == serde_json::to_vec(right).ok()
+}
+
+fn validate_cursor_transition(
+    event: &EventEnvelope,
+    candidate: &CursorToken,
+    current: Option<&CursorState>,
+) -> Result<(), GhostraceError> {
+    let Some(current) = current else {
+        return Ok(());
+    };
+    if current.invalidated() {
+        return Err(GhostraceError::CursorInvalidated { event_source: event.source });
+    }
+    if current.last_event_id.is_some()
+        && (current.policy_profile_id.as_deref() != Some(event.policy_profile_id.as_str())
+            || current.policy_profile_version != Some(event.policy_profile_version))
+    {
+        return Err(GhostraceError::CursorPolicyMismatch { event_source: event.source });
+    }
+    if current.can_accept_first_event() && current.token.raw() == candidate.raw() {
+        return Ok(());
+    }
+    match current.token.transition(candidate) {
+        crate::cursor::CursorTransition::Advance => {
+            if !matches!(
+                event.kind,
+                EventKind::Gap | EventKind::CollectorStarted | EventKind::CollectorStopped
+            ) && current.token.epoch() == candidate.epoch()
+                && current.token.position().zip(candidate.position()).is_some_and(
+                    |(current_position, candidate_position)| {
+                        candidate_position > current_position.saturating_add(1)
+                    },
+                )
+            {
+                return Err(GhostraceError::CursorSkipped { event_source: event.source });
+            }
+            Ok(())
+        }
+        crate::cursor::CursorTransition::Reset | crate::cursor::CursorTransition::Wrap => {
+            if candidate.epoch().is_some_and(|epoch| epoch > current.epoch) {
+                Ok(())
+            } else {
+                Err(GhostraceError::CursorRegression { event_source: event.source })
+            }
+        }
+        crate::cursor::CursorTransition::Duplicate => {
+            Err(GhostraceError::CursorConflict { event_source: event.source })
+        }
+        crate::cursor::CursorTransition::Regression => {
+            Err(GhostraceError::CursorRegression { event_source: event.source })
+        }
+        crate::cursor::CursorTransition::Unknown => {
+            Err(GhostraceError::CursorOrderingUnknown { event_source: event.source })
+        }
+        crate::cursor::CursorTransition::Initial => Ok(()),
+    }
 }
 
 fn insert_diagnostics(
@@ -583,6 +818,107 @@ fn insert_diagnostics(
         )?;
     }
     Ok(())
+}
+
+fn load_cursor_state_transaction(
+    transaction: &Transaction<'_>,
+    source: EventSource,
+    collector_instance: &str,
+) -> Result<Option<CursorState>, GhostraceError> {
+    let row = transaction
+        .query_row(
+            "SELECT source_cursor, epoch, state, cursor_kind, policy_profile_id,
+                    policy_profile_version, last_event_id
+             FROM cursors WHERE source = ?1 AND collector_instance = ?2",
+            params![source.to_string(), collector_instance],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<i64>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                ))
+            },
+        )
+        .optional()?;
+    row.map(|(raw, epoch, status, kind, policy_id, policy_version, last_event_id)| {
+        let _stored_kind = CursorKind::parse(&kind)?;
+        let cursor = SourceCursor::try_from(raw)?;
+        let epoch = u64::try_from(epoch)
+            .map_err(|_| GhostraceError::MigrationLedger("cursor epoch is negative".to_owned()))?;
+        let policy_profile_version = policy_version
+            .map(|version| {
+                u32::try_from(version).map_err(|_| {
+                    GhostraceError::MigrationLedger(
+                        "cursor policy version is out of range".to_owned(),
+                    )
+                })
+            })
+            .transpose()?;
+        Ok(CursorState {
+            identity: CursorIdentity::new(source, collector_instance.to_owned())?,
+            token: CursorToken::new(cursor),
+            status: CursorStatus::parse(&status)?,
+            epoch,
+            policy_profile_id: policy_id,
+            policy_profile_version,
+            last_event_id,
+        })
+    })
+    .transpose()
+}
+
+fn read_cursor_state(
+    connection: &Connection,
+    identity: &CursorIdentity,
+) -> Result<Option<CursorState>, GhostraceError> {
+    let row = connection
+        .query_row(
+            "SELECT source_cursor, epoch, state, cursor_kind, policy_profile_id,
+                    policy_profile_version, last_event_id
+             FROM cursors WHERE source = ?1 AND collector_instance = ?2",
+            params![identity.source.to_string(), identity.collector_instance()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<i64>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                ))
+            },
+        )
+        .optional()?;
+    row.map(|(raw, epoch, status, kind, policy_id, policy_version, last_event_id)| {
+        let _stored_kind = CursorKind::parse(&kind)?;
+        let cursor = SourceCursor::try_from(raw)?;
+        let epoch = u64::try_from(epoch)
+            .map_err(|_| GhostraceError::MigrationLedger("cursor epoch is negative".to_owned()))?;
+        let policy_profile_version = policy_version
+            .map(|version| {
+                u32::try_from(version).map_err(|_| {
+                    GhostraceError::MigrationLedger(
+                        "cursor policy version is out of range".to_owned(),
+                    )
+                })
+            })
+            .transpose()?;
+        Ok(CursorState {
+            identity: identity.clone(),
+            token: CursorToken::new(cursor),
+            status: CursorStatus::parse(&status)?,
+            epoch,
+            policy_profile_id: policy_id,
+            policy_profile_version,
+            last_event_id,
+        })
+    })
+    .transpose()
 }
 
 #[derive(Debug)]
@@ -754,7 +1090,7 @@ fn parse_kind(value: &str) -> Result<crate::model::EventKind, GhostraceError> {
         .map_err(|_| GhostraceError::InvalidEvent("stored event kind is invalid".to_owned()))
 }
 
-fn migration_specs() -> [MigrationSpec; 3] {
+fn migration_specs() -> [MigrationSpec; 4] {
     [
         MigrationSpec {
             id: "0000_migration_ledger",
@@ -768,6 +1104,12 @@ fn migration_specs() -> [MigrationSpec; 3] {
             version: 2,
             schema_version: 2,
             sql: MIGRATION_METADATA,
+        },
+        MigrationSpec {
+            id: "0003_cursor_contract",
+            version: 3,
+            schema_version: 3,
+            sql: MIGRATION_CURSOR_CONTRACT,
         },
     ]
 }
@@ -824,7 +1166,7 @@ fn run_migrations(connection: &mut Connection) -> Result<(), GhostraceError> {
 
 fn initialize_migration_ledger(
     connection: &mut Connection,
-    specs: &[MigrationSpec; 3],
+    specs: &[MigrationSpec; 4],
 ) -> Result<(), GhostraceError> {
     let ledger_exists = table_exists(connection, "migration_records")?;
     if !ledger_exists {
@@ -933,7 +1275,7 @@ fn insert_applied_migration(
 
 fn validate_applied_prefix(
     records: &[AppliedMigration],
-    specs: &[MigrationSpec; 3],
+    specs: &[MigrationSpec; 4],
 ) -> Result<usize, GhostraceError> {
     for (index, record) in records.iter().enumerate() {
         let Some(spec) = specs.get(index) else {
@@ -974,7 +1316,7 @@ fn validate_applied_prefix(
 
 fn validate_final_schema(
     connection: &Connection,
-    specs: &[MigrationSpec; 3],
+    specs: &[MigrationSpec; 4],
 ) -> Result<(), GhostraceError> {
     let records = load_applied_migrations(connection)?;
     if records.len() != specs.len() {

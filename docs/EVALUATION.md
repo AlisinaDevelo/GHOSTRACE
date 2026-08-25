@@ -32,7 +32,7 @@ No live collector is ready until its fixture, integration, and failure matrix co
 | Minimization | Field inventory, redaction tests, prohibited-field regression |
 | Scope | Root canonicalization, symlink containment, exclusions, malformed Unicode/path tests |
 | Coverage | Source flags, cursor continuity, coalescing/omission behavior, first-class gaps |
-| Recovery | Crash before/after commit, cursor/event atomicity, restart discontinuity |
+| Recovery | Crash before/after commit, cursor/event atomicity, restart discontinuity, idempotent replay, explicit reset/wrap/invalidation |
 | Backpressure | Bounded memory under bursts, measurable drops, visible loss records |
 | Security | Key-handling tests, restrictive file permissions, log-redaction tests, dependency and advisory checks |
 | Platform | Supported macOS versions and architectures, permission prompts, revocation |
@@ -58,12 +58,12 @@ number without its workload would be a misleading guarantee.
 1. **Unit tests:** model validation, URL sanitization, policy decisions, evidence
    labels, encryption failure modes, and path rules.
 2. **Property tests:** malformed and attacker-shaped inputs, policy state transitions,
-   and bounded-size behavior.
+   ordered cursor reordering/replay, skipped and opaque cursors, and bounded-size behavior.
 3. **Fixture tests:** deterministic replay, explanation citations, gap propagation,
    export compatibility, and privacy regression.
 4. **Integration tests:** SQLite migrations, WAL behavior, permissions, crash
-   injection, cursor/policy/diagnostic atomicity, FIFO acknowledgements, bounded
-   queue policies, cancellation, and retry limits.
+   injection and reopen replay, cursor/policy/diagnostic atomicity, FIFO
+   acknowledgements, bounded queue policies, cancellation, and retry limits.
 5. **Platform tests:** selected-root FSEvents behavior and macOS permission changes.
 6. **Release checks:** locked build, advisories, license/source policy, SBOM,
    signing/notarization, and network-surface review.
