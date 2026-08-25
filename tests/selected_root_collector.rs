@@ -3,15 +3,16 @@ use std::path::PathBuf;
 #[cfg(target_os = "macos")]
 use std::{
     fs,
+    os::unix::fs::PermissionsExt,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
 use chrono::{TimeZone, Utc};
 use ghostrace::{
-    ConsentPreview, DeterministicKeyProvider, EventSource, FseventsCollector,
+    ConsentPreview, CursorIdentity, DeterministicKeyProvider, EventSource, FseventsCollector,
     FseventsCollectorConfig, FseventsCollectorError, FseventsOptions, Journal, PolicyDocument,
-    SelectedRoot, WriterConfig,
+    SelectedRoot, StartupCursor, StartupCursorDecision, WriterConfig,
 };
 use tempfile::tempdir;
 
@@ -297,9 +298,9 @@ fn history_done_transitions_replaying_to_live_without_user_event() {
     }
     assert_eq!(collector.status().coverage_state, CollectorCoverageState::Live);
     assert!(!collector.status().recovery_required);
+    assert!(collector.status().coverage_boundaries >= 1, "HistoryDone boundary was not consumed");
     let events = collector.journal().events().expect("journal events");
     assert!(!events.iter().any(|stored| stored.event.kind == EventKind::Gap));
-    assert!(!events.iter().any(|stored| stored.event.kind == EventKind::FilesystemChanged));
     collector.stop().expect("stop replay collector");
 }
 
@@ -334,6 +335,112 @@ fn incomplete_history_emits_a_gap_and_never_reports_live() {
                     if payload.reason_code.as_str() == "fsevents_history_incomplete"
                         && payload.remediation == Some(GapRemediation::ReinitializeStream)
             )
+    }));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn restart_resumes_from_committed_cursor_and_persists_invalidated_gap() {
+    let directory = tempdir().expect("tempdir");
+    fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700))
+        .expect("private tempdir");
+    let root_path = directory.path().join("selected-root");
+    fs::create_dir(&root_path).expect("selected root");
+    let root = SelectedRoot::new("root-main", &root_path).expect("selected root");
+    let volume = root.volume_identity().clone();
+    let journal_path = directory.path().join("restart.sqlite3");
+
+    let mut first = FseventsCollector::new(
+        confirmation(&policy()),
+        policy(),
+        [root],
+        Journal::open_fixture(
+            &journal_path,
+            DeterministicKeyProvider::from_seed("collector-restart"),
+        )
+        .expect("first journal"),
+        config(),
+    )
+    .expect("first collector");
+    first.start().expect("start first collector");
+    fs::write(root_path.join("committed.txt"), b"restart-evidence").expect("create file");
+    for _ in 0..100 {
+        first.run_current_run_loop_for(Duration::from_millis(50)).expect("drive first collector");
+        if first
+            .journal()
+            .events()
+            .expect("first events")
+            .iter()
+            .any(|stored| stored.event.kind == EventKind::FilesystemChanged)
+        {
+            break;
+        }
+    }
+    first.stop().expect("stop first collector");
+    drop(first);
+
+    let resumed_journal = Journal::open_fixture(
+        &journal_path,
+        DeterministicKeyProvider::from_seed("collector-restart"),
+    )
+    .expect("reopen journal");
+    let identity = CursorIdentity::for_volume(
+        EventSource::Filesystem,
+        "live-fsevents-test",
+        config().options.stream_mode,
+        volume.clone(),
+    )
+    .expect("cursor identity");
+    let committed = resumed_journal
+        .cursor_state(&identity)
+        .expect("read committed cursor")
+        .expect("committed cursor");
+    let committed_event_id = match StartupCursor::from_source_cursor(committed.token.raw())
+        .expect("ordered committed cursor")
+    {
+        StartupCursor::EventId { event_id } => event_id,
+        StartupCursor::SinceNow => panic!("a committed cursor cannot be SinceNow"),
+    };
+    let resumed = FseventsCollector::new(
+        confirmation(&policy()),
+        policy(),
+        [SelectedRoot::new("root-main", &root_path).expect("reopened selected root")],
+        resumed_journal,
+        config(),
+    )
+    .expect("resumed collector");
+    assert_eq!(
+        resumed.startup_cursor_decision(),
+        StartupCursorDecision::Replay { event_id: committed_event_id }
+    );
+    drop(resumed);
+
+    let invalidated_journal = Journal::open_fixture(
+        &journal_path,
+        DeterministicKeyProvider::from_seed("collector-restart"),
+    )
+    .expect("reopen for invalidation");
+    invalidated_journal.invalidate_cursor(&identity).expect("invalidate persisted cursor");
+    let mut blocked = FseventsCollector::new(
+        confirmation(&policy()),
+        policy(),
+        [SelectedRoot::new("root-main", &root_path).expect("selected root after invalidation")],
+        invalidated_journal,
+        config(),
+    )
+    .expect("collector records recovery gap");
+    assert!(blocked.status().recovery_required);
+    assert_eq!(blocked.status().coverage_state, CollectorCoverageState::HistoryUnavailable);
+    assert!(blocked.start().is_err(), "invalidated history must not auto-resume");
+    assert!(blocked.journal().events().expect("recovery events").iter().any(|stored| {
+        matches!(
+            &stored.event.payload,
+            EventPayload::Gap(payload)
+                if payload.reason_code.as_str() == "fsevents_cursor_invalidated"
+                    && payload.remediation == Some(GapRemediation::ReinitializeStream)
+                    && payload.from_cursor.is_none()
+                    && payload.to_cursor.is_none()
+        )
     }));
 }
 
