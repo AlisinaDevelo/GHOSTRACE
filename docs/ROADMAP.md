@@ -171,12 +171,15 @@ python3 scripts/roadmap.py check
 python3 scripts/roadmap.py index --write
 ```
 
-Issue bodies and native relationships are synchronized with Forge's GitHub task
-backend. Milestones, labels, assignments, and issue metadata are reconciled from
-`planning/program.json` only after an inspected Forge plan has zero pending native
-operations. This maintainer-only workflow requires authenticated `gh`, `jq`, and the
-Forge task-ledger script. Set `GHOSTRACE_FORGE_TASKS` to that script's absolute path,
-then run:
+Issue titles are the stable public identity for roadmap tasks. Public bodies contain
+the goal, acceptance criteria, context, and notes, but never Forge markers or the
+internal `Assigned:`, `Depends on:`, or `Parent:` routing lines. The publisher removes
+those lines idempotently and verifies the resulting body before any other metadata
+write. Native relationships and task state remain Forge-owned. Milestones, labels,
+assignments, and public-body hygiene are reconciled from `planning/program.json` only
+after an inspected Forge plan has zero pending native operations. This maintainer-only
+workflow requires authenticated `gh`, `jq`, and the Forge task-ledger script. Set
+`GHOSTRACE_FORGE_TASKS` to that script's absolute path, then run:
 
 ```sh
 GHOSTRACE_TASK_TREE_DIGEST=$(python3 scripts/roadmap.py task-digest)
@@ -199,7 +202,7 @@ python3 scripts/roadmap.py github-apply --yes \
 ```
 
 The metadata apply re-runs Forge's read-only plan before writing, mutates only the
-exact inspected metadata plan, uses field-scoped label, assignee, and milestone
+exact inspected metadata plan, uses field-scoped body, label, assignee, and milestone
 operations, preserves unmanaged labels and assignees, and pauses between writes.
 Existing managed label or milestone definition drift is a blocker rather than an
 automatic overwrite. Creating milestones can require a second plan/apply pass because

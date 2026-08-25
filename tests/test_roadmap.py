@@ -115,6 +115,50 @@ def fake_issue(
 
 
 class RoadmapTests(unittest.TestCase):
+    def test_public_issue_body_sanitizer_removes_routing_metadata_and_is_idempotent(self):
+        original = (
+            "<!-- forge-task:v1 id=0001 sync=" + "a" * 64 + " -->\n"
+            "\nStatus: `backlog`\n"
+            "Assigned: test-engineer @ human\n"
+            "Depends on: `0000`\n"
+            "Parent: 0000\n"
+            "\n## Goal\nKeep this evidence.\n"
+        )
+        sanitized = roadmap.sanitize_public_issue_body(original)
+        self.assertNotIn("forge-task:v1", sanitized)
+        self.assertNotIn("Assigned:", sanitized)
+        self.assertNotIn("Depends on:", sanitized)
+        self.assertNotIn("Parent:", sanitized)
+        self.assertIn("## Goal\nKeep this evidence.", sanitized)
+        self.assertEqual(roadmap.sanitize_public_issue_body(sanitized), sanitized)
+
+    def test_title_identity_allows_metadata_plan_without_internal_marker_or_mapping(self):
+        program = tiny_program()
+        task = tiny_task()
+        issue = fake_issue(1, "Status: `ready`\n\n## Goal\nA test goal.\n")
+        issue["title"] = task.title
+        FakeGitHub.responses = {
+            "labels": program["labels"],
+            "milestones?state=all": [
+                {
+                    "number": 7,
+                    "title": "M0",
+                    "description": "test milestone",
+                    "due_on": "2026-12-31T00:00:00Z",
+                }
+            ],
+            "issues?state=all": [issue],
+        }
+        with mock.patch.object(roadmap, "validate"), mock.patch.object(
+            roadmap, "load_sync_mapping", return_value={}
+        ), mock.patch.object(roadmap, "GitHub", FakeGitHub):
+            operations = roadmap.metadata_plan(
+                program, [task], program["repository"], "0" * 64
+            )
+        self.assertFalse(any(item.get("blocking") for item in operations))
+        self.assertFalse(any(item["action"] == "marker_missing" for item in operations))
+        self.assertTrue(any(item["action"] == "add_issue_label" for item in operations))
+
     def test_forge_sync_hash_matches_non_ascii_canonicalization(self):
         task = replace(tiny_task(), notes="Planned in 2026–2031.")
         self.assertEqual(
@@ -486,6 +530,13 @@ class RoadmapTests(unittest.TestCase):
         forge_digest = "0" * 64
         operations = [
             {
+                "action": "sanitize_issue_body",
+                "blocking": False,
+                "task": "0001",
+                "number": 1,
+                "body": "## Goal\nPublic evidence.\n",
+            },
+            {
                 "action": "add_issue_label",
                 "blocking": False,
                 "task": "0001",
@@ -538,6 +589,11 @@ class RoadmapTests(unittest.TestCase):
         self.assertEqual(
             requests,
             [
+                (
+                    "PATCH",
+                    "repos/AlisinaDevelo/GHOSTRACE/issues/1",
+                    {"body": "## Goal\nPublic evidence.\n"},
+                ),
                 (
                     "POST",
                     "repos/AlisinaDevelo/GHOSTRACE/issues/1/labels",
