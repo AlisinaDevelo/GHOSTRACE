@@ -1,7 +1,7 @@
 ---
 id: 0060
 title: Specify bounded writer queue and acknowledgement semantics
-status: review
+status: done
 agent: concurrency-specialist
 model: human
 release: M1
@@ -19,14 +19,15 @@ platform: any
 Define admission, ordering, cancellation, backpressure, transaction, and acknowledgement behavior for the single durable writer.
 
 ## Acceptance criteria
-- [ ] Queue item, batch, memory, wait-time, and retry bounds are configuration contracts with safe defaults.
-- [ ] An acknowledgement is emitted only after event, cursor, policy reference, and diagnostics commit atomically.
-- [ ] Full queues block, reject, or emit a gap according to a tested source-specific policy and never drop silently.
+- [x] Queue item, batch, memory, wait-time, and retry bounds are configuration contracts with safe defaults.
+- [x] An acknowledgement is emitted only after event, cursor, policy reference, and diagnostics commit atomically.
+- [x] Full queues block, reject, or emit a gap according to a tested source-specific policy and never drop silently.
 
 ## Context
 Writer semantics are the point where source coverage becomes durable evidence or an explicit gap.
 
 ## Notes
-Implementation is ready for review in the bounded writer and journal transaction
-paths. Completion requires the protected-main device rerun and retained evidence;
-issue closure or hosted CI alone is not evidence.
+Implemented in PR #203 and merged to protected `main` at
+`0c6bae9c5ebf4b7d91ea705fd346fd7c6b541238`. Source and merged-main device
+receipts are retained in `docs/evidence/0060-bounded-writer.md`; issue closure or
+hosted CI alone is not evidence.
