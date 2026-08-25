@@ -1,6 +1,3 @@
-use std::collections::{HashMap, HashSet};
-
-use ghostrace::FileOperation;
 use serde_json::Value;
 
 const CORPUS: &str = include_str!("../fixtures/fsevents-lifecycle-corpus-v1.json");
@@ -75,11 +72,17 @@ fn native_lifecycle_rows_are_an_explicit_no_go_without_substitution() {
 #[cfg(target_os = "macos")]
 mod macos {
     use super::*;
-    use std::{fs, os::unix::fs::PermissionsExt, process::Command, time::Duration};
+    use std::{
+        collections::{HashMap, HashSet},
+        fs,
+        os::unix::fs::PermissionsExt,
+        process::Command,
+        time::Duration,
+    };
 
     use chrono::{TimeZone, Utc};
     use ghostrace::{
-        ConsentPreview, DeterministicKeyProvider, EventSource, FseventsCollector,
+        ConsentPreview, DeterministicKeyProvider, EventSource, FileOperation, FseventsCollector,
         FseventsCollectorConfig, FseventsOptions, Journal, SelectedRoot, WriterConfig,
     };
     use tempfile::tempdir;
