@@ -27,14 +27,15 @@ resolved only through the active local provider. Legacy nonce-plus-ciphertext ro
 still be read while a verified rotation migrates them. Rotation checkpoints and
 destruction receipts are separate key-free contracts and are never event payloads.
 
-For a future FSEvents source, the raw callback flag word is normalized by the
+For the selected-root FSEvents source, the raw callback flag word is normalized by the
 `fsevents-normalized-v1` contract before it can become a filesystem event. The
 contract maps all documented Apple bits, retains the raw `u32` and unknown-bit
 remainder, and records a status of observed, rescan-required, boundary,
 unsupported, or contradictory. Unknown bits and loss boundaries lower completeness;
 they are never silently treated as ordinary file changes. The normalized evidence
-record is path-free, so selected-root canonicalization and exclusion policy still
-run before persistence.
+record is path-free. The selected-root collector performs startup canonicalization,
+lexical containment, policy authorization, and path hashing before persistence; the
+race-resistant path policy, exclusions, and cursor/recovery gates remain later work.
 
 The published JSON Schema describes the canonical normalized serialization emitted
 by Rust, so nullable/defaulted fields are present even when their value is `null` or

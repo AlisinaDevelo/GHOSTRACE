@@ -14,6 +14,7 @@ pub mod export;
 pub mod fault;
 pub mod fixture;
 pub mod fsevents;
+pub mod fsevents_collector;
 pub mod fsevents_flags;
 pub mod journal;
 pub mod key_lifecycle;
@@ -54,6 +55,11 @@ pub use fsevents::{
     CallbackHealth, FseventsError, FseventsEvent, FseventsOptions, FseventsStream, StreamState,
     DEFAULT_LATENCY, EVENT_ID_SINCE_NOW, FLAG_FILE_EVENTS, FLAG_FULL_HISTORY, FLAG_NO_DEFER,
     FLAG_USE_CF_TYPES, FLAG_USE_EXTENDED_DATA, FLAG_WITH_DOC_ID,
+};
+pub use fsevents_collector::{
+    CollectedFilesystemEvent, CollectorState, CollectorStatus, FseventsCollector,
+    FseventsCollectorConfig, FseventsCollectorError, SelectedRoot, MAX_PENDING_EVENTS,
+    MAX_SELECTED_ROOTS,
 };
 pub use fsevents_flags::{
     normalize_fsevents_event, FseventsBoundaryReason, FseventsCompleteness,
