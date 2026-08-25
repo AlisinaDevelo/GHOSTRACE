@@ -10,10 +10,12 @@ use std::{
 
 use chrono::{TimeZone, Utc};
 use ghostrace::{
-    ConsentPreview, CursorIdentity, DeterministicKeyProvider, EventSource, FseventsCollector,
+    ConsentPreview, DeterministicKeyProvider, EventSource, FseventsCollector,
     FseventsCollectorConfig, FseventsCollectorError, FseventsOptions, Journal, PolicyDocument,
-    SelectedRoot, StartupCursor, StartupCursorDecision, WriterConfig,
+    SelectedRoot, WriterConfig,
 };
+#[cfg(target_os = "macos")]
+use ghostrace::{CursorIdentity, StartupCursor, StartupCursorDecision};
 use tempfile::tempdir;
 
 #[cfg(target_os = "macos")]
