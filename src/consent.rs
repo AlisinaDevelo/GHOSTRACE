@@ -5,14 +5,20 @@
 //! source observations. The state machine is deny-by-default and only a
 //! recorded `grant` transition can make collection eligible again.
 
+use std::collections::BTreeSet;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     error::GhostraceError,
-    model::{OpaqueIdentifier, PolicyProfileId, ReasonCode, SnapshotDigest},
+    model::{OpaqueIdentifier, PolicyProfileId, ReasonCode, RootId, SnapshotDigest},
     policy::PolicyDocument,
 };
+
+/// Maximum number of retained-field or coverage-limit identifiers shown in a
+/// consent preview. The bound keeps a user-visible confirmation finite.
+pub const MAX_CONSENT_PREVIEW_ITEMS: usize = 64;
 
 /// The effective consent state after the last accepted receipt.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,6 +35,12 @@ pub enum ConsentState {
 impl ConsentState {
     pub fn allows_capture(self) -> bool {
         matches!(self, Self::Active)
+    }
+
+    /// Whether this state is a bounded terminal outcome for an observation
+    /// session. Terminal states never reopen without a new explicit grant.
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Revoked | Self::DeletionRequested)
     }
 }
 
@@ -56,6 +68,140 @@ pub struct ConsentReceipt {
     pub occurred_at: DateTime<Utc>,
     pub actor: OpaqueIdentifier,
     pub reason: ReasonCode,
+}
+
+/// The user-visible scope and limitation summary shown before a live root can
+/// be enabled. Root identities are canonical opaque IDs, never raw filesystem
+/// paths. This preview is not a receipt and is intentionally not persisted by
+/// the consent state machine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ConsentPreview {
+    policy_id: PolicyProfileId,
+    policy_version: u32,
+    canonical_roots: Vec<RootId>,
+    excluded_roots: Vec<RootId>,
+    retained_fields: Vec<OpaqueIdentifier>,
+    coverage_limits: Vec<OpaqueIdentifier>,
+    scope_digest: SnapshotDigest,
+}
+
+/// An explicit acknowledgement of a rendered [`ConsentPreview`]. The private
+/// payload prevents callers from constructing a confirmation without first
+/// validating and displaying a preview.
+#[derive(Debug, PartialEq, Eq)]
+pub struct ConsentConfirmation {
+    preview: ConsentPreview,
+}
+
+impl ConsentPreview {
+    /// Build a deterministic, bounded preview from a versioned policy. The
+    /// selected and excluded roots are rendered as canonical opaque IDs; the
+    /// retained fields and known coverage limits are required to be explicit.
+    pub fn from_policy<Fields, Field, Limits, Limit>(
+        document: &PolicyDocument,
+        retained_fields: Fields,
+        coverage_limits: Limits,
+    ) -> Result<Self, GhostraceError>
+    where
+        Fields: IntoIterator<Item = Field>,
+        Field: Into<String>,
+        Limits: IntoIterator<Item = Limit>,
+        Limit: Into<String>,
+    {
+        document.validate()?;
+        let canonical_roots = document
+            .selected_roots
+            .iter()
+            .cloned()
+            .map(RootId::try_from)
+            .collect::<Result<Vec<_>, _>>()?;
+        if canonical_roots.is_empty() {
+            return Err(GhostraceError::ConsentTransition(
+                "an explicit root scope is required before capture".to_owned(),
+            ));
+        }
+        let excluded_roots = document
+            .excluded_roots
+            .iter()
+            .cloned()
+            .map(RootId::try_from)
+            .collect::<Result<Vec<_>, _>>()?;
+        let retained_fields = bounded_preview_identifiers(retained_fields, "retained fields")?;
+        let coverage_limits = bounded_preview_identifiers(coverage_limits, "coverage limits")?;
+        Ok(Self {
+            policy_id: PolicyProfileId::try_from(document.id.clone())?,
+            policy_version: document.version,
+            canonical_roots,
+            excluded_roots,
+            retained_fields,
+            coverage_limits,
+            scope_digest: document.scope_digest()?,
+        })
+    }
+
+    /// Confirm this exact rendered preview. The confirmation is consumed by
+    /// [`ConsentStateMachine::grant_preview`] and cannot be silently reused.
+    pub fn confirm(self) -> ConsentConfirmation {
+        ConsentConfirmation { preview: self }
+    }
+
+    pub fn policy_id(&self) -> &PolicyProfileId {
+        &self.policy_id
+    }
+
+    pub fn policy_version(&self) -> u32 {
+        self.policy_version
+    }
+
+    pub fn canonical_roots(&self) -> &[RootId] {
+        &self.canonical_roots
+    }
+
+    pub fn excluded_roots(&self) -> &[RootId] {
+        &self.excluded_roots
+    }
+
+    pub fn retained_fields(&self) -> &[OpaqueIdentifier] {
+        &self.retained_fields
+    }
+
+    pub fn coverage_limits(&self) -> &[OpaqueIdentifier] {
+        &self.coverage_limits
+    }
+
+    pub fn scope_digest(&self) -> &SnapshotDigest {
+        &self.scope_digest
+    }
+}
+
+fn bounded_preview_identifiers<I, S>(
+    values: I,
+    label: &str,
+) -> Result<Vec<OpaqueIdentifier>, GhostraceError>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let mut identifiers = BTreeSet::new();
+    for value in values {
+        let identifier = OpaqueIdentifier::try_from(value.into())?;
+        if !identifiers.insert(identifier) {
+            return Err(GhostraceError::ConsentTransition(format!(
+                "{label} must not contain duplicates"
+            )));
+        }
+    }
+    if identifiers.is_empty() {
+        return Err(GhostraceError::ConsentTransition(format!(
+            "{label} must be declared before capture"
+        )));
+    }
+    if identifiers.len() > MAX_CONSENT_PREVIEW_ITEMS {
+        return Err(GhostraceError::ConsentTransition(format!(
+            "{label} exceed the {MAX_CONSENT_PREVIEW_ITEMS}-item bound"
+        )));
+    }
+    Ok(identifiers.into_iter().collect())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,6 +248,34 @@ impl ConsentStateMachine {
         reason: &str,
     ) -> Result<ConsentReceipt, GhostraceError> {
         let context = context_for(document)?;
+        self.grant_context(context, occurred_at, actor, reason)
+    }
+
+    /// Install a grant only after the caller has explicitly confirmed the
+    /// user-visible root scope preview. The receipt retains the policy context
+    /// and digest, never the preview's root or field names.
+    pub fn grant_preview(
+        &mut self,
+        confirmation: ConsentConfirmation,
+        occurred_at: DateTime<Utc>,
+        actor: &str,
+        reason: &str,
+    ) -> Result<ConsentReceipt, GhostraceError> {
+        let context = PolicyContext {
+            id: confirmation.preview.policy_id,
+            version: confirmation.preview.policy_version,
+            scope_digest: confirmation.preview.scope_digest,
+        };
+        self.grant_context(context, occurred_at, actor, reason)
+    }
+
+    fn grant_context(
+        &mut self,
+        context: PolicyContext,
+        occurred_at: DateTime<Utc>,
+        actor: &str,
+        reason: &str,
+    ) -> Result<ConsentReceipt, GhostraceError> {
         let actor = bounded_actor(actor)?;
         let reason = bounded_reason(reason)?;
         let receipt = self.receipt(

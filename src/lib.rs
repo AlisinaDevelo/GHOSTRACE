@@ -25,7 +25,10 @@ pub(crate) mod storage;
 pub mod wal;
 pub mod writer;
 
-pub use consent::{ConsentReceipt, ConsentState, ConsentStateMachine, ConsentTransitionKind};
+pub use consent::{
+    ConsentConfirmation, ConsentPreview, ConsentReceipt, ConsentState, ConsentStateMachine,
+    ConsentTransitionKind, MAX_CONSENT_PREVIEW_ITEMS,
+};
 pub use crypto::{
     decrypt_payload, encrypt_payload, CiphertextEnvelope, DeterministicKeyProvider, KeyAlgorithm,
     KeyMetadata, KeyProvider, CIPHERTEXT_ENVELOPE_VERSION, MAX_CIPHERTEXT_BYTES,

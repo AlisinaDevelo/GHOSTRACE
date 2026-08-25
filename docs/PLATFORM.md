@@ -80,9 +80,11 @@ single owner thread and that thread's current Core Foundation run loop; it does 
 start ambient capture by itself. Creation, scheduling, callback parsing, flush,
 stop, restart, invalidation, and release are explicit operations. A callback is
 never allowed to unwind through the C ABI, and a native stream is released only
-after invalidation. Selected-root consent, canonicalization, exclusions, source
-flag semantics, cursor recovery, and persistence are intentionally not claimed by
-this adapter and remain no-go gates for a live collector.
+after invalidation. The separate selected-root consent preview now makes canonical
+opaque roots, exclusions, retained fields, and FSEvents coverage limits explicit
+before a grant; canonical filesystem-path resolution, symlink containment,
+exclusions, source flag semantics, cursor recovery, and persistence remain no-go
+gates for a live collector.
 
 The adapter rejects FSEvents callback modes that replace the raw C-string path
 array with CFType or extended-data values (including full-history and document-ID
