@@ -1,7 +1,7 @@
 ---
 id: 0060
 title: Specify bounded writer queue and acknowledgement semantics
-status: backlog
+status: review
 agent: concurrency-specialist
 model: human
 release: M1
@@ -27,4 +27,6 @@ Define admission, ordering, cancellation, backpressure, transaction, and acknowl
 Writer semantics are the point where source coverage becomes durable evidence or an explicit gap.
 
 ## Notes
-Planned in the 2026–2031 GHOSTRACE program. Completion requires the acceptance evidence above; issue closure alone is not evidence.
+Implementation is ready for review in the bounded writer and journal transaction
+paths. Completion requires the protected-main device rerun and retained evidence;
+issue closure or hosted CI alone is not evidence.

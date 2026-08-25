@@ -17,6 +17,7 @@ pub mod model;
 pub mod policy;
 pub(crate) mod storage;
 pub mod wal;
+pub mod writer;
 
 pub use consent::{ConsentReceipt, ConsentState, ConsentStateMachine, ConsentTransitionKind};
 pub use crypto::{decrypt_payload, encrypt_payload, DeterministicKeyProvider, KeyProvider};
@@ -26,7 +27,7 @@ pub use export::{
     export_fixture, export_journal, ExportManifest, ExportPolicyProfile, EXPORT_VERSION,
 };
 pub use fixture::{ingest_fixture, read_fixture, FixtureIngestReport};
-pub use journal::{AppliedMigration, BackupReceipt, Journal, StoredEvent};
+pub use journal::{AppliedMigration, BackupReceipt, DiagnosticRecord, Journal, StoredEvent};
 #[cfg(target_os = "macos")]
 pub use keychain::{MacOsKeychainProvider, JOURNAL_KEYCHAIN_ACCOUNT, JOURNAL_KEYCHAIN_SERVICE};
 pub use model::{
@@ -50,6 +51,11 @@ pub use policy::{
     PolicyReason, POLICY_DOCUMENT_SCHEMA_VERSION,
 };
 pub use wal::{CheckpointMode, WalCheckpointReport, WalPolicy};
+pub use writer::{
+    QueueFullPolicy, WriteAck, WriteTicket, Writer, WriterConfig, WriterGap, WriterGapReason,
+    WriterOutcome, WriterSubmission, DEFAULT_MAX_BATCH_ITEMS, DEFAULT_MAX_MEMORY_BYTES,
+    DEFAULT_MAX_RETRIES, DEFAULT_MAX_WAIT_MS, DEFAULT_QUEUE_ITEMS,
+};
 
 pub const EVENT_SCHEMA_JSON: &str = include_str!("../schemas/event-envelope-v1.json");
 pub const POLICY_DOCUMENT_SCHEMA_JSON: &str = include_str!("../schemas/policy-document-v1.json");

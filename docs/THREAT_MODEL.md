@@ -73,7 +73,7 @@ plaintext chosen by the user.
 | Tampering | A local process edits journal rows or an export | Authenticated payloads; future integrity chain; explicit integrity status | Keychain encryption and chain verification are roadmap gates |
 | Repudiation | An explanation hides a denied interval or restart | First-class gaps, source status, cursor metadata, event IDs, deterministic output | Contract documented; live recovery tests required |
 | Information disclosure | Logs, WAL files, exports, or errors reveal paths or payloads | Minimized fields, redaction, no sensitive diagnostics, explicit export, file permissions | Fixture checks now; production storage hardening is not shipped |
-| Denial of service | Huge fixture, event storm, or full queue exhausts memory | Bounded parser, bounded queue, input limits, backpressure, visible loss | Fixture limits now; event-storm evidence is roadmap work |
+| Denial of service | Huge fixture, event storm, or full queue exhausts memory | Bounded parser, bounded queue/memory admission, input limits, bounded retries, backpressure, visible loss | Fixture writer limits and queue-policy tests now; live event-storm evidence remains future work |
 | Elevation of privilege | Collector asks for broad TCC access or follows a symlink outside scope | No root/Full Disk Access baseline, selected roots, canonicalization, exclusions | Policy design documented; live collector not shipped |
 
 ## Residual risks

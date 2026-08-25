@@ -56,6 +56,52 @@ pub struct StoredEvent {
     pub event: EventEnvelope,
 }
 
+/// A bounded, privacy-safe diagnostic written in the same transaction as an
+/// ingestion batch.  Diagnostics deliberately carry a stable code and short
+/// detail only; callers must not put paths, payloads, or other untrusted text
+/// in either field.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct DiagnosticRecord {
+    code: String,
+    detail: String,
+}
+
+impl DiagnosticRecord {
+    pub fn new(code: impl Into<String>, detail: impl Into<String>) -> Result<Self, GhostraceError> {
+        let record = Self { code: code.into(), detail: detail.into() };
+        record.validate()?;
+        Ok(record)
+    }
+
+    pub fn code(&self) -> &str {
+        &self.code
+    }
+
+    pub fn detail(&self) -> &str {
+        &self.detail
+    }
+
+    fn validate(&self) -> Result<(), GhostraceError> {
+        if self.code.is_empty()
+            || self.code.len() > 64
+            || !self
+                .code
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        {
+            return Err(GhostraceError::InvalidWriterDiagnostic(
+                "code must be 1-64 ASCII identifier bytes".to_owned(),
+            ));
+        }
+        if self.detail.len() > 512 || self.detail.chars().any(char::is_control) {
+            return Err(GhostraceError::InvalidWriterDiagnostic(
+                "detail must be at most 512 non-control bytes".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BackupReceipt {
     pub bytes: u64,
@@ -335,6 +381,19 @@ impl Journal {
         events: &[EventEnvelope],
         policy: &PolicyProfile,
     ) -> Result<Vec<u64>, GhostraceError> {
+        self.ingest_batch_with_diagnostics(origin, events, policy, &[])
+    }
+
+    /// Inserts accepted events, cursor progress, the policy reference, and
+    /// bounded diagnostics in one SQLite transaction.  An acknowledgement from
+    /// the durable writer is allowed only after this method has committed.
+    pub fn ingest_batch_with_diagnostics(
+        &self,
+        origin: &IngestionOrigin,
+        events: &[EventEnvelope],
+        policy: &PolicyProfile,
+        diagnostics: &[DiagnosticRecord],
+    ) -> Result<Vec<u64>, GhostraceError> {
         let mut ids = HashSet::with_capacity(events.len());
         for event in events {
             origin.validate_event(event)?;
@@ -347,15 +406,24 @@ impl Journal {
                 )));
             }
         }
+        for diagnostic in diagnostics {
+            diagnostic.validate()?;
+        }
         let mut connection = self.lock_connection()?;
         let transaction = connection.transaction()?;
         record_policy_profile(&transaction, policy)?;
         let sequences = insert_events(&transaction, events, self.key_provider.as_ref())?;
+        insert_diagnostics(&transaction, diagnostics)?;
         transaction.commit()?;
         if let Some(path) = self.path.as_deref() {
             storage::verify_database_artifacts(path)?;
         }
         Ok(sequences)
+    }
+
+    pub fn diagnostic_count(&self) -> Result<u64, GhostraceError> {
+        let connection = self.lock_connection()?;
+        Ok(connection.query_row("SELECT COUNT(*) FROM diagnostics", [], |row| row.get(0))?)
     }
 
     pub fn event(&self, event_id: Uuid) -> Result<EventEnvelope, GhostraceError> {
@@ -502,6 +570,19 @@ fn insert_events(
         sequences.push(sequence as u64);
     }
     Ok(sequences)
+}
+
+fn insert_diagnostics(
+    transaction: &Transaction<'_>,
+    diagnostics: &[DiagnosticRecord],
+) -> Result<(), GhostraceError> {
+    for diagnostic in diagnostics {
+        transaction.execute(
+            "INSERT INTO diagnostics(code, detail, created_at) VALUES (?1, ?2, ?3)",
+            params![diagnostic.code, diagnostic.detail, Utc::now().to_rfc3339()],
+        )?;
+    }
+    Ok(())
 }
 
 #[derive(Debug)]
