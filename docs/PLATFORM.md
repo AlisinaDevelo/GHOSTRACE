@@ -86,7 +86,14 @@ this adapter and remain no-go gates for a live collector.
 
 The adapter rejects FSEvents callback modes that replace the raw C-string path
 array with CFType or extended-data values (including full-history and document-ID
-modes); those modes require a separate parser contract.
+modes); those modes require a separate parser contract. The raw callback flag word
+is normalized immediately after copying: all 23 documented event bits map to
+`FseventsEventFlag`, dropped or wrapped coverage becomes an explicit rescan status,
+and root/mount/history markers remain boundaries. Unknown bits are preserved as a
+numeric remainder and lower completeness; contradictory item-kind or mount-state
+combinations are refused without discarding the raw word. The normalized v1 record
+contains no path and therefore cannot bypass root canonicalization or privacy
+policy.
 
 ## Private contexts
 
