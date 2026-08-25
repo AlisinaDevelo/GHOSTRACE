@@ -76,7 +76,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0070 | Persist one replay boundary per source and volume | M2 | done | filesystem | database-expert | 0015 | 0061, 0063, 0066 |
 | 0071 | Emit gaps for dropped, wrapped, and root-changed history | M2 | done | filesystem | macos-engineer | 0015 | 0065, 0070 |
 | 0072 | Define startup history-done and invalid-cursor behavior | M2 | done | filesystem | macos-engineer | 0015 | 0065, 0070 |
-| 0073 | Specify coalescing, deduplication, and rename limits | M2 | backlog | filesystem | architect | 0016 | 0065, 0070, 0071 |
+| 0073 | Specify coalescing, deduplication, and rename limits | M2 | done | filesystem | architect | 0016 | 0065, 0070, 0071 |
 | 0074 | Prevent collector feedback loops and own-event suppression errors | M2 | backlog | filesystem | security-auditor | 0016 | 0065, 0069, 0070 |
 | 0075 | Exercise storms, sleep, wake, detach, and restart | M2 | backlog | filesystem | test-engineer | 0017 | 0014, 0015, 0016 |
 | 0076 | Publish a reproducible filesystem benchmark corpus | M2 | backlog | filesystem | performance-engineer | 0017 | 0075 |
