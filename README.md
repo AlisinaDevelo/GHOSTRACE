@@ -3,16 +3,17 @@
 [![CI](https://github.com/AlisinaDevelo/GHOSTRACE/actions/workflows/ci.yml/badge.svg)](https://github.com/AlisinaDevelo/GHOSTRACE/actions/workflows/ci.yml)
 [![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](LICENSE)
 [![MSRV: 1.88.0](https://img.shields.io/badge/MSRV-1.88.0-informational.svg)](rust-toolchain.toml)
-[![Status: fixture-only](https://img.shields.io/badge/status-fixture--only-orange.svg)](docs/ROADMAP.md)
+[![Status: controlled collector API](https://img.shields.io/badge/status-controlled--collector--API-orange.svg)](docs/ROADMAP.md)
 
 GHOSTRACE is a local macOS causal event journal. It records bounded, user-authorized
 evidence about changes—not everything a person does—and explains which observations
 support each causal link.
 
-> **Status:** M0, fixture-only developer headstart (0.0.1). Live capture is
-> intentionally disabled until consent and policy enforcement, cursor recovery, a
-> bounded writer, and production Keychain encryption are complete. This repository
-> makes no legal chain-of-custody claim.
+> **Status:** M2 selected-root collector API headstart (0.0.1). The API requires an
+> explicit consent confirmation and writes only bounded filesystem metadata through the
+> existing writer; the ambient `capture` command remains intentionally disabled until
+> path-race containment, cursor recovery, and release gates are complete. This
+> repository makes no legal chain-of-custody claim.
 
 ## Ten-minute demo
 
@@ -81,7 +82,8 @@ encryption or key-management claim.
 | ghostrace schema | Available |
 | ghostrace capture | Refuses by design |
 | Local journal and bounded durable writer | Scaffolded for the fixture path; live ingestion is gated |
-| FSEvents, shell, Git, frontmost-app, or browser collectors | Not shipped |
+| Selected-root FSEvents collector API | Available only behind explicit consent; no ambient CLI |
+| Shell, Git, frontmost-app, or browser collectors | Not shipped |
 | macOS Keychain-backed production encryption | Not shipped |
 | Signed/notarized release artifacts | Not shipped |
 
@@ -93,9 +95,9 @@ failure, and coverage tests are present.
 The causal path is deliberately small:
 
 ~~~text
-fixture JSONL (now) ─┐
-                     ├─> normalization ─> deny-by-default policy
-opt-in source (later)┘                         │
+fixture JSONL (now) ─────────┐
+selected-root FSEvents (now) ├─> normalization ─> deny-by-default policy
+                             ┘                         │
                                                v
                                   versioned event + provenance
                                                │
@@ -124,14 +126,15 @@ GHOSTRACE is designed around a narrow local boundary:
   0044 must make that boundary independently enforceable in CI before it becomes
   release evidence. The separate maintainer-only roadmap synchronizer invokes `gh`
   only when an operator explicitly runs its GitHub commands.
-- **User-authorized:** future collectors require explicit consent, selected scope,
-  and a versioned policy. No event is retained before policy evaluation.
+- **User-authorized:** the selected-root collector requires explicit consent, selected
+  scope, and a versioned policy. No event is retained before policy evaluation.
 - **Minimized:** the baseline records bounded metadata about changes. It does not
   read file contents as part of the filesystem design.
 - **Honest evidence:** direct, contextual, inferred, and unknown evidence levels are
   distinct. Missing coverage is visible.
-- **Fail closed:** ghostrace capture refuses while the gates for consent, cursor
-  recovery, bounded writing, and Keychain protection are incomplete.
+- **Fail closed:** the ambient `ghostrace capture` command refuses while the gates for
+  path-race containment, cursor recovery, and release protection are incomplete; the
+  library collector itself cannot start without a consumed consent confirmation.
 - **Inspectable:** exports are explicit commands. Existing destinations are not
   overwritten unless --force is supplied.
 
@@ -200,9 +203,9 @@ diff -u .forge/tasks/README.md /tmp/ghostrace-roadmap-index.md
 scripts/reproducibility-test.sh
 ~~~
 
-The fixture-only path should remain offline. Do not add a network dependency, a
-permission request, a new sensitive field, or a collector without updating the
-privacy and threat documentation and adding regression coverage.
+The fixture path should remain offline. Do not add a network dependency, a permission
+request, a new sensitive field, or a collector behavior without updating the privacy and
+threat documentation and adding device regression coverage.
 
 ## License
 

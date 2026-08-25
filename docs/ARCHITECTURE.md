@@ -1,16 +1,16 @@
 # Architecture
 
 GHOSTRACE is a local, modular Rust application with a deliberately narrow data
-path. The current public slice replays synthetic JSONL fixtures. Live collection is
-a separate capability and remains disabled until its policy, recovery, writer, and
-encryption gates pass.
+path. The public slice replays synthetic JSONL fixtures and now contains an explicitly
+enabled selected-root FSEvents source. Ambient CLI capture remains disabled until the
+remaining path-policy, recovery, and release gates pass.
 
 ## Pipeline
 
 ~~~text
 source adapter
   ├─ fixture JSONL (current)
-  └─ explicitly enabled macOS source (future)
+  └─ explicitly enabled selected-root FSEvents source (current API)
         │
         v
 bounded normalization
@@ -64,7 +64,7 @@ command enables a live collector or network path.
 
 ## FSEvents lifecycle boundary
 
-The `fsevents` module is a deliberately small native boundary, not the selected-root
+The `fsevents` module is a deliberately small native boundary beneath the selected-root
 collector. `FseventsStream::new` validates a bounded path list and creates an
 `FSEventStreamRef` with a boxed Rust callback context. The wrapper is `!Send` and
 `!Sync`; the creating thread must schedule and drive the stream on its current
@@ -81,8 +81,9 @@ strict: stop a running stream, invalidate a scheduled stream, release the native
 object exactly once, then reclaim the boxed callback state. Callback parsing rejects
 null pointers, oversized batches, and oversized paths. User callback panics are
 caught at the ABI boundary and exposed as a bounded health counter rather than
-unwinding into CoreServices. Root canonicalization, consent, exclusions, cursor
-persistence, backpressure, and journal writes remain later collector gates.
+unwinding into CoreServices. The `fsevents` module itself does not decide consent,
+exclusions, cursors, or journal policy; those responsibilities belong to the collector
+adapter below.
 
 ### FSEvents flag normalization
 
@@ -98,6 +99,26 @@ history markers produce `boundary`. File/dir and mount/unmount contradictions ar
 refused as `contradictory` while preserving the complete raw flag set. A normalized
 record intentionally contains no path; path containment and digest policy remain
 the responsibility of the selected-root collector.
+
+## Selected-root collector boundary
+
+`FseventsCollector::new` consumes a `ConsentConfirmation`, validates that the policy
+enables both filesystem and lifecycle sources, and requires an exact opaque-root to
+canonical-path mapping. Construction never starts the stream. `start` is the explicit
+enable operation; it records a typed lifecycle event before native observation begins.
+
+Callback batches are copied into a bounded owner-thread queue. The drain step normalizes
+the flags, checks lexical containment, applies the versioned policy, hashes the path as
+`sha256:...`, and creates only a `FilesystemChanged` payload with operation, entry kind,
+root ID, path class, and digest. It never opens the reported path or reads file content.
+Accepted events and lifecycle transitions use the existing single `Writer`; queue
+overflow becomes a first-class gap, and blocked observations become a bounded summary.
+The public status exposes running/stopped/revoked state, callback health, accepted and
+dropped counts, and coverage-loss counters without retaining paths.
+
+The collector deliberately does not persist an FSEvents cursor yet. Volume identity,
+reset/wrap recovery, storm backpressure, exclusion precedence, symlink/hard-link race
+defense, and the ambient CLI remain later gates (tasks 0014–0017 and their children).
 
 ## Policy-document boundary
 

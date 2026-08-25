@@ -32,7 +32,9 @@ The M0 developer headstart should prove:
 
 ## Future live-source gates
 
-No live collector is ready until its fixture, integration, and failure matrix covers:
+The selected-root FSEvents API is a bounded first slice, not a release-ready ambient
+collector. No ambient collector is ready until its fixture, integration, and failure
+matrix covers:
 
 | Area | Required evidence |
 | --- | --- |
@@ -79,6 +81,11 @@ number without its workload would be a misleading guarantee.
 Task 0063 adds a platform lifecycle gate beneath the selected-root collector:
 macOS integration tests exercise creation, owner-run-loop scheduling, callback
 copying, start/stop/restart, flush, invalidation, and explicit refusal states.
+Task 0013 adds the next gate: explicit consent confirmation, exact root mapping,
+path-free filesystem payloads, lifecycle records, writer admission, controlled
+create/modify/move/delete integration, and revocation before pending events commit.
+Its startup canonicalization and lexical containment are intentionally not a
+substitute for the race-resistant path policy and cursor/recovery work below.
 Cross-platform lifecycle-model tests inject schedule/start failures and assert that
 stop, invalidate, and release occur exactly once. AddressSanitizer is a required
 macOS evidence lane when the pinned nightly sanitizer toolchain is available; a

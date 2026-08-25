@@ -2,7 +2,8 @@
 
 GHOSTRACE exists to help a person inspect a bounded sequence of local changes. It is
 not designed to reconstruct everything a person did. The current public headstart is
-fixture-only, local, and offline; no live collector is enabled.
+local and offline: a selected-root collector API exists only behind explicit consent,
+while the ambient CLI remains disabled.
 
 ## Defaults
 
@@ -29,7 +30,7 @@ These are product boundaries, not suggestions for a future configuration screen.
 | Synthetic fixture event | Exercise parsing, explanation, and export | Allowed in developer headstart | Checked-in fixtures must contain no user data |
 | Event ID, schema version, source, kind, timestamps, and policy ID/version | Identify, order, and audit the policy that accepted an observation | Fixture-only now; live only after policy | Bounded by the journal policy |
 | Source cursor and status | Describe coverage and restart state | Not ambiently collected now | Persist with the event when live capture ships |
-| Selected path metadata | Describe a permitted filesystem change without reading content | Future, explicit root only | Canonicalized, excluded, and bounded before persistence |
+| Selected path metadata | Describe a permitted filesystem change without reading content | Explicit selected-root API only | Canonicalized, policy-checked, hashed, and bounded before persistence |
 | Policy decision and reason | Explain why an observation was accepted, denied, or redacted | Required for live design | No blocked sensitive value is retained |
 | Evidence level and gap | Express what the source supports and what it cannot | Part of the event contract | First-class records |
 | Payload | Carry the minimum normalized source facts | Fixture-only plaintext may be shown by an explicit command | Production payloads require Keychain-backed authenticated encryption |
@@ -61,9 +62,10 @@ queue fallback.
 
 ## Consent and scope
 
-When live capture is eventually enabled, consent must state the source, selected
+When a selected-root collector is enabled, consent must state the source, selected
 scope, exclusions, private-context behavior, fields retained, policy version, and
-how to stop or delete the journal. A source cannot expand scope because a path
+how to stop or delete the journal. The collector requires a rendered and explicitly
+confirmed preview before `start`; a source cannot expand scope because a path
 contains a symlink, a mounted volume, a browser profile, or a process-owned file.
 Scope checks and canonicalization occur before a value reaches the journal.
 
@@ -107,6 +109,14 @@ and literal specificity then resolve overlaps. Empty, traversal, malformed-escap
 and oversized patterns are rejected before a policy can be installed. Policy history
 keeps the old version available for existing evidence and evaluates only future
 observations against a newly installed version.
+
+The selected-root collector stores only an opaque root ID, operation, entry kind, path
+class, and SHA-256 path digest. It does not call `stat`, open, read, or hash file
+contents. Lifecycle transitions, callback health, blocked counts, and callback overflow
+gaps are bounded status records; the raw callback path is never written to a payload or
+diagnostic. Startup canonicalization and lexical containment are intentionally weaker
+than the race-resistant symlink, hard-link, and exclusion gates still required before
+ambient CLI capture can be enabled.
 
 ## Local storage and export
 

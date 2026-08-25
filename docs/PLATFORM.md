@@ -69,22 +69,30 @@ session, and no legacy-keychain fallback is permitted.
 
 ## FSEvents boundary
 
-The planned first live source observes bounded filesystem metadata below explicitly
-selected roots. It must canonicalize roots, reject symlink escapes, apply exclusions
-before persistence, and retain no file contents. FSEvents does not guarantee
+The first live-source API observes bounded filesystem metadata below explicitly selected
+roots. `FseventsCollector` requires a consumed consent confirmation, canonicalizes each
+startup root, rejects paths outside the selected lexical scope, applies the existing
+versioned policy before persistence, and retains no file contents. FSEvents does not guarantee
 process attribution, event completeness, or one notification per change. Source
 flags, cursor state, and gaps must remain visible.
 
-The shipped lifecycle adapter is only the native stream fence. It requires a
+The collector records start/stop lifecycle events, hashes reported paths, and routes
+accepted metadata through the bounded writer. Callback overflow is a first-class gap;
+blocked observations are summarized without retaining blocked paths. The startup
+canonicalization is not the complete path policy: symlink replacement, hard-link
+aliasing, validation-to-use races, exclusion matching, volume identity, and cursor
+recovery remain separate release gates. No FSEvents cursor is persisted by this first
+slice, so the ambient CLI remains refused.
+
+The shipped lifecycle adapter is the native stream fence beneath the collector. It requires a
 single owner thread and that thread's current Core Foundation run loop; it does not
 start ambient capture by itself. Creation, scheduling, callback parsing, flush,
 stop, restart, invalidation, and release are explicit operations. A callback is
 never allowed to unwind through the C ABI, and a native stream is released only
 after invalidation. The separate selected-root consent preview now makes canonical
 opaque roots, exclusions, retained fields, and FSEvents coverage limits explicit
-before a grant; canonical filesystem-path resolution, symlink containment,
-exclusions, source flag semantics, cursor recovery, and persistence remain no-go
-gates for a live collector.
+before a grant; race-resistant symlink containment, exclusions, cursor recovery, and
+release-scale persistence remain no-go gates for ambient capture.
 
 The adapter rejects FSEvents callback modes that replace the raw C-string path
 array with CFType or extended-data values (including full-history and document-ID
