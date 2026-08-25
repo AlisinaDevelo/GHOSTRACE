@@ -70,6 +70,22 @@ network-surface scan. A separate full debug all-target attempt was not a test
 result: it exited 101 before compilation because the device filesystem reached
 `ENOSPC`; its generated target was removed before the successful release run.
 
+## Merged-main reproduction
+
+The same device lanes were rerun from the exact squash merge on protected `main`,
+`623a15a52a2ecb5ec874f32eca7667b7ee7a9477`:
+
+| Check | Result and receipt |
+| --- | --- |
+| Full release all-target/all-feature suite | Passed, exit 0; `/private/tmp/ghostrace-0065-postmerge-release-v1.log`; SHA-256 `8a7bbe4717c861d6e763a6119652fbebf702eea92bca9b291fc8dcbecacce886` |
+| Enforced macOS sandbox canary plus FSEvents/privacy focus | Passed, exit 0; `/private/tmp/ghostrace-0065-postmerge-sandbox-v1.log`; SHA-256 `149427dba04629710c82991f37f7c39f311ac89c8d432dd7cfac5b4757a7dd49` |
+| Static/repository lane | Passed, exit 0; `/private/tmp/ghostrace-0065-postmerge-static-v1.log`; SHA-256 `f0b435b6c2cd20f3580744477632abf352c3a89a72aae3e61a1f63224f883c87` |
+
+The post-merge static lane repeated the full formatting, locked-Clippy,
+reproducibility, roadmap/index, Python, ShellCheck, actionlint, and source-only
+network-surface checks. The release output again shows the expected migration
+crash-child diagnostics while the parent recovery test exits successfully.
+
 ## Limitations
 
 - The normalizer is a bounded source primitive, not a filesystem walk or symlink
