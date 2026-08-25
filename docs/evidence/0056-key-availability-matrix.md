@@ -1,23 +1,29 @@
 # Task 0056 evidence: locked-session and background key behavior
 
-Status: complete for the bounded writer/key-provider contract on the verified
-macOS ARM64 device. The matrix deliberately records transitions that were not
-safe to automate as explicit no-go results; it does not turn those rows into
-positive support claims.
+Status: complete for the bounded writer/key-provider contract on protected
+`main`. The matrix deliberately records transitions that were not safe to
+automate as explicit no-go results; it does not turn those rows into positive
+support claims.
 
 ## Retained artifacts
 
 | Artifact | Value |
 | --- | --- |
 | Implementation commit before merge | `069cde6fed9ac7770d2f8f59c93b3d3e503cbdeb` |
+| Implementation pull request | [#223](https://github.com/AlisinaDevelo/GHOSTRACE/pull/223) |
+| Protected-main merge | `7aaa5e2ebc944d51908e56be1d87947f78f192d2` |
 | Device lifecycle log | `/tmp/ghostrace-0056-keychain-lifecycle-source-final.log` — SHA-256 `24873913bfc572ac18af2183204bf739def842320a71f61efb9db0e9cd9af8ab` |
 | Machine-readable matrix | [`0056-key-availability-matrix.json`](0056-key-availability-matrix.json) |
 | Source reproducibility pipe | `/tmp/ghostrace-0056-source-repro-final.log` — SHA-256 `1c4f3014268482d613c50c9e6ae027a06b80f7fbf9fb381329a3718b6986d145` |
 | Source network-denial pipe | `/tmp/ghostrace-0056-source-offline.log` — SHA-256 `785a3a5e11d37054bffaa24a37e2b95623198087e207f5482f8d23a1b06752eb` |
 | Source release all-target pipe | `/tmp/ghostrace-0056-source-release.log` — SHA-256 `c9eaeedb0ef3f543627d5313eca208616ffe5d34a5ddab60bd3d8fb69c75f400` |
+| Post-merge device lifecycle log | `/tmp/ghostrace-0056-keychain-lifecycle-postmerge.log` — SHA-256 `b22a81e2f67b36ef370b10eee919183a6947ce1ce3cf473410ceb458e3b9d9b1` |
+| Post-merge reproducibility pipe | `/tmp/ghostrace-0056-postmerge-repro.log` — SHA-256 `ebc9fc56dc98407739aeab670c5e7535c1d8a88f065f7b7dd38802f45764be0d` |
+| Post-merge network-denial pipe | `/tmp/ghostrace-0056-postmerge-offline.log` — SHA-256 `63a4705f2d38e20843be3f802dd894d2192fabf09a75f6aa021f0ef6630a8a3f` |
+| Post-merge release all-target pipe | `/tmp/ghostrace-0056-postmerge-release.log` — SHA-256 `63a9ad024bd2ec83b6bb9b31534d9af73a0257aa28ec9b772876f3a244f83487` |
 
-The device was a MacBookPro17,1 (Apple M1, arm64), macOS 26.6.2 build 25G83,
-with Rust/Cargo 1.88.0 (`aarch64-apple-darwin`). The probe used an isolated
+The source and post-merge runs used a MacBookPro17,1 (Apple M1, arm64), macOS
+26.6.2 build 25G83, with Rust/Cargo 1.88.0 (`aarch64-apple-darwin`). The probe used an isolated
 temporary legacy Keychain and restored the user's default/search Keychain list
 in an RAII cleanup path. No login-keychain item, user password, key material,
 event payload, or private path was written to the repository or evidence.
@@ -71,6 +77,6 @@ lock, sleep, wake, fast-user-switch, logout, and launchd-restart.
 - `shellcheck scripts/*.sh`, `actionlint`, `python3 scripts/roadmap.py check`,
   `python3 scripts/fixture-manifest.py check`, and `git diff --check` — pass.
 
-The optimized run and both safety pipes are supplementary to the retained
-device lifecycle log; the protected-main reproduction and merge SHA are added
-after review and merge.
+The protected-main reproduction above is the acceptance rerun for merge
+`7aaa5e2ebc944d51908e56be1d87947f78f192d2`; hosted checks on PR #223 were
+additional merge gates, not substitutes for the device receipts.
