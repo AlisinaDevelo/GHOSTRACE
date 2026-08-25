@@ -144,6 +144,14 @@ root-change callbacks become first-class gaps with stable reason codes, bounded
 volume/root digests, cursor ranges when knowable, and a remediation action. A
 source-loss gap sets `recovery_required`, so the collector does not resume
 ordinary filesystem events until a later reconciliation stage clears that gate.
+Startup readiness is a separate coverage state: `SinceNow` is explicitly live,
+whereas a nonzero ordered cursor enters `Replaying` and may claim live delivery
+only after the native `HistoryDone` sentinel is consumed as a state transition.
+Zero, stale, future, wrapped, and corrupted resume positions are refused rather
+than silently downgraded to `SinceNow`. A timeout, partial-history status, or
+explicit stop before `HistoryDone` emits a bounded `fsevents_history_*` gap,
+enters `HistoryUnavailable`, and keeps `recovery_required` set. `HistoryDone`
+never becomes a `FilesystemChanged` record or a user observation.
 Gap events are committed with their cursor advancement in the same transaction;
 durable restart recovery and the ambient CLI remain later gates (tasks 0015–0017
 and their children).

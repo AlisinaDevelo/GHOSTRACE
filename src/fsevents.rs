@@ -27,9 +27,9 @@ use std::sync::Mutex;
 use thiserror::Error;
 
 use crate::{
-    cursor::{CursorStreamMode, ReplayConfiguration},
+    cursor::{CursorKind, CursorStreamMode, CursorToken, ReplayConfiguration},
     error::GhostraceError,
-    model::SnapshotDigest,
+    model::{SnapshotDigest, SourceCursor},
 };
 
 #[cfg(target_os = "macos")]
@@ -41,6 +41,126 @@ use std::{
 
 /// FSEventStream's sentinel for "start at the current point in history".
 pub const EVENT_ID_SINCE_NOW: u64 = u64::MAX;
+
+/// Why a persisted FSEvents startup position cannot be used as a native
+/// `sinceWhen` value. These refusals are explicit so a caller cannot silently
+/// fall back to a live stream and imply that the missing history was covered.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum StartupCursorRejection {
+    #[error("zero is not a bounded history boundary")]
+    Zero,
+    #[error("the requested history is older than the available source window")]
+    Stale,
+    #[error("the requested history is newer than the available source window")]
+    Future,
+    #[error("the source event ID counter wrapped; a new stream epoch is required")]
+    Wrapped,
+    #[error("the persisted cursor is not a valid ordered FSEvents event ID")]
+    Corrupted,
+}
+
+/// Errors raised while classifying a startup cursor before native stream
+/// creation. No source or path value is included in the error text.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum StartupCursorError {
+    #[error("startup cursor refused: {0}")]
+    Refused(StartupCursorRejection),
+    #[error("history cursor range is invalid")]
+    InvalidRange,
+}
+
+/// A bounded source-history window supplied by a platform probe or a durable
+/// source receipt. Event IDs are global for one FSEvents stream identity.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HistoryCursorRange {
+    pub oldest_event_id: u64,
+    pub newest_event_id: u64,
+}
+
+impl HistoryCursorRange {
+    pub fn new(oldest_event_id: u64, newest_event_id: u64) -> Result<Self, StartupCursorError> {
+        if oldest_event_id == 0 || newest_event_id < oldest_event_id {
+            return Err(StartupCursorError::InvalidRange);
+        }
+        Ok(Self { oldest_event_id, newest_event_id })
+    }
+}
+
+/// The only startup positions accepted by the native FSEvents adapter.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum StartupCursor {
+    SinceNow,
+    EventId { event_id: u64 },
+}
+
+impl StartupCursor {
+    pub fn from_since_when(since_when: u64) -> Result<Self, StartupCursorError> {
+        if since_when == EVENT_ID_SINCE_NOW {
+            return Ok(Self::SinceNow);
+        }
+        Self::from_event_id(since_when)
+    }
+
+    pub fn from_source_cursor(cursor: &SourceCursor) -> Result<Self, StartupCursorError> {
+        let token = CursorToken::new(cursor.clone());
+        match token.kind() {
+            CursorKind::Sequence => {
+                let Some(position) = token.position() else {
+                    return Err(StartupCursorError::Refused(StartupCursorRejection::Corrupted));
+                };
+                let Ok(event_id) = u64::try_from(position) else {
+                    return Err(StartupCursorError::Refused(StartupCursorRejection::Corrupted));
+                };
+                Self::from_event_id(event_id)
+            }
+            CursorKind::Wrap => Err(StartupCursorError::Refused(StartupCursorRejection::Wrapped)),
+            CursorKind::Opaque | CursorKind::Reset => {
+                Err(StartupCursorError::Refused(StartupCursorRejection::Corrupted))
+            }
+        }
+    }
+
+    pub fn decision(
+        self,
+        available: Option<HistoryCursorRange>,
+    ) -> Result<StartupCursorDecision, StartupCursorError> {
+        match self {
+            Self::SinceNow => Ok(StartupCursorDecision::SinceNow),
+            Self::EventId { event_id } => {
+                if let Some(range) = available {
+                    if event_id < range.oldest_event_id {
+                        return Err(StartupCursorError::Refused(StartupCursorRejection::Stale));
+                    }
+                    if event_id > range.newest_event_id {
+                        return Err(StartupCursorError::Refused(StartupCursorRejection::Future));
+                    }
+                }
+                Ok(StartupCursorDecision::Replay { event_id })
+            }
+        }
+    }
+
+    fn from_event_id(event_id: u64) -> Result<Self, StartupCursorError> {
+        if event_id == 0 {
+            return Err(StartupCursorError::Refused(StartupCursorRejection::Zero));
+        }
+        if event_id == EVENT_ID_SINCE_NOW {
+            return Err(StartupCursorError::Refused(StartupCursorRejection::Corrupted));
+        }
+        Ok(Self::EventId { event_id })
+    }
+}
+
+/// Startup behavior after the cursor has passed validation and any available
+/// history-window check.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum StartupCursorDecision {
+    SinceNow,
+    Replay { event_id: u64 },
+}
 
 /// The default stream latency.  A short latency is useful for the lifecycle
 /// integration tests while still allowing the daemon to coalesce callbacks.
@@ -90,6 +210,9 @@ pub enum FseventsError {
 
     #[error("FSEvents callback representation flags are unsupported by the raw-path adapter")]
     UnsupportedCallbackFlags,
+
+    #[error("FSEvents startup cursor is invalid: {reason}")]
+    InvalidStartupCursor { reason: StartupCursorRejection },
 
     #[error("the FSEvents stream is not scheduled on a run loop")]
     NotScheduled,
@@ -157,6 +280,14 @@ impl Default for FseventsOptions {
 
 impl FseventsOptions {
     fn validate(&self) -> Result<(), FseventsError> {
+        StartupCursor::from_since_when(self.since_when).map_err(|error| {
+            FseventsError::InvalidStartupCursor {
+                reason: match error {
+                    StartupCursorError::Refused(reason) => reason,
+                    StartupCursorError::InvalidRange => StartupCursorRejection::Corrupted,
+                },
+            }
+        })?;
         let seconds = self.latency.as_secs_f64();
         if !seconds.is_finite() || seconds > 60.0 * 60.0 {
             return Err(FseventsError::InvalidLatency);
@@ -168,6 +299,17 @@ impl FseventsOptions {
             return Err(FseventsError::UnsupportedCallbackFlags);
         }
         Ok(())
+    }
+
+    /// Classify the configured `sinceWhen` value before stream creation. A
+    /// missing range means that the source has not yet supplied an availability
+    /// probe; the explicit nonzero event ID remains a replay request and any
+    /// later source-loss signal must become a gap.
+    pub fn startup_decision(
+        &self,
+        available: Option<HistoryCursorRange>,
+    ) -> Result<StartupCursorDecision, StartupCursorError> {
+        StartupCursor::from_since_when(self.since_when)?.decision(available)
     }
 
     /// Convert stream settings into the path-free durable replay contract.

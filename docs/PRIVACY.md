@@ -133,7 +133,13 @@ volume fingerprint, opaque root IDs, bounded cursor range, stable reason code, a
 remediation; they never retain the callback path or a rescan listing. Any boundary
 change fails closed until an explicit reset or wrap. The collector exposes
 `recovery_required` and refuses ordinary delivery after a loss until reconciliation;
-ambient capture still requires the remaining release gates.
+ambient capture still requires the remaining release gates. Startup cursor
+validation refuses zero, stale, future, wrapped, and corrupted positions instead
+of silently dropping history. Historical replay remains `Replaying` until the
+path-free `HistoryDone` control boundary; timeout, partial-history status, or an
+explicit stop before that boundary records only a bounded history gap and keeps
+the collector unavailable for ordinary delivery. The sentinel is never written as
+an observation, and no source path is included in the refusal or gap text.
 
 ## Local storage and export
 

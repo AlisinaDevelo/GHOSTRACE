@@ -288,6 +288,16 @@ impl NormalizedFseventsEvent {
         }
     }
 
+    /// HistoryDone is a stream sentinel, never a user-visible filesystem
+    /// observation. It marks the only transition from historical replay to
+    /// live delivery for a stream created with an explicit since-when ID.
+    pub fn is_history_done(&self) -> bool {
+        matches!(
+            self.status,
+            FseventsEvidenceStatus::Boundary { reason: FseventsBoundaryReason::HistoryDone }
+        )
+    }
+
     /// Return the stable gap reason for a coverage-changing callback.
     ///
     /// The combined dropped case is intentionally distinct from each
