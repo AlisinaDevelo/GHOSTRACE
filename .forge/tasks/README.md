@@ -8,7 +8,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0002 | Record macOS support, permission, and collector boundaries | M0 | done | foundation | maintainer | — | 0001 |
 | 0003 | Scaffold the MPL-2.0 Rust core and CI | M0 | done | foundation | maintainer | — | 0001 |
 | 0004 | Publish the threat model and data inventory | M0 | done | foundation | maintainer | — | 0001, 0002 |
-| 0005 | Add privacy regression and network-surface checks | M0 | backlog | privacy | maintainer | — | 0003, 0004, 0043, 0044 |
+| 0005 | Add privacy regression and network-surface checks | M0 | done | privacy | maintainer | — | 0003, 0004, 0043, 0044 |
 | 0006 | Define the versioned canonical event envelope | M0 | done | foundation | maintainer | — | 0003 |
 | 0007 | Implement the consent and capture-policy engine | M1 | backlog | privacy | maintainer | — | 0004, 0006, 0051, 0052, 0053 |
 | 0008 | Implement Keychain-backed DEK and AEAD envelopes | M1 | backlog | storage | maintainer | — | 0003, 0004, 0054, 0055, 0056 |
