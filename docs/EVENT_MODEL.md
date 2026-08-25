@@ -211,6 +211,11 @@ or a time ordering alone when the source cannot establish the relationship.
   policy-denial, source-disabled, no-event, unknown-history, and retention
   deletion markers even when an event-kind filter excludes those marker rows;
   an opt-out is explicit in the response.
+- Explanation statements use claim grammar version `1`: each event kind has
+  required facts, an evidence-label rule, prohibited implications, and gap
+  behavior. The bounded `en`/`en-GB` renderer cites the event ID and refuses
+  intent, completeness, process attribution, unsupported causality, and
+  old-to-new rename identity.
 - Export must preserve evidence labels, provenance, and gaps.
 - Unknown schema versions, malformed UUIDs, invalid timestamps, and prohibited
   payload fields fail closed.
