@@ -132,8 +132,11 @@ equivalence are whatever the selected filesystem resolves; the collector does no
 cross-volume equivalence.
 Accepted events and lifecycle transitions use the existing single `Writer`; queue
 overflow becomes a first-class gap, and blocked observations become a bounded summary.
-The public status exposes running/stopped/revoked state, callback health, accepted and
-dropped counts, and coverage-loss counters without retaining paths.
+The callback queue is capped at `MAX_PENDING_EVENTS`, while one bounded emergency
+writer reservation remains available for a loss/status record when normal work is
+saturated. The public status exposes running/stopped/revoked state, callback health,
+accepted and dropped counts, pending/overflow counts, writer reservations, and
+coverage-loss state without retaining paths.
 
 The storm/lifecycle evaluation contract is kept separate from the source boundary in
 [`fixtures/fsevents-lifecycle-corpus-v1.json`](../fixtures/fsevents-lifecycle-corpus-v1.json).

@@ -39,6 +39,11 @@ const MAX_BATCH_ITEMS: usize = 1_024;
 const MAX_MEMORY_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_WAIT_MS: u64 = 30_000;
 const MAX_RETRIES: u8 = 8;
+// One bounded emergency admission is reserved for a source status/gap record
+// when the normal queue is saturated. It is still subject to the same worker,
+// transaction, encryption, and acknowledgement boundaries as normal events.
+const STATUS_QUEUE_RESERVE_ITEMS: usize = 1;
+const STATUS_MEMORY_RESERVE_BYTES: u64 = 16 * 1024;
 
 /// What a source adapter observes when its bounded queue has no admission
 /// capacity.  `Gap` is an explicit outcome and must be forwarded to the
@@ -249,7 +254,8 @@ impl std::fmt::Debug for Writer {
 impl Writer {
     pub fn new(journal: Journal, config: WriterConfig) -> Result<Self, GhostraceError> {
         config.validate()?;
-        let (sender, receiver) = mpsc::sync_channel(config.queue_items);
+        let (sender, receiver) =
+            mpsc::sync_channel(config.queue_items.saturating_add(STATUS_QUEUE_RESERVE_ITEMS));
         let state = Arc::new(AdmissionState::default());
         let worker_state = Arc::clone(&state);
         let worker_config = config.clone();
@@ -267,7 +273,8 @@ impl Writer {
         gate: TestGate,
     ) -> Result<Self, GhostraceError> {
         config.validate()?;
-        let (sender, receiver) = mpsc::sync_channel(config.queue_items);
+        let (sender, receiver) =
+            mpsc::sync_channel(config.queue_items.saturating_add(STATUS_QUEUE_RESERVE_ITEMS));
         let state = Arc::new(AdmissionState::default());
         let worker_state = Arc::clone(&state);
         let worker_config = config.clone();
@@ -300,21 +307,54 @@ impl Writer {
         diagnostics: Vec<DiagnosticRecord>,
         boundary: Option<ReplayBoundary>,
     ) -> Result<WriterSubmission, GhostraceError> {
+        self.enqueue_with_boundary_mode(origin, events, policy, diagnostics, boundary, false)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn enqueue_status_with_boundary(
+        &self,
+        origin: IngestionOrigin,
+        events: Vec<EventEnvelope>,
+        policy: PolicyProfile,
+        diagnostics: Vec<DiagnosticRecord>,
+        boundary: Option<ReplayBoundary>,
+    ) -> Result<WriterSubmission, GhostraceError> {
+        self.enqueue_with_boundary_mode(origin, events, policy, diagnostics, boundary, true)
+    }
+
+    fn enqueue_with_boundary_mode(
+        &self,
+        origin: IngestionOrigin,
+        events: Vec<EventEnvelope>,
+        policy: PolicyProfile,
+        diagnostics: Vec<DiagnosticRecord>,
+        boundary: Option<ReplayBoundary>,
+        status_reservation: bool,
+    ) -> Result<WriterSubmission, GhostraceError> {
         let source = validate_batch(&events, &self.config)?;
         let bytes = estimate_request_bytes(&events, &policy, &diagnostics, boundary.as_ref())?;
-        if bytes > self.config.max_memory_bytes {
-            return Err(GhostraceError::WriterMemoryBound {
-                bytes,
-                max_bytes: self.config.max_memory_bytes,
-            });
+        let max_memory_bytes = if status_reservation {
+            self.config.max_memory_bytes.saturating_add(STATUS_MEMORY_RESERVE_BYTES)
+        } else {
+            self.config.max_memory_bytes
+        };
+        if bytes > max_memory_bytes {
+            return Err(GhostraceError::WriterMemoryBound { bytes, max_bytes: max_memory_bytes });
         }
 
+        let queue_policy = if status_reservation {
+            QueueFullPolicy::Block
+        } else {
+            self.config.queue_full_policy(source)
+        };
+        let max_queue_items =
+            self.config.queue_items.saturating_add(usize::from(status_reservation));
         match self.state.reserve(
             source,
-            self.config.queue_full_policy(source),
-            self.config.queue_items,
+            queue_policy,
+            max_queue_items,
             bytes,
-            self.config.max_memory_bytes,
+            max_memory_bytes,
             self.config.max_wait,
         )? {
             Admission::Gap => {
@@ -380,9 +420,39 @@ impl Writer {
         diagnostics: Vec<DiagnosticRecord>,
         boundary: Option<ReplayBoundary>,
     ) -> Result<WriterOutcome, GhostraceError> {
+        self.submit_with_boundary_mode(origin, events, policy, diagnostics, boundary, false)
+    }
+
+    pub(crate) fn submit_status_with_boundary(
+        &self,
+        origin: IngestionOrigin,
+        events: Vec<EventEnvelope>,
+        policy: PolicyProfile,
+        diagnostics: Vec<DiagnosticRecord>,
+        boundary: Option<ReplayBoundary>,
+    ) -> Result<WriterOutcome, GhostraceError> {
+        self.submit_with_boundary_mode(origin, events, policy, diagnostics, boundary, true)
+    }
+
+    fn submit_with_boundary_mode(
+        &self,
+        origin: IngestionOrigin,
+        events: Vec<EventEnvelope>,
+        policy: PolicyProfile,
+        diagnostics: Vec<DiagnosticRecord>,
+        boundary: Option<ReplayBoundary>,
+        status_reservation: bool,
+    ) -> Result<WriterOutcome, GhostraceError> {
         let source = validate_batch(&events, &self.config)?;
         let event_count = events.len();
-        match self.enqueue_with_boundary(origin, events, policy, diagnostics, boundary)? {
+        match self.enqueue_with_boundary_mode(
+            origin,
+            events,
+            policy,
+            diagnostics,
+            boundary,
+            status_reservation,
+        )? {
             WriterSubmission::Queued(ticket) => match ticket.wait() {
                 Ok(ack) => Ok(WriterOutcome::Committed(ack)),
                 Err(error)
@@ -760,6 +830,41 @@ mod tests {
         gate.release();
         let WriterSubmission::Queued(ticket) = first else { panic!("unexpected gap") };
         ticket.wait().expect("ack");
+    }
+
+    #[test]
+    fn status_submission_has_one_reserved_slot_when_normal_queue_is_full() {
+        let (origin, event, policy) = fixture();
+        let gate = TestGate::new();
+        let journal = Journal::in_memory(DeterministicKeyProvider::from_seed("writer-status-slot"))
+            .expect("journal");
+        let writer = Writer::new_with_gate(
+            journal,
+            WriterConfig {
+                queue_items: 1,
+                default_queue_full_policy: QueueFullPolicy::EmitGap,
+                ..WriterConfig::default()
+            },
+            gate.clone(),
+        )
+        .expect("writer");
+        let first = writer
+            .enqueue(origin.clone(), vec![event.clone()], policy.clone(), Vec::new())
+            .expect("first");
+        gate.wait_until_entered();
+
+        let mut status_event = event;
+        status_event.event_id = Uuid::new_v4();
+        let status = writer
+            .enqueue_status_with_boundary(origin, vec![status_event], policy, Vec::new(), None)
+            .expect("reserved status admission");
+        assert!(matches!(status, WriterSubmission::Queued(_)));
+
+        gate.release();
+        let WriterSubmission::Queued(ticket) = first else { panic!("unexpected gap") };
+        ticket.wait().expect("first ack");
+        let WriterSubmission::Queued(ticket) = status else { panic!("unexpected gap") };
+        let _ = ticket.wait();
     }
 
     #[test]

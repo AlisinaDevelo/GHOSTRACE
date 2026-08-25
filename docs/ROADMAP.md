@@ -88,7 +88,10 @@ claim process attribution. Task 0076 adds a versioned synthetic benchmark contra
 for small, deep, wide, Unicode, case-variant, Git, build-output, and event-storm
 trees, with bounded latency, coverage, gap, CPU, memory, energy, and disk reports.
 Results are tied to the named device and are not cross-machine comparable without
-normalization.
+normalization. Task 0016 now adds a bounded event-storm admission contract: copied
+callback events stop at `MAX_PENDING_EVENTS`, one emergency writer slot remains for
+the loss/status record when the normal queue is full, and an induced overflow is
+persisted as a gap before the collector enters `recovery_required`.
 
 ### Query, explanation, export, and integrity
 

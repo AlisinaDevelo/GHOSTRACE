@@ -58,7 +58,7 @@ use crate::{
     },
     policy::{PolicyDocument, PolicyProfile},
     volume::VolumeIdentity,
-    writer::{Writer, WriterConfig, WriterOutcome},
+    writer::{Writer, WriterConfig, WriterGapReason, WriterOutcome},
 };
 
 /// Upper bound on the number of selected roots in one collector instance.
@@ -507,6 +507,15 @@ pub struct CollectorStatus {
     /// A source-loss gap has stopped automatic resume until a later
     /// reconciliation stage explicitly clears this condition.
     pub recovery_required: bool,
+    /// Number of copied callback events currently waiting for the owner
+    /// thread. This is always at most [`MAX_PENDING_EVENTS`].
+    pub pending_events: usize,
+    /// Cumulative callback deliveries refused by the bounded pending queue.
+    pub pending_overflow_events: u64,
+    /// Current durable-writer reservations, including at most one emergency
+    /// status/gap reservation above the normal queue bound.
+    pub writer_outstanding_items: usize,
+    pub writer_outstanding_bytes: u64,
     pub callback_health: CallbackHealth,
 }
 
@@ -556,6 +565,9 @@ pub enum FseventsCollectorError {
 
     #[error("the startup recovery gap could not be durably admitted")]
     StartupGapAdmission,
+
+    #[error("a collector loss gap could not be durably admitted")]
+    GapAdmission,
 
     #[error(transparent)]
     Stream(#[from] FseventsError),
@@ -649,6 +661,7 @@ pub struct FseventsCollector {
     accepted_events: u64,
     blocked_events: u64,
     dropped_events: u64,
+    pending_overflow_events: u64,
     coverage_boundaries: u64,
     rescan_required: u64,
     unsupported_events: u64,
@@ -775,6 +788,7 @@ impl FseventsCollector {
             accepted_events: 0,
             blocked_events: 0,
             dropped_events: 0,
+            pending_overflow_events: 0,
             coverage_boundaries: 0,
             rescan_required: 0,
             unsupported_events: 0,
@@ -792,6 +806,12 @@ impl FseventsCollector {
     }
 
     pub fn status(&self) -> CollectorStatus {
+        let (pending_events, pending_overflow_events) = self
+            .pending
+            .lock()
+            .map(|pending| (pending.events.len(), self.pending_overflow_events))
+            .unwrap_or((MAX_PENDING_EVENTS, self.pending_overflow_events));
+        let (writer_outstanding_items, writer_outstanding_bytes) = self.writer.outstanding();
         CollectorStatus {
             state: self.state,
             coverage_state: self.coverage_state,
@@ -807,6 +827,10 @@ impl FseventsCollector {
             transport_duplicates: self.transport_duplicates,
             internal_path_denials: self.internal_path_denials,
             recovery_required: self.recovery_required,
+            pending_events,
+            pending_overflow_events,
+            writer_outstanding_items,
+            writer_outstanding_bytes,
             callback_health: self.stream.callback_health(),
         }
     }
@@ -945,10 +969,13 @@ impl FseventsCollector {
             (pending.events.drain(..).collect::<Vec<_>>(), std::mem::take(&mut pending.overflowed))
         };
         if self.state == CollectorState::Revoked {
-            self.dropped_events = self.dropped_events.saturating_add(events.len() as u64);
+            self.pending_overflow_events = self.pending_overflow_events.saturating_add(overflowed);
+            self.dropped_events =
+                self.dropped_events.saturating_add(events.len() as u64).saturating_add(overflowed);
             return Ok(Vec::new());
         }
         if overflowed > 0 {
+            self.pending_overflow_events = self.pending_overflow_events.saturating_add(overflowed);
             self.dropped_events = self.dropped_events.saturating_add(overflowed);
             self.submit_gap(GapSubmission {
                 dropped_count: overflowed,
@@ -1134,8 +1161,18 @@ impl FseventsCollector {
                     committed.push(collected);
                 }
                 WriterOutcome::Gap(gap) => {
-                    self.dropped_events =
-                        self.dropped_events.saturating_add(gap.event_count as u64);
+                    let dropped_count = gap.event_count as u64;
+                    self.dropped_events = self.dropped_events.saturating_add(dropped_count);
+                    self.submit_gap(GapSubmission {
+                        dropped_count,
+                        reason_code: writer_gap_reason_code(gap.reason),
+                        source_cursor: None,
+                        from_cursor: None,
+                        to_cursor: None,
+                        remediation: Some(GapRemediation::RescanSelectedRoots),
+                        root_ids: self.all_root_ids(),
+                        requires_reconciliation: true,
+                    })?;
                 }
             }
         }
@@ -1299,7 +1336,7 @@ impl FseventsCollector {
             Evidence::Unknown,
             None,
         )?;
-        let outcome = self.writer.submit_with_boundary(
+        let outcome = self.writer.submit_status_with_boundary(
             self.origin.clone(),
             vec![event],
             self.policy.clone(),
@@ -1326,7 +1363,7 @@ impl FseventsCollector {
                 if require_durable {
                     return Err(FseventsCollectorError::StartupGapAdmission);
                 }
-                Ok(())
+                Err(FseventsCollectorError::GapAdmission)
             }
         }
     }
@@ -2002,6 +2039,13 @@ fn remediation_for(event: &NormalizedFseventsEvent) -> GapRemediation {
     }
 }
 
+fn writer_gap_reason_code(reason: WriterGapReason) -> &'static str {
+    match reason {
+        WriterGapReason::QueueFull => "writer_queue_full",
+        WriterGapReason::KeyUnavailable => "writer_key_unavailable",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2359,5 +2403,130 @@ mod tests {
         assert_eq!(rename_pairing_for(FileOperation::Modified), None);
         assert_eq!(evidence_for(true, None, Some(RenamePairing::Unknown)), Evidence::Contextual);
         assert_eq!(evidence_for(true, None, None), Evidence::Direct);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn synthetic_event_storm_backpressure_stays_bounded_and_emits_durable_gap() {
+        use crate::{
+            consent::ConsentPreview,
+            fsevents::{FseventsEvent, FseventsOptions},
+            model::EventSource,
+            policy::PolicyDocument,
+            DeterministicKeyProvider,
+        };
+        use chrono::{TimeZone, Utc};
+        use std::{fs, time::Instant};
+        use tempfile::tempdir;
+
+        fn enqueue_test_batch(collector: &FseventsCollector, events: Vec<FseventsEvent>) {
+            let mut pending =
+                collector.pending.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            for event in events {
+                if pending.events.len() >= MAX_PENDING_EVENTS {
+                    pending.overflowed = pending.overflowed.saturating_add(1);
+                } else {
+                    pending.events.push_back(event);
+                }
+            }
+        }
+
+        let directory = tempdir().expect("private storm root");
+        fs::create_dir(directory.path().join("selected-root")).expect("selected root");
+        let root_path = directory.path().join("selected-root");
+        let root = SelectedRoot::new("root-main", &root_path).expect("root");
+        let document = PolicyDocument::new(
+            "live-filesystem-v1",
+            1,
+            [EventSource::Filesystem, EventSource::Lifecycle],
+            ["root-main"],
+            false,
+        )
+        .expect("policy");
+        let confirmation = ConsentPreview::from_policy(
+            &document,
+            ["path_digest", "operation", "entry_kind"],
+            ["fsevents_coalescing", "no_process_attribution", "history_can_be_dropped"],
+        )
+        .expect("consent preview")
+        .confirm();
+        let journal = Journal::in_memory(DeterministicKeyProvider::from_seed("storm-backpressure"))
+            .expect("journal");
+        let config = FseventsCollectorConfig {
+            options: FseventsOptions {
+                latency: Duration::from_millis(20),
+                ..FseventsOptions::default()
+            },
+            writer: WriterConfig::default(),
+            collector_instance: "live-storm-backpressure".to_owned(),
+            instance_label: "storm-backpressure".to_owned(),
+            consent_at: Utc.timestamp_opt(1_750_000_000, 0).single().expect("timestamp"),
+            actor: "human".to_owned(),
+            reason: "root_opt_in".to_owned(),
+            history_timeout: Duration::from_secs(5),
+            internal_paths: InternalPathPolicy::default(),
+        };
+        let mut collector = FseventsCollector::new(confirmation, document, [root], journal, config)
+            .expect("collector");
+        let make_batch = |start: u64, count: usize| {
+            (0..count)
+                .map(|offset| FseventsEvent {
+                    path: root_path.join(format!("synthetic-{offset}")),
+                    event_id: start.saturating_add(offset as u64),
+                    flags: EVENT_FLAG_ITEM_CREATED | EVENT_FLAG_ITEM_IS_FILE,
+                })
+                .collect::<Vec<_>>()
+        };
+
+        enqueue_test_batch(&collector, make_batch(1, 64));
+        let admitted_started = Instant::now();
+        let admitted = collector.drain_pending().expect("admit initial load");
+        let admitted_ms = admitted_started.elapsed().as_secs_f64() * 1000.0;
+        assert_eq!(admitted.len(), 64);
+
+        enqueue_test_batch(&collector, make_batch(1_000, MAX_PENDING_EVENTS + 128));
+        let max_pending =
+            collector.pending.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).events.len();
+        let storm_started = Instant::now();
+        let drained = collector.drain_pending().expect("record storm loss");
+        let storm_ms = storm_started.elapsed().as_secs_f64() * 1000.0;
+        let status = collector.status();
+        let events = collector.journal.events().expect("journal events");
+        let gaps = events
+            .iter()
+            .filter_map(|stored| match &stored.event.payload {
+                EventPayload::Gap(payload)
+                    if payload.reason_code.as_str() == "callback_queue_overflow" =>
+                {
+                    Some(payload)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(drained.is_empty(), "recovery must stop admitting events after a loss");
+        assert_eq!(max_pending, MAX_PENDING_EVENTS);
+        assert_eq!(status.pending_events, 0);
+        assert_eq!(status.pending_overflow_events, 128);
+        assert!(status.dropped_events >= (MAX_PENDING_EVENTS + 128) as u64);
+        assert!(status.recovery_required);
+        assert_eq!(gaps.len(), 1, "the induced overflow must be auditable");
+        assert_eq!(gaps[0].dropped_count, 128);
+        let receipt = serde_json::json!({
+            "schema_version": 1,
+            "synthetic_events": 64 + MAX_PENDING_EVENTS + 128,
+            "admitted_events": admitted.len(),
+            "dropped_events": status.dropped_events,
+            "max_pending_events": max_pending,
+            "pending_limit": MAX_PENDING_EVENTS,
+            "overflow_events": status.pending_overflow_events,
+            "auditable_gap_count": gaps.len(),
+            "recovery_required": status.recovery_required,
+            "admitted_load_ms": admitted_ms,
+            "storm_loss_record_ms": storm_ms,
+        });
+        let rendered = serde_json::to_string(&receipt).expect("receipt JSON");
+        assert!(!rendered.contains(&root_path.to_string_lossy().to_string()));
+        println!("event-storm-backpressure-receipt={rendered}");
     }
 }
