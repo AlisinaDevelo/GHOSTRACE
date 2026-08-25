@@ -12,6 +12,10 @@ fn observation_contract_is_path_free_and_strict() {
         json!("repeated_modification")
     );
     assert_eq!(
+        serde_json::to_value(FilesystemObservation::OwnEvent).expect("own JSON"),
+        json!("own_event")
+    );
+    assert_eq!(
         serde_json::to_value(RenamePairing::Unknown).expect("rename JSON"),
         json!("unknown")
     );

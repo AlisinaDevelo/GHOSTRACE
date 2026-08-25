@@ -441,6 +441,10 @@ pub enum FileOperation {
 pub enum FilesystemObservation {
     SourceCoalesced,
     RepeatedModification,
+    /// CoreServices marked the delivery as originating from this collector.
+    /// This is source evidence, not a suppression instruction: the event may
+    /// still be accepted when it is outside the collector's internal paths.
+    OwnEvent,
 }
 
 /// How much of a rename relationship the source supports.
@@ -780,6 +784,7 @@ impl EventPayload {
                     summary.push_str(match observation {
                         FilesystemObservation::SourceCoalesced => "; source coalesced changes",
                         FilesystemObservation::RepeatedModification => "; repeated modification",
+                        FilesystemObservation::OwnEvent => "; source marked own event",
                     });
                 }
                 if let Some(pairing) = payload.rename_pairing {

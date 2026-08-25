@@ -15,6 +15,7 @@
 
 use std::{
     collections::{BTreeSet, VecDeque},
+    fmt,
     fs::{File, Metadata},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -72,6 +73,162 @@ pub const MAX_TRANSPORT_DEDUP_EVENT_ID_SPAN: u64 = 4096;
 /// A historical stream must announce `HistoryDone` within this bounded window
 /// or it becomes an explicit unavailable-history gap.
 pub const DEFAULT_HISTORY_TIMEOUT: Duration = Duration::from_secs(30);
+/// Maximum number of internal artifacts/directories registered by one
+/// collector.  A bounded list prevents a caller-controlled configuration from
+/// becoming an unbounded path-matching workload.
+pub const MAX_INTERNAL_PATHS: usize = 128;
+/// Maximum path length accepted by the internal-path policy.
+pub const MAX_INTERNAL_PATH_BYTES: usize = 4 * 1024;
+const INTERNAL_ARTIFACT_SUFFIXES: &[&str] = &["", "-wal", "-shm", "-journal", "-tmp", "-backup"];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InternalPathKind {
+    Artifact,
+    Directory,
+}
+
+#[derive(Clone, Debug)]
+struct InternalPathEntry {
+    canonical_path: PathBuf,
+    identity: Option<FilesystemIdentity>,
+    kind: InternalPathKind,
+}
+
+/// Paths owned by the journal and its deliberate plaintext/temporary output
+/// surfaces.  Matching is path-free and fail-closed: existing objects are
+/// also bound to their device/inode identity, so a rename is still denied,
+/// while a symlink replacement cannot redirect an event into the internal
+/// scope.  The policy never retains or renders a path in a diagnostic.
+#[derive(Clone, Default)]
+pub struct InternalPathPolicy {
+    entries: Vec<InternalPathEntry>,
+}
+
+impl fmt::Debug for InternalPathPolicy {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("InternalPathPolicy")
+            .field("entry_count", &self.entries.len())
+            .finish()
+    }
+}
+
+impl InternalPathPolicy {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register one exact artifact.  A missing path is allowed because export
+    /// and backup destinations are often created only after capture starts.
+    pub fn register_artifact<P: Into<PathBuf>>(
+        &mut self,
+        path: P,
+    ) -> Result<(), FseventsCollectorError> {
+        self.register(path.into(), InternalPathKind::Artifact)
+    }
+
+    /// Register a directory and all of its descendants as internal.  The
+    /// directory identity is retained when it exists so a rename remains
+    /// denied even after its pathname changes.
+    pub fn register_directory<P: Into<PathBuf>>(
+        &mut self,
+        path: P,
+    ) -> Result<(), FseventsCollectorError> {
+        self.register(path.into(), InternalPathKind::Directory)
+    }
+
+    pub fn with_artifact<P: Into<PathBuf>>(
+        mut self,
+        path: P,
+    ) -> Result<Self, FseventsCollectorError> {
+        self.register_artifact(path)?;
+        Ok(self)
+    }
+
+    pub fn with_directory<P: Into<PathBuf>>(
+        mut self,
+        path: P,
+    ) -> Result<Self, FseventsCollectorError> {
+        self.register_directory(path)?;
+        Ok(self)
+    }
+
+    /// Register the database and the SQLite sidecars that can be created by a
+    /// journal write.  This is called automatically for file-backed journals;
+    /// callers should register export, backup, and temporary directories
+    /// explicitly before enabling a collector.
+    pub fn register_journal<P: Into<PathBuf>>(
+        &mut self,
+        path: P,
+    ) -> Result<(), FseventsCollectorError> {
+        let path = path.into();
+        let file_name = path
+            .file_name()
+            .ok_or(FseventsCollectorError::InvalidInternalPath)?
+            .to_string_lossy()
+            .into_owned();
+        for suffix in INTERNAL_ARTIFACT_SUFFIXES {
+            let candidate = if suffix.is_empty() {
+                path.clone()
+            } else {
+                let mut candidate = path.clone();
+                candidate.set_file_name(format!("{file_name}{suffix}"));
+                candidate
+            };
+            self.register_artifact(candidate)?;
+        }
+        Ok(())
+    }
+
+    fn register(
+        &mut self,
+        path: PathBuf,
+        kind: InternalPathKind,
+    ) -> Result<(), FseventsCollectorError> {
+        if let Ok(metadata) = std::fs::symlink_metadata(&path) {
+            if metadata.file_type().is_symlink()
+                || (kind == InternalPathKind::Directory && !metadata.is_dir())
+            {
+                return Err(FseventsCollectorError::InvalidInternalPath);
+            }
+        }
+        let (canonical_path, identity) = canonicalize_for_comparison(&path)?;
+        if self
+            .entries
+            .iter()
+            .any(|entry| entry.kind == kind && entry.canonical_path == canonical_path)
+        {
+            return Ok(());
+        }
+        if self.entries.len() >= MAX_INTERNAL_PATHS {
+            return Err(FseventsCollectorError::InvalidInternalPath);
+        }
+        self.entries.push(InternalPathEntry { canonical_path, identity, kind });
+        Ok(())
+    }
+
+    fn matches(&self, path: &Path) -> bool {
+        let Ok((canonical_path, identity)) = canonicalize_for_comparison(path) else {
+            return false;
+        };
+        self.entries.iter().any(|entry| {
+            if canonical_path == entry.canonical_path
+                || (entry.kind == InternalPathKind::Directory
+                    && canonical_path.starts_with(&entry.canonical_path))
+            {
+                return true;
+            }
+            let Some(entry_identity) = entry.identity else {
+                return false;
+            };
+            if identity == Some(entry_identity) {
+                return true;
+            }
+            entry.kind == InternalPathKind::Directory
+                && ancestor_has_identity(&canonical_path, entry_identity)
+        })
+    }
+}
 
 /// A canonical path bound to one opaque policy root identifier.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -282,6 +439,9 @@ pub struct FseventsCollectorConfig {
     pub actor: String,
     pub reason: String,
     pub history_timeout: Duration,
+    /// Journal/export/backup/temp paths whose source notifications must be
+    /// denied before a filesystem payload reaches the writer.
+    pub internal_paths: InternalPathPolicy,
 }
 
 /// Lifecycle state exposed by the selected-root adapter.
@@ -340,6 +500,10 @@ pub struct CollectorStatus {
     /// Exact callback deliveries suppressed by the bounded transport window.
     /// Distinct source event IDs are never counted here or suppressed.
     pub transport_duplicates: u64,
+    /// Source deliveries denied because they resolved to a journal/export/
+    /// backup/temp path.  This is a receipt counter, not a suppression rule
+    /// for unrelated OwnEvent deliveries.
+    pub internal_path_denials: u64,
     /// A source-loss gap has stopped automatic resume until a later
     /// reconciliation stage explicitly clears this condition.
     pub recovery_required: bool,
@@ -368,6 +532,9 @@ pub enum FseventsCollectorError {
 
     #[error("the consent confirmation does not match the policy document")]
     ConsentPolicyMismatch,
+
+    #[error("the internal path policy contains an unsafe or oversized path")]
+    InvalidInternalPath,
 
     #[error("contained path open refused: {reason}")]
     ContainedOpenRefused { reason: &'static str },
@@ -461,6 +628,7 @@ pub struct FseventsCollector {
     stream: FseventsStream,
     pending: Arc<Mutex<PendingState>>,
     roots: Vec<SelectedRoot>,
+    internal_paths: InternalPathPolicy,
     seen_path_digests: BTreeSet<PathDigest>,
     source_coalescing_possible: bool,
     transport_dedup: TransportDedupWindow,
@@ -486,6 +654,9 @@ pub struct FseventsCollector {
     unsupported_events: u64,
     contradictory_events: u64,
     transport_duplicates: u64,
+    internal_path_denials: u64,
+    blocked_internal_events: u64,
+    blocked_scope_events: u64,
     recovery_required: bool,
 }
 
@@ -516,6 +687,10 @@ impl FseventsCollector {
         validate_roots(&roots, &policy)?;
         if roots.windows(2).any(|pair| pair[0].volume != pair[1].volume) {
             return Err(FseventsCollectorError::MixedRootVolumes);
+        }
+        let mut internal_paths = config.internal_paths.clone();
+        if let Some(path) = journal.path() {
+            internal_paths.register_journal(path.to_path_buf())?;
         }
 
         let root_scope_digest = digest_root_scope(&roots)?;
@@ -579,6 +754,7 @@ impl FseventsCollector {
             stream,
             pending,
             roots,
+            internal_paths,
             seen_path_digests: BTreeSet::new(),
             source_coalescing_possible: requested_options.flags & FLAG_FILE_EVENTS == 0,
             transport_dedup: TransportDedupWindow::default(),
@@ -604,6 +780,9 @@ impl FseventsCollector {
             unsupported_events: 0,
             contradictory_events: 0,
             transport_duplicates: 0,
+            internal_path_denials: 0,
+            blocked_internal_events: 0,
+            blocked_scope_events: 0,
             recovery_required: false,
         };
         if let Some(reason_code) = startup_gap_reason {
@@ -626,6 +805,7 @@ impl FseventsCollector {
             unsupported_events: self.unsupported_events,
             contradictory_events: self.contradictory_events,
             transport_duplicates: self.transport_duplicates,
+            internal_path_denials: self.internal_path_denials,
             recovery_required: self.recovery_required,
             callback_health: self.stream.callback_health(),
         }
@@ -847,8 +1027,18 @@ impl FseventsCollector {
                     }
                 }
             }
+            // Internal artifacts are checked before root policy, path digest,
+            // and writer admission.  This blocks journal feedback loops while
+            // leaving unrelated OwnEvent deliveries eligible for evidence.
+            if self.internal_paths.matches(&event.path) {
+                self.blocked_events = self.blocked_events.saturating_add(1);
+                self.blocked_internal_events = self.blocked_internal_events.saturating_add(1);
+                self.internal_path_denials = self.internal_path_denials.saturating_add(1);
+                continue;
+            }
             let Some(root) = self.root_for_path(&event.path) else {
                 self.blocked_events = self.blocked_events.saturating_add(1);
+                self.blocked_scope_events = self.blocked_scope_events.saturating_add(1);
                 continue;
             };
             let root_id = root.id.clone();
@@ -856,6 +1046,7 @@ impl FseventsCollector {
                 self.policy.decide(EventSource::Filesystem, Some(root_id.as_str()), false);
             if !decision.is_allowed() {
                 self.blocked_events = self.blocked_events.saturating_add(1);
+                self.blocked_scope_events = self.blocked_scope_events.saturating_add(1);
                 continue;
             }
             let path_digest = root.path_digest(&event.path)?;
@@ -879,8 +1070,12 @@ impl FseventsCollector {
             if operation == FileOperation::Created && repeated_modification {
                 operation = FileOperation::Modified;
             }
-            let observation =
-                classify_observation(self.source_coalescing_possible, repeated_modification);
+            let own_event = normalized.flags.contains(FseventsEventFlag::OwnEvent);
+            let observation = classify_observation(
+                self.source_coalescing_possible,
+                repeated_modification,
+                own_event,
+            );
             let rename_pairing = rename_pairing_for(operation);
             let evidence = evidence_for(normalized.is_complete(), observation, rename_pairing);
             let collected = CollectedFilesystemEvent {
@@ -1210,8 +1405,23 @@ impl FseventsCollector {
         if self.blocked_events == 0 {
             return Ok(());
         }
-        let blocked_count = self.blocked_events;
         self.blocked_events = 0;
+        let internal_count = std::mem::take(&mut self.blocked_internal_events);
+        let scope_count = std::mem::take(&mut self.blocked_scope_events);
+        if internal_count > 0 {
+            self.submit_blocked_summary_event("internal_storage_path", internal_count)?;
+        }
+        if scope_count > 0 {
+            self.submit_blocked_summary_event("outside_selected_scope", scope_count)?;
+        }
+        Ok(())
+    }
+
+    fn submit_blocked_summary_event(
+        &mut self,
+        reason_code: &'static str,
+        count: u64,
+    ) -> Result<(), FseventsCollectorError> {
         let event = EventEnvelope::new(
             &self.origin,
             Uuid::new_v4(),
@@ -1221,8 +1431,8 @@ impl FseventsCollector {
             EventKind::PolicyBlockedSummary,
             EventPayload::PolicyBlockedSummary(PolicyBlockedSummaryPayload {
                 source: EventSource::Filesystem,
-                reason_code: ReasonCode::try_from("outside_selected_scope")?,
-                count: blocked_count,
+                reason_code: ReasonCode::try_from(reason_code)?,
+                count,
             }),
             None,
             self.policy.id.clone(),
@@ -1618,6 +1828,68 @@ fn resolve_path(path: &Path) -> Option<ResolvedPath> {
     }
 }
 
+/// Resolve the existing prefix of a path and append the bounded missing tail.
+/// The resulting comparison path is canonical for all existing components,
+/// while a newly-created artifact can still be matched lexically before its
+/// first write.  Parent traversal is refused before any filesystem lookup.
+fn canonicalize_for_comparison(
+    path: &Path,
+) -> Result<(PathBuf, Option<FilesystemIdentity>), FseventsCollectorError> {
+    if !path.is_absolute()
+        || path.components().any(|component| component == std::path::Component::ParentDir)
+        || path.as_os_str().to_string_lossy().contains('\0')
+    {
+        return Err(FseventsCollectorError::InvalidInternalPath);
+    }
+    #[cfg(unix)]
+    let path_bytes = path.as_os_str().as_bytes().len();
+    #[cfg(not(unix))]
+    let path_bytes = path.to_string_lossy().len();
+    if path_bytes == 0 || path_bytes > MAX_INTERNAL_PATH_BYTES {
+        return Err(FseventsCollectorError::InvalidInternalPath);
+    }
+
+    let mut candidate = path.to_path_buf();
+    let mut missing = Vec::new();
+    loop {
+        if let Ok(canonical_existing) = std::fs::canonicalize(&candidate) {
+            let identity = if missing.is_empty() {
+                std::fs::metadata(&canonical_existing)
+                    .ok()
+                    .map(|metadata| filesystem_identity(&metadata))
+            } else {
+                None
+            };
+            let mut canonical_path = canonical_existing;
+            for component in missing.iter().rev() {
+                canonical_path.push(component);
+            }
+            return Ok((canonical_path, identity));
+        }
+        let Some(component) = candidate.file_name() else {
+            return Err(FseventsCollectorError::InvalidInternalPath);
+        };
+        missing.push(component.to_os_string());
+        if !candidate.pop() {
+            return Err(FseventsCollectorError::InvalidInternalPath);
+        }
+    }
+}
+
+fn ancestor_has_identity(path: &Path, expected: FilesystemIdentity) -> bool {
+    let mut current = Some(path);
+    while let Some(candidate) = current {
+        if std::fs::metadata(candidate)
+            .ok()
+            .is_some_and(|metadata| filesystem_identity(&metadata) == expected)
+        {
+            return true;
+        }
+        current = candidate.parent();
+    }
+    false
+}
+
 fn digest_path_scoped(
     path: &Path,
     root: &SelectedRoot,
@@ -1665,8 +1937,14 @@ fn operation_for(event: &NormalizedFseventsEvent) -> Option<FileOperation> {
 fn classify_observation(
     source_coalescing_possible: bool,
     repeated_modification: bool,
+    own_event: bool,
 ) -> Option<FilesystemObservation> {
-    if repeated_modification {
+    // OwnEvent is source evidence, not a drop instruction. Preserve it as the
+    // highest-priority qualifier when several bounded qualifiers apply; the
+    // normalized flag word remains available to the in-memory receipt.
+    if own_event {
+        Some(FilesystemObservation::OwnEvent)
+    } else if repeated_modification {
         Some(FilesystemObservation::RepeatedModification)
     } else if source_coalescing_possible {
         Some(FilesystemObservation::SourceCoalesced)
@@ -1975,12 +2253,104 @@ mod tests {
 
     #[test]
     fn observation_contract_separates_coalescing_and_repeated_modification() {
-        assert_eq!(classify_observation(false, false), None);
-        assert_eq!(classify_observation(true, false), Some(FilesystemObservation::SourceCoalesced));
+        assert_eq!(classify_observation(false, false, false), None);
         assert_eq!(
-            classify_observation(false, true),
+            classify_observation(true, false, false),
+            Some(FilesystemObservation::SourceCoalesced)
+        );
+        assert_eq!(
+            classify_observation(false, true, false),
             Some(FilesystemObservation::RepeatedModification)
         );
+    }
+
+    #[test]
+    fn own_event_is_evidence_and_never_an_unconditional_drop_rule() {
+        assert_eq!(classify_observation(false, false, true), Some(FilesystemObservation::OwnEvent));
+        assert_eq!(classify_observation(true, true, true), Some(FilesystemObservation::OwnEvent));
+        let normalized = crate::fsevents::FseventsEvent {
+            path: PathBuf::from("/private/tmp/source-fact"),
+            event_id: 7,
+            flags: crate::fsevents_flags::EVENT_FLAG_OWN_EVENT
+                | EVENT_FLAG_ITEM_CREATED
+                | EVENT_FLAG_ITEM_IS_FILE,
+        }
+        .normalize_flags();
+        assert!(normalized.flags.contains(FseventsEventFlag::OwnEvent));
+        assert_eq!(operation_for(&normalized), Some(FileOperation::Created));
+        assert_eq!(
+            evidence_for(true, Some(FilesystemObservation::OwnEvent), None),
+            Evidence::Contextual
+        );
+    }
+
+    #[test]
+    fn internal_path_policy_denies_sidecars_and_descendants_without_rendering_paths() {
+        let directory = tempfile::tempdir().expect("internal path root");
+        let internal = directory.path().join("journal.sqlite3");
+        std::fs::write(&internal, b"journal").expect("journal");
+        let internal_dir = directory.path().join("exports");
+        std::fs::create_dir(&internal_dir).expect("exports");
+        let mut policy = InternalPathPolicy::new();
+        policy.register_journal(&internal).expect("journal policy");
+        policy.register_directory(&internal_dir).expect("directory policy");
+
+        assert!(policy.matches(&internal));
+        assert!(policy.matches(&directory.path().join("journal.sqlite3-wal")));
+        assert!(policy.matches(&internal_dir.join("nested/export.jsonl")));
+        assert!(!policy.matches(&directory.path().join("user-file.txt")));
+        let rendered = format!("{policy:?}");
+        assert!(!rendered.contains("journal.sqlite3"));
+        assert!(!rendered.contains("exports"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn internal_path_policy_tracks_relocation_and_rejects_symlink_redirects() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().expect("internal path root");
+        let internal = directory.path().join("private");
+        std::fs::create_dir(&internal).expect("internal directory");
+        let artifact = internal.join("journal.sqlite3");
+        std::fs::write(&artifact, b"journal").expect("artifact");
+        let mut policy = InternalPathPolicy::new();
+        policy.register_directory(&internal).expect("directory policy");
+
+        let relocated = directory.path().join("relocated");
+        std::fs::rename(&internal, &relocated).expect("relocate internal directory");
+        assert!(policy.matches(&relocated.join("journal.sqlite3")));
+
+        let outside = directory.path().join("outside");
+        std::fs::create_dir(&outside).expect("outside");
+        let alias = directory.path().join("alias");
+        symlink(&outside, &alias).expect("symlink alias");
+        assert!(!policy.matches(&alias.join("attacker.txt")));
+        assert!(!policy.matches(&relocated.join("missing/../attacker.txt")));
+    }
+
+    #[test]
+    fn internal_path_policy_rejects_unsafe_inputs_and_is_bounded() {
+        let directory = tempfile::tempdir().expect("internal path root");
+        let mut policy = InternalPathPolicy::new();
+        assert!(matches!(
+            policy.register_artifact(PathBuf::from("relative-output")),
+            Err(FseventsCollectorError::InvalidInternalPath)
+        ));
+        assert!(matches!(
+            policy.register_artifact(directory.path().join("..")),
+            Err(FseventsCollectorError::InvalidInternalPath)
+        ));
+
+        for index in 0..MAX_INTERNAL_PATHS {
+            policy
+                .register_artifact(directory.path().join(format!("artifact-{index}")))
+                .expect("bounded artifact registration");
+        }
+        assert!(matches!(
+            policy.register_artifact(directory.path().join("overflow")),
+            Err(FseventsCollectorError::InvalidInternalPath)
+        ));
     }
 
     #[test]

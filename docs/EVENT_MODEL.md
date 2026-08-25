@@ -41,17 +41,34 @@ boundary now persists volume, stream, scope, and FSEvents settings atomically.
 
 ### Filesystem delivery limits
 
-The selected-root filesystem payload has two optional, path-free qualifiers. An
+The selected-root filesystem payload has three optional, path-free qualifiers. An
 `observation` of `source_coalesced` means the stream was configured without
 per-file delivery and may have combined source changes; `repeated_modification`
 marks a distinct source delivery for a path digest already admitted as created or
-modified. These are observations about delivery shape, not claims about a user's
+modified; `own_event` preserves CoreServices' OwnEvent source flag as evidence.
+OwnEvent is not a suppression instruction: an unrelated event is still admitted,
+while an event resolved to a registered internal artifact is denied by the path
+policy below. These are observations about delivery shape, not claims about a user's
 action. Exact transport duplicates are not persisted as events: the collector
 uses the deterministic key `(source event ID, raw flag word, path digest)` in a
 window bounded to 1,024 keys and a 4,096 event-ID horizon, and exposes suppressed
 deliveries only through the path-free `CollectorStatus.transport_duplicates`
 counter. A different source ID, flag word, or digest is never erased as a
 duplicate.
+
+### Internal feedback-loop boundary
+
+The selected-root collector automatically registers a file-backed journal and its
+SQLite sidecars (`-wal`, `-shm`, rollback journal, temporary, and backup names).
+Callers register export files and temporary/backup directories through the bounded
+`InternalPathPolicy` before starting capture. Matching happens before path hashing,
+payload construction, and writer admission. Existing artifacts are bound to their
+device/inode identity so a relocation remains denied; canonicalization and root
+containment make a symlink redirect fail closed. A denial produces only a bounded,
+path-free `PolicyBlockedSummary` with reason `internal_storage_path`, so an external
+writer under an internal-looking path is visible as a denial without recursively
+creating filesystem evidence. The policy retains no plaintext path in status,
+diagnostics, or events.
 
 Renames carry a `rename_pairing` qualifier. The current adapter emits `unknown`
 because one callback supplies one path digest and cannot establish an old-to-new
