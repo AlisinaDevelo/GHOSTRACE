@@ -54,6 +54,7 @@ use crate::{
         PathClass, PathDigest, PolicyBlockedSummaryPayload, ReasonCode, RootId,
     },
     policy::{PolicyDocument, PolicyProfile},
+    volume::VolumeIdentity,
     writer::{Writer, WriterConfig, WriterOutcome},
 };
 
@@ -68,6 +69,7 @@ pub struct SelectedRoot {
     id: RootId,
     canonical_path: PathBuf,
     identity: FilesystemIdentity,
+    volume: VolumeIdentity,
 }
 
 /// A descriptor-backed path that was opened without following any symlink in
@@ -161,6 +163,9 @@ impl SelectedRoot {
             filesystem_identity(&std::fs::metadata(&canonical_path).map_err(|_| {
                 FseventsCollectorError::InvalidRoot { reason: "root identity cannot be read" }
             })?);
+        let expected_volume = VolumeIdentity::from_path(&canonical_path).map_err(|_| {
+            FseventsCollectorError::InvalidRoot { reason: "root volume identity cannot be read" }
+        })?;
         run_test_root_open_hook(&canonical_path);
         let descriptor = open_directory_nofollow(&canonical_path)?;
         let descriptor_metadata = descriptor.metadata().map_err(|_| {
@@ -175,7 +180,13 @@ impl SelectedRoot {
         if identity != expected_identity {
             return Err(FseventsCollectorError::ContainedOpenRace);
         }
-        Ok(Self { id: RootId::try_from(id.into())?, canonical_path, identity })
+        let volume = VolumeIdentity::from_path(&canonical_path).map_err(|_| {
+            FseventsCollectorError::InvalidRoot { reason: "root volume identity cannot be read" }
+        })?;
+        if volume != expected_volume {
+            return Err(FseventsCollectorError::ContainedOpenRace);
+        }
+        Ok(Self { id: RootId::try_from(id.into())?, canonical_path, identity, volume })
     }
 
     pub fn id(&self) -> &RootId {
@@ -184,6 +195,12 @@ impl SelectedRoot {
 
     pub fn path(&self) -> &Path {
         &self.canonical_path
+    }
+
+    /// Stable volume evidence for cursor binding. The display name is never
+    /// part of this value.
+    pub fn volume_identity(&self) -> &VolumeIdentity {
+        &self.volume
     }
 
     /// Return whether a reported path belongs to this root under the operating
@@ -1064,6 +1081,7 @@ fn digest_path_scoped(
     hasher.update(root.id.as_str().as_bytes());
     hasher.update(root.identity.device.to_le_bytes());
     hasher.update(root.identity.inode.to_le_bytes());
+    hasher.update(root.volume.fingerprint().as_str().as_bytes());
     hasher.update(path_bytes);
     let digest = hasher.finalize();
     let encoded = digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>();

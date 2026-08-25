@@ -26,6 +26,8 @@ use std::sync::Mutex;
 
 use thiserror::Error;
 
+use crate::cursor::CursorStreamMode;
+
 #[cfg(target_os = "macos")]
 use std::{
     ffi::{c_char, c_void, CStr, CString, OsStr},
@@ -132,6 +134,8 @@ pub struct FseventsOptions {
     pub since_when: u64,
     pub latency: Duration,
     pub flags: u32,
+    /// Stream scope must be carried into cursor identity by the caller.
+    pub stream_mode: CursorStreamMode,
 }
 
 impl Default for FseventsOptions {
@@ -140,6 +144,7 @@ impl Default for FseventsOptions {
             since_when: EVENT_ID_SINCE_NOW,
             latency: DEFAULT_LATENCY,
             flags: FLAG_FILE_EVENTS | FLAG_NO_DEFER,
+            stream_mode: CursorStreamMode::PerHost,
         }
     }
 }

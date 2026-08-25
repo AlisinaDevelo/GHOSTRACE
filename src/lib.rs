@@ -23,6 +23,7 @@ pub mod keychain;
 pub mod model;
 pub mod policy;
 pub(crate) mod storage;
+pub mod volume;
 pub mod wal;
 pub mod writer;
 
@@ -35,8 +36,8 @@ pub use crypto::{
     KeyMetadata, KeyProvider, CIPHERTEXT_ENVELOPE_VERSION, MAX_CIPHERTEXT_BYTES,
 };
 pub use cursor::{
-    CursorIdentity, CursorKind, CursorOrder, CursorState, CursorStatus, CursorToken,
-    CursorTransition, CURSOR_CONTRACT_VERSION,
+    CursorIdentity, CursorKind, CursorOrder, CursorState, CursorStatus, CursorStreamMode,
+    CursorToken, CursorTransition, CURSOR_CONTRACT_VERSION,
 };
 pub use error::{CryptoError, GhostraceError};
 pub use exclusion::{
@@ -102,6 +103,10 @@ pub use policy::{
     PolicyChange, PolicyDecision, PolicyDecisionRecord, PolicyDiagnostic, PolicyDocument,
     PolicyHistory, PolicyMigration, PolicyMigrationOutcome, PolicyOutcome, PolicyProfile,
     PolicyReason, POLICY_DOCUMENT_SCHEMA_VERSION,
+};
+pub use volume::{
+    MountState, VolumeIdentity, VolumeIdentityError, VolumeObservation, VolumeTransition,
+    VOLUME_IDENTITY_CONTRACT_VERSION,
 };
 pub use wal::{CheckpointMode, WalCheckpointReport, WalPolicy};
 pub use writer::{

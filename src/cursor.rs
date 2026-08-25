@@ -10,14 +10,29 @@ use serde::{Deserialize, Serialize};
 use crate::{
     error::GhostraceError,
     model::{CollectorInstanceId, EventSource, SourceCursor},
+    volume::VolumeIdentity,
 };
 
 pub const CURSOR_CONTRACT_VERSION: u32 = 1;
+
+/// The FSEvents stream scope is part of cursor identity.  Per-host and
+/// per-device IDs are not interchangeable, and fixture cursors must never be
+/// mistaken for a live stream cursor.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CursorStreamMode {
+    Fixture,
+    PerHost,
+    PerDevice,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct CursorIdentity {
     pub source: EventSource,
     pub collector_instance: CollectorInstanceId,
+    pub stream_mode: CursorStreamMode,
+    #[serde(default)]
+    pub volume: Option<VolumeIdentity>,
 }
 
 impl CursorIdentity {
@@ -28,11 +43,53 @@ impl CursorIdentity {
         Ok(Self {
             source,
             collector_instance: CollectorInstanceId::try_from(collector_instance.into())?,
+            stream_mode: CursorStreamMode::Fixture,
+            volume: None,
+        })
+    }
+
+    /// Construct a live cursor identity bound to one stream mode and volume.
+    /// A matching collector instance or path string alone is not sufficient to
+    /// resume this cursor.
+    pub fn for_volume(
+        source: EventSource,
+        collector_instance: impl Into<String>,
+        stream_mode: CursorStreamMode,
+        volume: VolumeIdentity,
+    ) -> Result<Self, GhostraceError> {
+        if matches!(stream_mode, CursorStreamMode::Fixture) {
+            return Err(GhostraceError::InvalidEvent(
+                "fixture stream mode cannot bind a live volume".to_owned(),
+            ));
+        }
+        Ok(Self {
+            source,
+            collector_instance: CollectorInstanceId::try_from(collector_instance.into())?,
+            stream_mode,
+            volume: Some(volume),
         })
     }
 
     pub fn collector_instance(&self) -> &str {
         self.collector_instance.as_str()
+    }
+
+    pub fn stream_mode(&self) -> CursorStreamMode {
+        self.stream_mode
+    }
+
+    pub fn volume(&self) -> Option<&VolumeIdentity> {
+        self.volume.as_ref()
+    }
+
+    /// Return whether a stored cursor can be resumed by a candidate source.
+    /// Every identity component must match, including volume and stream mode.
+    pub fn can_resume_from(&self, candidate: &Self) -> bool {
+        self.source == candidate.source
+            && self.collector_instance == candidate.collector_instance
+            && self.stream_mode == candidate.stream_mode
+            && self.volume == candidate.volume
+            && self.volume.is_some()
     }
 }
 
