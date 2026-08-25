@@ -38,6 +38,29 @@ only after its transaction commits. If the source cannot prove coverage, it emit
 gap or an unknown evidence level rather than allowing the explanation layer to infer
 one.
 
+## FSEvents lifecycle boundary
+
+The `fsevents` module is a deliberately small native boundary, not the selected-root
+collector. `FseventsStream::new` validates a bounded path list and creates an
+`FSEventStreamRef` with a boxed Rust callback context. The wrapper is `!Send` and
+`!Sync`; the creating thread must schedule and drive the stream on its current
+`CFRunLoop` and must perform start, flush, stop, restart, invalidate, and drop on
+that same thread. Callback paths are copied into bounded `PathBuf` values and no
+file is opened or read.
+
+The adapter accepts only the Core Services raw C-string path representation;
+CFType, extended-data, full-history, and document-ID callback modes are rejected
+before native creation rather than being parsed as the wrong pointer type.
+
+The context has no Core Foundation retain/release callbacks. The shutdown fence is
+strict: stop a running stream, invalidate a scheduled stream, release the native
+object exactly once, then reclaim the boxed callback state. Callback parsing rejects
+null pointers, oversized batches, and oversized paths. User callback panics are
+caught at the ABI boundary and exposed as a bounded health counter rather than
+unwinding into CoreServices. Root canonicalization, consent, exclusions, flag
+normalization, cursor persistence, backpressure, and journal writes remain later
+collector gates.
+
 ## Policy-document boundary
 
 Capture policy is stored as a strict `policy-document-v1` document with an immutable

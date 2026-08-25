@@ -71,9 +71,9 @@ plaintext chosen by the user.
 | --- | --- | --- | --- |
 | Spoofing | A fixture or future adapter claims another source or policy | Sealed typed origin capabilities, versioned provenance namespaces, policy IDs, and validation | Fixture boundary and deserialized-fixture refusal now; live adapter attestation remains future work |
 | Tampering | A local process edits journal rows or an export | Authenticated payloads; future integrity chain; explicit integrity status | Keychain encryption and chain verification are roadmap gates |
-| Repudiation | An explanation hides a denied interval, restart, or replay conflict | First-class gaps, typed source identity, monotonic cursor state, event IDs, policy binding, deterministic output, named crash/replay matrix | Fixture cursor/replay/reset and storage-fault recovery tests now; live recovery tests required |
+| Repudiation | An explanation hides a denied interval, restart, or replay conflict, or a callback is lost during native shutdown | First-class gaps, typed source identity, monotonic cursor state, event IDs, policy binding, deterministic output, named crash/replay matrix, owner-thread FSEvents shutdown fence | Fixture cursor/replay/reset and storage-fault recovery tests plus FSEvents lifecycle tests now; live recovery and cursor evidence required |
 | Information disclosure | Logs, WAL files, exports, or errors reveal paths or payloads | Minimized fields, redaction, no sensitive diagnostics, explicit export, file permissions | Fixture checks now; production storage hardening is not shipped |
-| Denial of service | Huge fixture, event storm, or full queue exhausts memory | Bounded parser, bounded queue/memory admission, input limits, bounded retries, backpressure, visible loss | Fixture writer limits and queue-policy tests now; live event-storm evidence remains future work |
+| Denial of service | Huge fixture, event storm, callback panic, or native lifecycle leak exhausts memory or leaves capture wedged | Bounded parser, bounded callback batches/paths, panic containment, single-owner lifecycle, bounded queue/memory admission, input limits, bounded retries, backpressure, visible loss | FSEvents lifecycle and fixture writer limits are tested; live event-storm and backpressure evidence remains future work |
 | Elevation of privilege | Collector asks for broad TCC access or follows a symlink outside scope | No root/Full Disk Access baseline, selected roots, canonicalization, exclusions | Policy design documented; live collector not shipped |
 
 ## Residual risks
@@ -84,6 +84,10 @@ plaintext chosen by the user.
   swap, or file-system snapshots.
 - FSEvents may coalesce, delay, reorder, or omit changes and does not provide
   process attribution or completeness. An explanation cannot repair that limitation.
+- The lifecycle adapter cannot make an FSEvents callback complete, attributable, or
+  durable. It only bounds native ownership and callback handoff; a collector must
+  still record source flags, cursor transitions, gaps, policy, and persistence
+  outcomes.
 - A user may intentionally export sensitive data to an insecure destination.
 - A compromised dependency, toolchain, or build host can violate the local-only
   contract. CI checks reduce this risk; they do not prove source intent.

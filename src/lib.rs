@@ -12,6 +12,7 @@ pub mod explain;
 pub mod export;
 pub mod fault;
 pub mod fixture;
+pub mod fsevents;
 pub mod journal;
 #[cfg(target_os = "macos")]
 pub mod keychain;
@@ -34,6 +35,11 @@ pub use export::{
 };
 pub use fault::{FaultAction, FaultPlan, FaultPoint, FaultSchedule};
 pub use fixture::{ingest_fixture, read_fixture, FixtureIngestReport};
+pub use fsevents::{
+    CallbackHealth, FseventsError, FseventsEvent, FseventsOptions, FseventsStream, StreamState,
+    DEFAULT_LATENCY, EVENT_ID_SINCE_NOW, FLAG_FILE_EVENTS, FLAG_FULL_HISTORY, FLAG_NO_DEFER,
+    FLAG_USE_CF_TYPES, FLAG_USE_EXTENDED_DATA, FLAG_WITH_DOC_ID,
+};
 pub use journal::{AppliedMigration, BackupReceipt, DiagnosticRecord, Journal, StoredEvent};
 #[cfg(target_os = "macos")]
 pub use keychain::{MacOsKeychainProvider, JOURNAL_KEYCHAIN_ACCOUNT, JOURNAL_KEYCHAIN_SERVICE};
