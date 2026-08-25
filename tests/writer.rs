@@ -2,8 +2,9 @@ use std::{fs, path::Path, time::Duration};
 
 use ghostrace::{
     read_fixture, CryptoError, DeterministicKeyProvider, DiagnosticRecord, EventEnvelope,
-    EventSource, GhostraceError, IngestionOrigin, Journal, KeyProvider, PolicyProfile,
-    QueueFullPolicy, SourceCursor, Writer, WriterConfig, WriterOutcome, WriterSubmission,
+    EventSource, FaultPlan, FaultPoint, GhostraceError, IngestionOrigin, Journal, KeyProvider,
+    PolicyProfile, QueueFullPolicy, SourceCursor, Writer, WriterConfig, WriterOutcome,
+    WriterSubmission,
 };
 use rusqlite::Connection;
 use tempfile::tempdir;
@@ -194,6 +195,39 @@ fn acknowledgement_follows_one_atomic_event_cursor_policy_and_diagnostic_commit(
         })
         .expect("snapshot");
     assert_eq!((events, cursors, policies, diagnostics), (1, 1, 1, 1));
+}
+
+#[test]
+fn precommit_failure_returns_no_ack_and_rolls_back_event_and_cursor_together() {
+    let (origin, events, policy) = fixture();
+    let event = unique_event(events.first().expect("fixture event"), 0x7101);
+    let journal = Journal::in_memory_with_fault_plan(
+        DeterministicKeyProvider::from_seed("writer-atomic-fault"),
+        FaultPlan::fail_once(FaultPoint::CursorBeforeUpdate),
+    )
+    .expect("journal");
+    let writer = Writer::new(journal.clone(), WriterConfig::default()).expect("writer");
+
+    let error = writer
+        .submit(origin.clone(), vec![event.clone()], policy.clone(), Vec::new())
+        .expect_err("pre-commit fault must not acknowledge");
+    assert!(matches!(error, GhostraceError::InjectedFault { .. }));
+    assert!(journal.events().expect("rolled-back events").is_empty());
+    let identity = ghostrace::CursorIdentity::new(event.source, event.collector_instance())
+        .expect("cursor identity");
+    assert!(journal.cursor_state(&identity).expect("cursor state").is_none());
+
+    drop(writer);
+    let recovered = journal.with_fault_plan(FaultPlan::none());
+    let retry_writer = Writer::new(recovered.clone(), WriterConfig::default()).expect("writer");
+    let outcome = retry_writer
+        .submit(origin, vec![event.clone()], policy, Vec::new())
+        .expect("replay after rollback");
+    let WriterOutcome::Committed(ack) = outcome else { panic!("unexpected gap") };
+    assert_eq!(ack.event_ids, vec![event.event_id]);
+    assert_eq!(recovered.events().expect("committed event").len(), 1);
+    let state = recovered.cursor_state(&identity).expect("cursor state").expect("committed cursor");
+    assert_eq!(state.last_event_id, Some(event.event_id.to_string()));
 }
 
 #[test]
