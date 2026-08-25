@@ -1,7 +1,8 @@
 # Task 0066 evidence: volume identity and mount transitions
 
-Status: implementation complete on the source branch; final protected-main
-device receipts are added after PR merge.
+Status: complete on protected `main` at
+`167f17480f85935c9d2ba1b3bd31b63265e36c33` (PR #250). Evidence is retained by
+PR #251 after the device lanes below passed on that exact commit.
 
 ## Contract
 
@@ -43,6 +44,21 @@ hardware was exercised. Durable storage and recovery remain later gates.
 
 ## Target-device verification
 
-The final protected-main receipt, exact commit, device details, and log digests
-are retained in this document after the evidence PR is merged. No path,
-display name, account data, credential, or capture key is retained.
+The verification below ran on the protected-main checkout, with no network
+required for the offline lane:
+
+| Lane | Command | Result | Receipt SHA-256 |
+| --- | --- | --- | --- |
+| Focused contract | `cargo +1.88.0 test --locked --lib fsevents_collector::tests`; `cargo +1.88.0 test --locked --test volume_identity`; `cargo +1.88.0 test --locked --test selected_root_scope`; `cargo +1.88.0 test --locked --test cursor_contract` | pass (10 + 4 + 2 + 5 tests) | `caa1843d46117672cc379eb556c49f94a2a0984ef8cb71f76b1b7d055519022e` |
+| Full debug | `cargo +1.88.0 test --locked --all-targets --all-features` | pass | `e80d59cf3da96f7b63248cff68566853670cef4e734e5ce70c4381778c78b0fd` |
+| Full release | `cargo +1.88.0 test --release --locked --all-targets --all-features` | pass | `2f121dc014fb15a199a4068e2bc5583e7937b0a3d1eb28037f9abba09ba6593a` |
+| Reproducibility | `CARGO_NET_OFFLINE=true /bin/bash scripts/reproducibility-test.sh` | pass; all checks passed | `248522f5fd4dccb8225f0bfd2f1ccd7b74d1d6bf988b3d486e96410481cf466b` |
+| Rust documentation | `RUSTDOCFLAGS=-D warnings cargo +1.88.0 doc --locked --all-features --no-deps` | pass | `1afef1fda8229816076e65d6121d7e119eddd1eacec4a3345bab1c8d6df22556` |
+| Offline network | `scripts/offline-network-test.sh` | pass | `7f76f21791071e72787a1fbc4fe20d7161d595d9ebc4c5d45a85ec8c64ccc047` |
+| Python policy/roadmap tests | `python3 -m unittest discover -s tests -p 'test_*.py'` | pass; 40 tests | `137f35433abf8e1702d65166a008e1b16e8f84865aa39783b40d5a98fdf04dd4` |
+
+Device: macOS 26.6.2 (25G83), Darwin arm64, MacBookPro17,1, Apple M1;
+`rustc 1.88.0 (6b00bc388 2025-06-23)`, target `aarch64-apple-darwin`.
+Hosted PR #250 checks also passed for macOS stable, Linux stable/MSRV,
+clippy, rustfmt, offline fixture, audit, dependency review, and roadmap.
+No path, display name, account data, credential, or capture key is retained.
