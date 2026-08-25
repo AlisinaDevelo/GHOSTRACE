@@ -201,6 +201,24 @@ pub enum GhostraceError {
 
     #[error("invalid fault plan: {0}")]
     InvalidFaultPlan(String),
+
+    #[error("query request is invalid")]
+    QueryInvalid,
+
+    #[error("query page token is invalid")]
+    QueryTokenInvalid,
+
+    #[error("query page token has expired")]
+    QueryTokenExpired,
+
+    #[error("query page token does not match the request")]
+    QueryTokenMismatch,
+
+    #[error("query policy scope is not available or has changed")]
+    QueryScopeMismatch,
+
+    #[error("query schema changed while a page token was active")]
+    QuerySchemaChanged,
 }
 
 /// Errors from payload encryption and authenticated decryption.

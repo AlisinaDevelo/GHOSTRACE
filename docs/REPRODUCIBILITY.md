@@ -29,6 +29,23 @@ cargo +1.88.0 test --locked --lib \
 
 Non-macOS builds retain an explicit no-go for this native lane.
 
+## Snapshot pagination reproduction
+
+The query contract is platform-neutral and runs against an in-memory or private
+mode-0700 file-backed journal. Run the focused matrix with the pinned toolchain:
+
+```sh
+cargo +1.88.0 test --locked --test query_pagination
+cargo +1.88.0 test --locked --lib query::tests
+```
+
+The tests use only the checked-in synthetic fixture and bounded local SQLite
+operations. They retain no paths or contents. The file-backed cases verify that
+new ingest is excluded by the snapshot upper bound, rows deleted after page one
+are not resurrected, and a changed storage schema invalidates a token. Token
+forgery, cross-profile reuse, changed filters/page size, and expiry are negative
+cases; no hosted runner is needed to substitute for this local contract.
+
 ## Install the pinned inputs
 
 On a clean machine, install Rust through the official rustup channel manifest:

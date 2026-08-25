@@ -22,6 +22,7 @@ pub mod key_lifecycle;
 pub mod keychain;
 pub mod model;
 pub mod policy;
+pub mod query;
 pub(crate) mod storage;
 pub mod volume;
 pub mod wal;
@@ -109,6 +110,10 @@ pub use policy::{
     PolicyChange, PolicyDecision, PolicyDecisionRecord, PolicyDiagnostic, PolicyDocument,
     PolicyHistory, PolicyMigration, PolicyMigrationOutcome, PolicyOutcome, PolicyProfile,
     PolicyReason, POLICY_DOCUMENT_SCHEMA_VERSION,
+};
+pub use query::{
+    QueryPage, QueryRequest, DEFAULT_QUERY_PAGE_SIZE, MAX_QUERY_PAGE_SIZE, QUERY_CONTRACT_VERSION,
+    QUERY_TOKEN_TTL_SECONDS,
 };
 pub use volume::{
     MountState, VolumeIdentity, VolumeIdentityError, VolumeObservation, VolumeTransition,

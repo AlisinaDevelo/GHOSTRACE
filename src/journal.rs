@@ -24,6 +24,10 @@ use crate::{
         OriginBinding, PolicyProfileId, ProvenanceVersion, SourceCursor, EVENT_SCHEMA_VERSION,
     },
     policy::PolicyProfile,
+    query::{
+        decode_page_token, make_token, validate_token_request, QueryOrderKey, QueryPage,
+        QueryRequest, QueryTokenPayload,
+    },
     storage,
     wal::{CheckpointMode, WalCheckpointReport, WalPolicy},
 };
@@ -747,6 +751,42 @@ impl Journal {
         Ok(result)
     }
 
+    /// Read one bounded page from a logical ingest snapshot.  The read
+    /// transaction captures the initial upper bound; subsequent pages use the
+    /// authenticated token's bound and therefore ignore later ingest. Rows
+    /// removed by retention remain absent, which is explicit snapshot
+    /// semantics rather than a fabricated tombstone.
+    pub fn query_page(
+        &self,
+        request: &QueryRequest,
+        page_token: Option<&str>,
+    ) -> Result<QueryPage, GhostraceError> {
+        request.validate()?;
+        let token = page_token
+            .map(|encoded| {
+                decode_page_token(encoded, self.key_provider.as_ref(), Utc::now().timestamp())
+            })
+            .transpose()?;
+        self.with_read_snapshot(|connection| {
+            let storage_schema_version = read_user_version(connection)?;
+            let compiled_schema_version =
+                migration_specs().last().expect("migration catalog is non-empty").schema_version;
+            if storage_schema_version != compiled_schema_version {
+                return Err(GhostraceError::QuerySchemaChanged);
+            }
+            if let Some(token) = token.as_ref() {
+                validate_token_request(token, request, storage_schema_version)?;
+            }
+            read_query_page(
+                connection,
+                self.key_provider.as_ref(),
+                request,
+                token.as_ref(),
+                storage_schema_version,
+            )
+        })
+    }
+
     pub fn raw_payload_ciphertext(&self, event_id: Uuid) -> Result<Vec<u8>, GhostraceError> {
         let connection = self.lock_connection()?;
         let value = connection
@@ -1327,6 +1367,135 @@ fn decode_stored(
     );
     event.validate()?;
     Ok(StoredEvent { ingest_seq: raw.ingest_seq, event })
+}
+
+fn read_query_page(
+    connection: &Connection,
+    provider: &dyn KeyProvider,
+    request: &QueryRequest,
+    token: Option<&QueryTokenPayload>,
+    storage_schema_version: u32,
+) -> Result<QueryPage, GhostraceError> {
+    validate_query_policy_scope(connection, request)?;
+    let snapshot_boundary = match token {
+        Some(token) => token.snapshot_boundary,
+        None => connection
+            .query_row("SELECT COALESCE(MAX(ingest_seq), 0) FROM events", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .map_err(GhostraceError::from)
+            .and_then(|value| u64::try_from(value).map_err(|_| GhostraceError::QueryInvalid))?,
+    };
+    let boundary = i64::try_from(snapshot_boundary).map_err(|_| GhostraceError::QueryInvalid)?;
+    let source = request.source.map(|value| value.to_string());
+    let kind = request.kind.map(|value| value.to_string());
+    let observed_from = request.observed_from.map(|value| value.to_rfc3339());
+    let observed_until = request.observed_until.map(|value| value.to_rfc3339());
+    let last_observed =
+        token.and_then(|value| value.last_order.as_ref().map(|order| order.observed_at.clone()));
+    let last_sequence = token
+        .and_then(|value| value.last_order.as_ref().map(|order| order.ingest_seq))
+        .map(|value| i64::try_from(value).map_err(|_| GhostraceError::QueryInvalid))
+        .transpose()?;
+    let last_event_id =
+        token.and_then(|value| value.last_order.as_ref().map(|order| order.event_id.to_string()));
+    let limit = i64::try_from(request.page_size.saturating_add(1))
+        .map_err(|_| GhostraceError::QueryInvalid)?;
+    let mut statement = connection.prepare(
+        "SELECT ingest_seq, event_id, schema_version, observed_at, ingested_at, source,
+                kind, collector_instance, source_cursor, provenance_version,
+                policy_profile_id, policy_profile_version, evidence, parent_event_id,
+                payload_ciphertext
+         FROM events
+         WHERE ingest_seq <= ?1
+           AND policy_profile_id = ?2
+           AND policy_profile_version = ?3
+           AND (?4 IS NULL OR source = ?4)
+           AND (?5 IS NULL OR kind = ?5)
+           AND (?6 IS NULL OR observed_at >= ?6)
+           AND (?7 IS NULL OR observed_at <= ?7)
+           AND (
+                ?8 IS NULL
+                OR observed_at > ?8
+                OR (observed_at = ?8 AND ingest_seq > ?9)
+                OR (observed_at = ?8 AND ingest_seq = ?9 AND event_id > ?10)
+           )
+         ORDER BY observed_at ASC, ingest_seq ASC, event_id ASC
+         LIMIT ?11",
+    )?;
+    let mut rows = statement.query(params![
+        boundary,
+        request.policy_profile_id.as_str(),
+        request.policy_profile_version,
+        source,
+        kind,
+        observed_from,
+        observed_until,
+        last_observed,
+        last_sequence.unwrap_or(0),
+        last_event_id,
+        limit,
+    ])?;
+    let mut events = Vec::with_capacity(request.page_size);
+    while let Some(row) = rows.next()? {
+        events.push(decode_stored(row_to_stored(row)?, provider)?);
+    }
+    let has_more = events.len() > request.page_size;
+    if has_more {
+        events.pop();
+    }
+    let next_page_token = if has_more {
+        events
+            .last()
+            .map(|stored| {
+                make_token(
+                    request,
+                    storage_schema_version,
+                    snapshot_boundary,
+                    Some(QueryOrderKey {
+                        observed_at: stored.event.observed_at.to_rfc3339(),
+                        ingest_seq: stored.ingest_seq,
+                        event_id: stored.event.event_id,
+                    }),
+                    provider,
+                    Utc::now().timestamp(),
+                )
+            })
+            .transpose()?
+    } else {
+        None
+    };
+    Ok(QueryPage { events, next_page_token, snapshot_boundary })
+}
+
+fn validate_query_policy_scope(
+    connection: &Connection,
+    request: &QueryRequest,
+) -> Result<(), GhostraceError> {
+    let profile_json: Option<String> = connection
+        .query_row(
+            "SELECT profile_json FROM policy_metadata
+             WHERE profile_id = ?1 AND profile_version = ?2",
+            params![request.policy_profile_id.as_str(), request.policy_profile_version],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(profile_json) = profile_json else {
+        return Ok(());
+    };
+    let profile: PolicyProfile =
+        serde_json::from_str(&profile_json).map_err(|_| GhostraceError::QueryScopeMismatch)?;
+    let digest = profile
+        .to_document()
+        .and_then(|document| document.scope_digest())
+        .map_err(|_| GhostraceError::QueryScopeMismatch)?;
+    if profile.id != request.policy_profile_id.as_str()
+        || profile.version != request.policy_profile_version
+        || digest != request.scope_digest
+    {
+        return Err(GhostraceError::QueryScopeMismatch);
+    }
+    Ok(())
 }
 
 #[derive(Serialize)]
