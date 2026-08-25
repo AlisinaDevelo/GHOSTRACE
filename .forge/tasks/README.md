@@ -14,7 +14,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0008 | Implement Keychain-backed DEK and AEAD envelopes | M1 | done | storage | maintainer | — | 0003, 0004, 0054, 0055, 0056 |
 | 0009 | Create SQLite WAL schema and migration runner | M1 | done | storage | maintainer | — | 0006, 0008, 0057, 0058, 0059 |
 | 0010 | Build bounded ingest writer with atomic cursor commit | M1 | done | storage | maintainer | — | 0006, 0007, 0008, 0009, 0049, 0060, 0061 |
-| 0011 | Build fixture replay and crash-injection harness | M1 | backlog | storage | maintainer | — | 0006, 0010, 0062 |
+| 0011 | Build fixture replay and crash-injection harness | M1 | done | storage | maintainer | — | 0006, 0010, 0062 |
 | 0012 | Ship fixture ingest, explain, and JSONL export CLI slice | M1 | backlog | foundation | maintainer | — | 0007, 0009, 0010, 0011 |
 | 0013 | Implement selected-root macOS FSEvents collector | M2 | backlog | filesystem | maintainer | — | 0002, 0007, 0010, 0012, 0063, 0064, 0065 |
 | 0014 | Enforce root canonicalization, symlink, and exclusion rules | M2 | backlog | filesystem | maintainer | — | 0007, 0013, 0067, 0068, 0069 |
