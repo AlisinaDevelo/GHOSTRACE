@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "grammar_version": 1,
+  "property_dimensions": [
+    "ingestion_permutation",
+    "equal_observed_timestamps",
+    "irrelevant_events",
+    "query_page_boundaries"
+  ],
+  "golden_matrix": {
+    "claim_templates": [
+      "filesystem_observation",
+      "frontmost_observation",
+      "shell_started_observation",
+      "shell_finished_observation",
+      "git_snapshot_observation",
+      "browser_navigation_observation",
+      "browser_bookmark_observation",
+      "collector_started_observation",
+      "collector_stopped_observation",
+      "coverage_gap",
+      "policy_denied",
+      "source_error"
+    ],
+    "evidence_levels": ["direct", "contextual", "inferred", "unknown"],
+    "gap_states": [
+      {"id": "no_recorded_gap", "present": false},
+      {"id": "recorded_gap", "present": true}
+    ],
+    "expected_gap_behavior": {
+      "ordinary": "limit_interpretation",
+      "status": "explicit_status"
+    }
+  },
+  "conflict_outcomes": [
+    {
+      "id": "coverage_gap",
+      "template": "coverage_gap",
+      "evidence": "unknown",
+      "claim_state": "explicit_unknown"
+    },
+    {
+      "id": "policy_denied",
+      "template": "policy_denied",
+      "evidence": "unknown",
+      "claim_state": "explicit_unknown"
+    },
+    {
+      "id": "source_error",
+      "template": "source_error",
+      "evidence": "unknown",
+      "claim_state": "explicit_unknown"
+    },
+    {
+      "id": "unknown_evidence",
+      "template": "filesystem_observation",
+      "evidence": "unknown",
+      "claim_state": "downgraded_unknown"
+    }
+  ],
+  "mutations": [
+    {
+      "id": "remove_cross_source_observation",
+      "baseline_evidence": "inferred",
+      "mutated_evidence": "unknown",
+      "mutated_reason": "requires_distinct_sources"
+    },
+    {
+      "id": "remove_parent_observation",
+      "baseline_statement_count": 8,
+      "mutated_statement_count": 7,
+      "removed_template": "filesystem_observation",
+      "mutated_state": "claim_removed"
+    }
+  ],
+  "privacy": {
+    "synthetic_only": true,
+    "user_data_included": false,
+    "network_required": false
+  }
+}

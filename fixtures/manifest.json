@@ -70,6 +70,14 @@
       "seed": "ghostrace-fixture-seed-v1",
       "sha256": "f1a22b29ed81f1a272ac3d3e272e8e22f5df1a1aaf440e0c75fa65caf3f2f855",
       "bytes": 633
+    },
+    {
+      "path": "fixtures/explanation-counterexamples-v1.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "7b2158d83919ef03649c54bedbd5bed2b2f259f1e05c9b6e7b8de377298b7d49",
+      "bytes": 2115
     }
   ],
   "privacy": {
