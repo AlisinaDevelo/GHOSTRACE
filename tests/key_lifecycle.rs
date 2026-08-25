@@ -1,6 +1,6 @@
 use chacha20poly1305::{
     aead::{Aead, KeyInit},
-    Key, XChaCha20Poly1305, XNonce,
+    XChaCha20Poly1305, XNonce,
 };
 use ghostrace::{
     decrypt_payload, encrypt_payload, CiphertextEnvelope, DestructionConfirmation,
@@ -40,13 +40,11 @@ fn envelope_records_algorithm_and_generation_without_key_material() {
 #[test]
 fn legacy_nonce_ciphertext_remains_readable_during_migration() {
     let provider = DeterministicKeyProvider::new(key(0x21));
-    let cipher = XChaCha20Poly1305::new(Key::from_slice(&key(0x21)));
+    let cipher = XChaCha20Poly1305::new_from_slice(&key(0x21)).expect("legacy key");
     let nonce = [9_u8; 24];
+    let nonce = XNonce::try_from(&nonce[..]).expect("legacy nonce");
     let ciphertext = cipher
-        .encrypt(
-            XNonce::from_slice(&nonce),
-            chacha20poly1305::aead::Payload { msg: b"legacy", aad: b"aad" },
-        )
+        .encrypt(&nonce, chacha20poly1305::aead::Payload { msg: b"legacy", aad: b"aad" })
         .expect("legacy encrypt");
     let mut encoded = nonce.to_vec();
     encoded.extend_from_slice(&ciphertext);

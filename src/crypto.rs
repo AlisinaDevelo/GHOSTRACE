@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use chacha20poly1305::{
     aead::{Aead, KeyInit},
-    Key, XChaCha20Poly1305, XNonce,
+    XChaCha20Poly1305, XNonce,
 };
 use rand_core::RngCore;
 use serde::{Deserialize, Serialize};
@@ -58,11 +58,16 @@ impl CiphertextEnvelope {
         if plaintext.len() > MAX_CIPHERTEXT_BYTES {
             return Err(CryptoError::Encoding("plaintext exceeds the ciphertext bound".to_owned()));
         }
-        let cipher = XChaCha20Poly1305::new(Key::from_slice(&key));
+        let cipher = XChaCha20Poly1305::new_from_slice(&key).map_err(|_| {
+            CryptoError::Encoding("encryption key has an invalid length".to_owned())
+        })?;
         let mut nonce = [0_u8; NONCE_BYTES];
         rand_core::OsRng.try_fill_bytes(&mut nonce).map_err(|_| CryptoError::Random)?;
+        let nonce = XNonce::try_from(&nonce[..]).map_err(|_| {
+            CryptoError::Encoding("encryption nonce has an invalid length".to_owned())
+        })?;
         let ciphertext = cipher.encrypt(
-            XNonce::from_slice(&nonce),
+            &nonce,
             chacha20poly1305::aead::Payload {
                 msg: plaintext,
                 aad: &envelope_associated_data(associated_data, key_generation),
@@ -83,9 +88,14 @@ impl CiphertextEnvelope {
         associated_data: &[u8],
     ) -> Result<Vec<u8>, CryptoError> {
         self.validate()?;
-        let cipher = XChaCha20Poly1305::new(Key::from_slice(&key));
+        let cipher = XChaCha20Poly1305::new_from_slice(&key).map_err(|_| {
+            CryptoError::Encoding("decryption key has an invalid length".to_owned())
+        })?;
+        let nonce = XNonce::try_from(self.nonce.as_slice()).map_err(|_| {
+            CryptoError::Encoding("ciphertext nonce has an invalid length".to_owned())
+        })?;
         Ok(cipher.decrypt(
-            XNonce::from_slice(&self.nonce),
+            &nonce,
             chacha20poly1305::aead::Payload {
                 msg: &self.ciphertext,
                 aad: &envelope_associated_data(associated_data, self.key_generation),
@@ -305,10 +315,12 @@ pub fn decrypt_payload(
     }
     let (nonce_bytes, ciphertext) = encoded.split_at(NONCE_BYTES);
     let key_bytes = provider.key()?;
-    let cipher = XChaCha20Poly1305::new(Key::from_slice(&key_bytes));
-    let nonce = XNonce::from_slice(nonce_bytes);
+    let cipher = XChaCha20Poly1305::new_from_slice(&key_bytes)
+        .map_err(|_| CryptoError::Encoding("decryption key has an invalid length".to_owned()))?;
+    let nonce = XNonce::try_from(nonce_bytes)
+        .map_err(|_| CryptoError::Encoding("legacy nonce has an invalid length".to_owned()))?;
     Ok(cipher.decrypt(
-        nonce,
+        &nonce,
         chacha20poly1305::aead::Payload { msg: ciphertext, aad: associated_data },
     )?)
 }
