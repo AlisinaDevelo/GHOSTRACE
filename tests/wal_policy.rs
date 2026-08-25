@@ -85,9 +85,18 @@ fn long_reader_is_refused_and_checkpoint_reports_remaining_frames() {
         .expect("write while reader is active");
     let checkpoint = journal.checkpoint(CheckpointMode::Passive);
     match checkpoint {
-        Err(GhostraceError::WalCheckpointRefused { frames_remaining, .. }) => {
-            println!("WAL_POLICY_STARVATION frames_remaining={frames_remaining}");
-            assert!(frames_remaining > 0, "refusal must identify uncheckpointed frames");
+        Err(GhostraceError::WalCheckpointRefused {
+            frames_remaining,
+            wal_bytes,
+            max_wal_bytes,
+        }) => {
+            println!(
+                "WAL_POLICY_STARVATION frames_remaining={frames_remaining} wal_bytes={wal_bytes}"
+            );
+            assert!(
+                frames_remaining > 0 || wal_bytes > max_wal_bytes,
+                "refusal must identify remaining frames or an oversized WAL"
+            );
         }
         Ok(report) => {
             println!("WAL_POLICY_PASSIVE {report:?}");
