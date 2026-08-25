@@ -228,6 +228,16 @@ Production sensitive payloads require authenticated encryption with a macOS Keyc
 backing key. That key path is not represented as shipped live-capture capability in
 the current headstart. Missing keys or failed authentication must fail closed.
 
+Payload bytes are now stored in a versioned `GRCE` envelope that records the cipher
+algorithm, positive key generation, nonce, and authenticated ciphertext without ever
+serializing key material. Readers retain a legacy nonce-plus-ciphertext compatibility
+path while a migration is in progress. `KeyRotation` stages a new generation, resumes
+from a key-free checkpoint, verifies every replacement, and retires the prior key only
+at commit; a crash before commit therefore leaves the old ciphertext readable. Explicit
+lost-key, compromise, and user-reset confirmations return bounded receipts that name
+the destroyed generations and state when their ciphertext is unrecoverable. No cloud
+recovery secret is introduced.
+
 ### Storage fault matrix
 
 The fixture journal exposes an inert-by-default `FaultPlan` for recovery drills.

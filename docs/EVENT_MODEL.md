@@ -20,6 +20,13 @@ An event has these conceptual fields:
 | evidence | direct, contextual, inferred, or unknown | A claim cannot be stronger than its supporting observations |
 | gap/status | Missing coverage, denial, drop, restart, or source limitation | First-class and visible to explain/export |
 
+The SQLite payload column stores the authenticated `GRCE` ciphertext envelope rather
+than a bare nonce. Its public metadata is the envelope schema version, algorithm, and
+key generation; the nonce and ciphertext are bounded bytes, and the key itself is
+resolved only through the active local provider. Legacy nonce-plus-ciphertext rows can
+still be read while a verified rotation migrates them. Rotation checkpoints and
+destruction receipts are separate key-free contracts and are never event payloads.
+
 For a future FSEvents source, the raw callback flag word is normalized by the
 `fsevents-normalized-v1` contract before it can become a filesystem event. The
 contract maps all documented Apple bits, retains the raw `u32` and unknown-bit

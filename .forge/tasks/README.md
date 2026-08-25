@@ -58,7 +58,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0052 | Model consent as a revocable state machine | M1 | done | privacy | privacy-engineer | 0007 | 0004, 0006 |
 | 0053 | Expose bounded policy decisions and refusal reasons | M1 | done | privacy | security-auditor | 0007 | 0004, 0006 |
 | 0054 | Implement the macOS data-protection Keychain backend | M1 | done | storage | macos-engineer | 0008 | 0003, 0004 |
-| 0055 | Specify key rotation, recovery, and destruction | M1 | backlog | storage | security-auditor | 0008 | 0054 |
+| 0055 | Specify key rotation, recovery, and destruction | M1 | done | storage | security-auditor | 0008 | 0054 |
 | 0056 | Test locked-session and background key behavior | M1 | backlog | storage | test-engineer | 0008 | 0054 |
 | 0057 | Harden persistent journal path creation | M1 | done | storage | security-auditor | 0009 | 0003, 0004 |
 | 0058 | Define WAL, SHM, checkpoint, and reader policy | M1 | done | storage | database-expert | 0009 | 0057 |
