@@ -59,6 +59,20 @@ x86_64 Linux cross-target attempt was not counted as a pass because this Mac
 does not have `x86_64-linux-gnu-gcc`; the hosted Linux stable/MSRV lanes are the
 cross-platform verification for this change.
 
+## Final protected-main readback
+
+After evidence PR #242 merged, the exact protected-main commit
+`210460949caf52843a41ebabc91dcfc705c3ddf3` was checked out clean on the same
+device. The focused collector suite passed 3/3 at
+`/tmp/ghostrace-0013-final-main-collector.log` (SHA-256
+`b4d92ee8048db69f8335b4e5f5300a27920c6a522acc2450347d83c0e316451c`), and the
+complete reproducibility pipe passed at
+`/tmp/ghostrace-0013-final-main-repro.log` (SHA-256
+`57f8c1c1045641d6e9f90382a14b28a6932b4437e8511f6de2a6fc564c003e19`). These
+receipts include the generated-index parity and evidence checks, so the
+published ledger and implementation were read back together from protected
+main.
+
 ## Privacy and scope limits
 
 The test sentinel is synthetic and is never retained; no production path,
