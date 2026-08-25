@@ -810,7 +810,9 @@ fn validate_paths(paths: &[PathBuf]) -> Result<(), FseventsError> {
         #[cfg(target_os = "macos")]
         let bytes = path.as_os_str().as_bytes();
         #[cfg(not(target_os = "macos"))]
-        let bytes = path.to_string_lossy().as_bytes();
+        let lossy = path.to_string_lossy();
+        #[cfg(not(target_os = "macos"))]
+        let bytes = lossy.as_bytes();
         if bytes.len() > MAX_PATH_BYTES {
             return Err(FseventsError::PathTooLong);
         }
