@@ -49,9 +49,20 @@ product network-surface scan.
   task-owned targets removed and one build job; only the passing receipts above are
   acceptance evidence.
 
-## Merge closure
+## Post-merge closure rerun
 
-The implementation PR and a separate post-merge receipt PR will append exact merged
-`main` SHAs and rerun logs here before the task issue is closed. A hosted CI green
-check is required for merge, but the target-device receipts above are the acceptance
-evidence and are rerun after the merged SHA.
+The implementation was squash-merged in PR #213. The receipts below were rerun from
+the exact protected `main` commit
+`7af88387f4d91b8499059e6ceffe4c6edaa1f9dd` on the same target device:
+
+| Receipt | Result | SHA-256 |
+| --- | --- | --- |
+| `/private/tmp/ghostrace-0007-postmerge-release-v1.log` | Full locked release all-target/all-feature suite, including 16 library, 5 cursor, 4 fault, 1 FSEvents, 7 migration, 2 policy property, 1 privacy, 5 support, 26 vertical, 6 WAL, and 5 writer tests: pass, exit 0 | `b024ef0dcdf43f01d8bda0db3f46e7b8ac1bf40b3ccf4dc20a6c627f2da33f58` |
+| `/private/tmp/ghostrace-0007-postmerge-sandbox-v1.log` | Direct release network-denial canary under macOS `sandbox-exec`, plus focused release privacy and policy-property tests: pass, exit 0 | `e902a4474e5caa5b797650d4f05170878382edc6f0564e65a57b3ef391ccb1f2` |
+| `/private/tmp/ghostrace-0007-postmerge-static-v1.log` | Format, locked release Clippy (`-D warnings`), fixture/identity/release-evidence/roadmap/reproducibility checks, 38 Python tests, index parity, ShellCheck, actionlint, and product network scan: pass, exit 0 | `97b3cf3dd51530102915bac0b3e899e001fa9e8c86b579d87977821d14be399b` |
+
+The release migration test prints expected failed crash-child processes while the
+parent recovery assertion passes. The separate post-merge PR contains documentation
+only; no product source, fixture, workflow, or test input changed after PR #213.
+Hosted protected checks for PR #213 also passed, including the retried Linux MSRV
+job after one timing-sensitive WAL test failure.
