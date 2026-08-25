@@ -1036,10 +1036,14 @@ def sanitize_public_issue_body(body: str | None) -> str:
     if body is None:
         return ""
     kept: list[str] = []
+    removed = False
     for line in body.splitlines():
         if MARKER_HINT_RE.search(line) or PUBLIC_ROUTING_LINE_RE.fullmatch(line):
+            removed = True
             continue
         kept.append(line.rstrip())
+    if not removed:
+        return body
     content = "\n".join(kept).strip()
     return f"{content}\n" if content else ""
 

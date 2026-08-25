@@ -131,6 +131,11 @@ class RoadmapTests(unittest.TestCase):
         self.assertNotIn("Parent:", sanitized)
         self.assertIn("## Goal\nKeep this evidence.", sanitized)
         self.assertEqual(roadmap.sanitize_public_issue_body(sanitized), sanitized)
+        clean_without_newline = "## Goal\nAlready public."
+        self.assertEqual(
+            roadmap.sanitize_public_issue_body(clean_without_newline),
+            clean_without_newline,
+        )
 
     def test_title_identity_allows_metadata_plan_without_internal_marker_or_mapping(self):
         program = tiny_program()
