@@ -72,6 +72,15 @@ number without its workload would be a misleading guarantee.
 6. **Release checks:** locked build, advisories, license/source policy, SBOM,
    signing/notarization, and network-surface review.
 
+Task 0063 adds a platform lifecycle gate beneath the selected-root collector:
+macOS integration tests exercise creation, owner-run-loop scheduling, callback
+copying, start/stop/restart, flush, invalidation, and explicit refusal states.
+Cross-platform lifecycle-model tests inject schedule/start failures and assert that
+stop, invalidate, and release occur exactly once. AddressSanitizer is a required
+macOS evidence lane when the pinned nightly sanitizer toolchain is available; a
+missing toolchain or unavailable architecture is recorded as a no-go, never as a
+passing substitute.
+
 ## Evidence package
 
 Each future milestone should publish the tests and limitations supporting its exit
@@ -83,3 +92,9 @@ Task 0062 retains the bounded schedule fixture and the device receipt in
 `docs/evidence/0062-storage-fault-matrix.md`. It verifies the current fixture
 journal's single deterministic key generation; key rotation and Keychain
 availability remain separate, explicitly unverified gates.
+
+Task 0063 retains its stream lifecycle receipt in
+`docs/evidence/0063-fsevents-stream-lifecycle.md`. That receipt must link the
+device-local native callback run, the mock partial-initialization counts, the
+sanitizer result (or explicit no-go), and the protected-main rerun before the
+issue may close.

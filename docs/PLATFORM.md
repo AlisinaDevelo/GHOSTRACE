@@ -75,6 +75,19 @@ before persistence, and retain no file contents. FSEvents does not guarantee
 process attribution, event completeness, or one notification per change. Source
 flags, cursor state, and gaps must remain visible.
 
+The shipped lifecycle adapter is only the native stream fence. It requires a
+single owner thread and that thread's current Core Foundation run loop; it does not
+start ambient capture by itself. Creation, scheduling, callback parsing, flush,
+stop, restart, invalidation, and release are explicit operations. A callback is
+never allowed to unwind through the C ABI, and a native stream is released only
+after invalidation. Selected-root consent, canonicalization, exclusions, source
+flag semantics, cursor recovery, and persistence are intentionally not claimed by
+this adapter and remain no-go gates for a live collector.
+
+The adapter rejects FSEvents callback modes that replace the raw C-string path
+array with CFType or extended-data values (including full-history and document-ID
+modes); those modes require a separate parser contract.
+
 ## Private contexts
 
 Private browsing and private application contexts are excluded by default. A future
