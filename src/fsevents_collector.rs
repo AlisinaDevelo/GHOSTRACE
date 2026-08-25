@@ -7,13 +7,15 @@
 //! containment check and are represented by a SHA-256 digest in the journal.
 //! The adapter never opens a reported path or reads its contents.
 //!
-//! Canonicalization here is a startup-time prerequisite, not the complete path
-//! policy. Symlink replacement, hard-link aliasing, open races, and exclusion
-//! precedence remain the dedicated later gates in task 0014 and its children.
+//! Canonicalization here is a startup-time prerequisite for path-free metadata.
+//! A separate descriptor-backed [`SelectedRoot::open_contained`] boundary is
+//! available to later consumers that must open an existing path; it refuses
+//! symlink replacement, hard-link aliases, and component races without reading
+//! file content. Exclusion precedence and cursor recovery remain later gates.
 
 use std::{
     collections::{BTreeSet, VecDeque},
-    fs::Metadata,
+    fs::{File, Metadata},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
@@ -23,6 +25,14 @@ use std::time::Duration;
 
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
+#[cfg(unix)]
+use std::{
+    ffi::CString,
+    os::{
+        fd::{AsRawFd, FromRawFd},
+        unix::ffi::OsStrExt,
+    },
+};
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -58,6 +68,33 @@ pub struct SelectedRoot {
     id: RootId,
     canonical_path: PathBuf,
     identity: FilesystemIdentity,
+}
+
+/// A descriptor-backed path that was opened without following any symlink in
+/// the selected-root walk. The contained file is deliberately not exposed as
+/// a `Read` implementation: this boundary proves authorization and metadata
+/// identity without turning the collector into a content reader.
+#[derive(Debug)]
+pub struct ContainedFile {
+    file: File,
+    identity: FilesystemIdentity,
+}
+
+impl ContainedFile {
+    /// Return metadata from the already-authorized descriptor, never from the
+    /// path name that was used to reach it.
+    pub fn metadata(&self) -> Result<Metadata, FseventsCollectorError> {
+        self.file.metadata().map_err(|_| FseventsCollectorError::ContainedOpenRefused {
+            reason: "contained descriptor metadata unavailable",
+        })
+    }
+
+    /// Return whether the descriptor still names the same filesystem object
+    /// observed when it was admitted.
+    pub fn identity_is_stable(&self) -> Result<bool, FseventsCollectorError> {
+        let metadata = self.metadata()?;
+        Ok(filesystem_identity(&metadata) == self.identity)
+    }
 }
 
 /// The filesystem identity used for containment, never exported as event data.
@@ -108,20 +145,36 @@ impl SelectedRoot {
         id: impl Into<String>,
         canonical_path: impl Into<PathBuf>,
     ) -> Result<Self, FseventsCollectorError> {
-        let canonical_path = canonical_path.into();
-        if !canonical_path.is_absolute() {
+        let requested_path = canonical_path.into();
+        if !requested_path.is_absolute() {
             return Err(FseventsCollectorError::InvalidRoot {
                 reason: "root path must be absolute",
             });
         }
-        if !canonical_path.is_dir() {
+        // Resolve OS aliases such as `/var` -> `/private/var` before the
+        // no-follow descriptor walk. Every remaining user-controlled
+        // component is then opened without following symlinks.
+        let canonical_path = std::fs::canonicalize(&requested_path).map_err(|_| {
+            FseventsCollectorError::InvalidRoot { reason: "root path cannot be canonicalized" }
+        })?;
+        let expected_identity =
+            filesystem_identity(&std::fs::metadata(&canonical_path).map_err(|_| {
+                FseventsCollectorError::InvalidRoot { reason: "root identity cannot be read" }
+            })?);
+        run_test_root_open_hook(&canonical_path);
+        let descriptor = open_directory_nofollow(&canonical_path)?;
+        let descriptor_metadata = descriptor.metadata().map_err(|_| {
+            FseventsCollectorError::InvalidRoot { reason: "root descriptor cannot be read" }
+        })?;
+        if !descriptor_metadata.is_dir() {
             return Err(FseventsCollectorError::InvalidRoot {
                 reason: "selected root is not a directory",
             });
         }
-        let identity = filesystem_identity(&std::fs::metadata(&canonical_path).map_err(|_| {
-            FseventsCollectorError::InvalidRoot { reason: "root identity cannot be read" }
-        })?);
+        let identity = filesystem_identity(&descriptor_metadata);
+        if identity != expected_identity {
+            return Err(FseventsCollectorError::ContainedOpenRace);
+        }
         Ok(Self { id: RootId::try_from(id.into())?, canonical_path, identity })
     }
 
@@ -156,6 +209,28 @@ impl SelectedRoot {
             });
         }
         digest_path_scoped(path, self)
+    }
+
+    /// Open an existing path through a descriptor walk rooted at this selected
+    /// directory. Every component is opened with `O_NOFOLLOW`; intermediate
+    /// descriptors remain the authority for the next lookup, so a rename or
+    /// replacement of a parent cannot redirect the walk. Regular files with
+    /// multiple hard links are refused because their content may be aliased
+    /// outside the selected scope. Symlink and hard-link FSEvents are still
+    /// represented as source facts by the metadata collector and are never
+    /// opened here.
+    pub fn open_contained(&self, path: &Path) -> Result<ContainedFile, FseventsCollectorError> {
+        #[cfg(unix)]
+        {
+            open_contained_unix(self, path, |_| {})
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = path;
+            Err(FseventsCollectorError::ContainedOpenRefused {
+                reason: "descriptor containment is unavailable on this platform",
+            })
+        }
     }
 
     fn contains_resolved(&self, resolved: &ResolvedPath) -> bool {
@@ -241,6 +316,12 @@ pub enum FseventsCollectorError {
 
     #[error("the consent confirmation does not match the policy document")]
     ConsentPolicyMismatch,
+
+    #[error("contained path open refused: {reason}")]
+    ContainedOpenRefused { reason: &'static str },
+
+    #[error("selected-root identity changed during descriptor validation")]
+    ContainedOpenRace,
 
     #[error("collector cannot {action} in its current state")]
     InvalidState { action: &'static str },
@@ -766,6 +847,184 @@ fn filesystem_identity(metadata: &Metadata) -> FilesystemIdentity {
     }
 }
 
+fn hard_link_count(metadata: &Metadata) -> u64 {
+    #[cfg(unix)]
+    {
+        metadata.nlink()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = metadata;
+        1
+    }
+}
+
+fn run_test_root_open_hook(path: &Path) {
+    #[cfg(test)]
+    ROOT_OPEN_HOOK.with(|slot| {
+        if let Some(hook) = slot.borrow_mut().take() {
+            hook(path);
+        }
+    });
+    #[cfg(not(test))]
+    let _ = path;
+}
+
+#[cfg(test)]
+type RootOpenHook = Box<dyn FnOnce(&Path) + 'static>;
+
+#[cfg(test)]
+thread_local! {
+    static ROOT_OPEN_HOOK: std::cell::RefCell<Option<RootOpenHook>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn install_root_open_test_hook(hook: RootOpenHook) {
+    ROOT_OPEN_HOOK.with(|slot| {
+        assert!(slot.borrow_mut().replace(hook).is_none(), "root open hook already installed");
+    });
+}
+
+#[cfg(unix)]
+fn open_directory_nofollow(path: &Path) -> Result<File, FseventsCollectorError> {
+    if !path.is_absolute()
+        || path.components().any(|component| component == std::path::Component::ParentDir)
+    {
+        return Err(FseventsCollectorError::ContainedOpenRefused {
+            reason: "root path is not an absolute, parent-free path",
+        });
+    }
+    let mut descriptor =
+        File::open("/").map_err(|_| FseventsCollectorError::ContainedOpenRefused {
+            reason: "filesystem root descriptor unavailable",
+        })?;
+    for component in path.components() {
+        let std::path::Component::Normal(name) = component else {
+            continue;
+        };
+        descriptor = open_component_nofollow(
+            descriptor.as_raw_fd(),
+            name,
+            true,
+            "selected-root directory component refused",
+        )?;
+    }
+    Ok(descriptor)
+}
+
+#[cfg(unix)]
+fn open_component_nofollow(
+    directory_fd: std::os::fd::RawFd,
+    name: &std::ffi::OsStr,
+    directory: bool,
+    reason: &'static str,
+) -> Result<File, FseventsCollectorError> {
+    let name = CString::new(name.as_bytes()).map_err(|_| {
+        FseventsCollectorError::ContainedOpenRefused { reason: "path component contains NUL" }
+    })?;
+    let mut flags = libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW;
+    if directory {
+        flags |= libc::O_DIRECTORY;
+    }
+    // SAFETY: `directory_fd` is an owned directory descriptor, `name` is a
+    // NUL-terminated component with no interior NUL, and the flags request a
+    // read-only no-follow descriptor. The returned fd is owned below.
+    let fd = unsafe { libc::openat(directory_fd, name.as_ptr(), flags) };
+    if fd < 0 {
+        return Err(FseventsCollectorError::ContainedOpenRefused { reason });
+    }
+    // SAFETY: `fd` is freshly returned by openat and is transferred exactly
+    // once into the File owner.
+    Ok(unsafe { File::from_raw_fd(fd) })
+}
+
+#[cfg(unix)]
+fn open_contained_unix<F>(
+    root: &SelectedRoot,
+    path: &Path,
+    mut before_component: F,
+) -> Result<ContainedFile, FseventsCollectorError>
+where
+    F: FnMut(usize),
+{
+    if !path.is_absolute()
+        || path.components().any(|component| component == std::path::Component::ParentDir)
+    {
+        return Err(FseventsCollectorError::ContainedOpenRefused {
+            reason: "contained path is not an absolute, parent-free path",
+        });
+    }
+    let relative = path.strip_prefix(&root.canonical_path).map_err(|_| {
+        FseventsCollectorError::ContainedOpenRefused {
+            reason: "contained path is outside the selected root",
+        }
+    })?;
+    let root_descriptor = open_directory_nofollow(&root.canonical_path)?;
+    let root_metadata =
+        root_descriptor.metadata().map_err(|_| FseventsCollectorError::ContainedOpenRefused {
+            reason: "root descriptor metadata unavailable",
+        })?;
+    if filesystem_identity(&root_metadata) != root.identity {
+        return Err(FseventsCollectorError::ContainedOpenRace);
+    }
+
+    let components = relative
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(name) => Some(name),
+            std::path::Component::CurDir => None,
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if components.is_empty() {
+        return Ok(ContainedFile { identity: root.identity, file: root_descriptor });
+    }
+
+    let mut directory = root_descriptor;
+    for (index, component) in components.iter().enumerate() {
+        before_component(index);
+        let last = index + 1 == components.len();
+        let child = open_component_nofollow(
+            directory.as_raw_fd(),
+            component,
+            !last,
+            if last {
+                "contained leaf refused by no-follow policy"
+            } else {
+                "contained parent refused by no-follow policy"
+            },
+        )?;
+        let metadata =
+            child.metadata().map_err(|_| FseventsCollectorError::ContainedOpenRefused {
+                reason: "contained descriptor metadata unavailable",
+            })?;
+        let identity = filesystem_identity(&metadata);
+        if identity.device != root.identity.device {
+            return Err(FseventsCollectorError::ContainedOpenRefused {
+                reason: "contained path crosses a filesystem device",
+            });
+        }
+        if last {
+            if metadata.is_file() && hard_link_count(&metadata) > 1 {
+                return Err(FseventsCollectorError::ContainedOpenRefused {
+                    reason: "contained file has an external hard-link alias",
+                });
+            }
+            if !metadata.is_file() && !metadata.is_dir() {
+                return Err(FseventsCollectorError::ContainedOpenRefused {
+                    reason: "contained leaf is not a regular file or directory",
+                });
+            }
+            return Ok(ContainedFile { file: child, identity });
+        }
+        directory = child;
+    }
+    Err(FseventsCollectorError::ContainedOpenRefused {
+        reason: "contained path walk ended without a leaf",
+    })
+}
+
 fn resolve_path(path: &Path) -> Option<ResolvedPath> {
     if !path.is_absolute()
         || path.components().any(|component| component == std::path::Component::ParentDir)
@@ -850,8 +1109,9 @@ fn entry_kind_for(event: &NormalizedFseventsEvent) -> EntryKind {
 mod tests {
     use super::*;
     use crate::fsevents_flags::{
-        EVENT_FLAG_ITEM_CREATED, EVENT_FLAG_ITEM_IS_FILE, EVENT_FLAG_ITEM_MODIFIED,
-        EVENT_FLAG_ITEM_REMOVED, EVENT_FLAG_ITEM_RENAMED,
+        EVENT_FLAG_ITEM_CREATED, EVENT_FLAG_ITEM_IS_FILE, EVENT_FLAG_ITEM_IS_HARDLINK,
+        EVENT_FLAG_ITEM_IS_SYMLINK, EVENT_FLAG_ITEM_MODIFIED, EVENT_FLAG_ITEM_REMOVED,
+        EVENT_FLAG_ITEM_RENAMED,
     };
 
     #[test]
@@ -953,5 +1213,110 @@ mod tests {
         let second = other_scope.path_digest(&path).expect("digest");
         assert_ne!(first, second);
         assert!(!first.as_str().contains("café"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn descriptor_open_refuses_symlink_and_hard_link_aliases_without_reading_content() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().expect("root");
+        let root_path = directory.path().join("selected");
+        std::fs::create_dir(&root_path).expect("selected root");
+        let root = SelectedRoot::new("root-main", &root_path).expect("root");
+        let outside = directory.path().join("outside.txt");
+        std::fs::write(&outside, b"outside-secret").expect("outside");
+
+        let symlink_path = root.path().join("symlink.txt");
+        symlink(&outside, &symlink_path).expect("symlink");
+        assert!(root.open_contained(&symlink_path).is_err());
+
+        let hard_link_path = root.path().join("hard-link.txt");
+        std::fs::hard_link(&outside, &hard_link_path).expect("hard link");
+        assert!(root.open_contained(&hard_link_path).is_err());
+
+        let regular = root.path().join("regular.txt");
+        std::fs::write(&regular, b"inside-secret").expect("regular");
+        let descriptor = root.open_contained(&regular).expect("regular descriptor");
+        assert!(descriptor.metadata().expect("metadata").is_file());
+        assert!(descriptor.identity_is_stable().expect("identity"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn descriptor_walk_denies_replacement_of_every_path_component() {
+        use std::os::unix::fs::symlink;
+
+        for swapped_component in 0..3 {
+            let directory = tempfile::tempdir().expect("root");
+            let root_path = directory.path().join("selected");
+            std::fs::create_dir(&root_path).expect("selected root");
+            let first = root_path.join("first");
+            let second = first.join("second");
+            let leaf = second.join("leaf.txt");
+            std::fs::create_dir(&first).expect("first");
+            std::fs::create_dir(&second).expect("second");
+            std::fs::write(&leaf, b"inside-secret").expect("leaf");
+            let root = SelectedRoot::new("root-main", &root_path).expect("root");
+
+            let outside_directory = directory.path().join("outside-directory");
+            std::fs::create_dir(&outside_directory).expect("outside directory");
+            let outside_file = directory.path().join("outside-file");
+            std::fs::write(&outside_file, b"outside-secret").expect("outside file");
+            let swap_path = match swapped_component {
+                0 => first.clone(),
+                1 => second.clone(),
+                _ => leaf.clone(),
+            };
+            let moved_path = directory.path().join(format!("moved-{swapped_component}"));
+            let replacement = if swapped_component == 2 {
+                outside_file.clone()
+            } else {
+                outside_directory.clone()
+            };
+            let path = leaf.clone();
+            let result = open_contained_unix(&root, &path, |index| {
+                if index == swapped_component {
+                    std::fs::rename(&swap_path, &moved_path).expect("move component");
+                    symlink(&replacement, &swap_path).expect("replace component");
+                }
+            });
+            assert!(result.is_err(), "component {swapped_component} must be denied");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn root_selection_refuses_replacement_between_identity_and_descriptor_open() {
+        let directory = tempfile::tempdir().expect("root");
+        let root_path = directory.path().join("selected");
+        let moved_path = directory.path().join("selected-moved");
+        std::fs::create_dir(&root_path).expect("selected root");
+        let original = root_path.clone();
+        let moved = moved_path.clone();
+        let replacement = root_path.clone();
+        install_root_open_test_hook(Box::new(move |_| {
+            std::fs::rename(&original, &moved).expect("move root");
+            std::fs::create_dir(&replacement).expect("replacement root");
+        }));
+
+        let result = SelectedRoot::from_canonical_path("root-main", &root_path);
+        assert!(matches!(result, Err(FseventsCollectorError::ContainedOpenRace)));
+    }
+
+    #[test]
+    fn link_flags_remain_source_facts_without_authorizing_an_open() {
+        let symlink_event = crate::fsevents_flags::normalize_fsevents_event(
+            1,
+            EVENT_FLAG_ITEM_CREATED | EVENT_FLAG_ITEM_IS_SYMLINK,
+        );
+        assert_eq!(entry_kind_for(&symlink_event), EntryKind::Symlink);
+
+        let hard_link_event = crate::fsevents_flags::normalize_fsevents_event(
+            2,
+            EVENT_FLAG_ITEM_CREATED | EVENT_FLAG_ITEM_IS_FILE | EVENT_FLAG_ITEM_IS_HARDLINK,
+        );
+        assert_eq!(entry_kind_for(&hard_link_event), EntryKind::File);
+        assert!(hard_link_event.flags.contains(FseventsEventFlag::ItemIsHardlink));
     }
 }

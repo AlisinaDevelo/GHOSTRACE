@@ -119,9 +119,12 @@ equivalent only when the selected filesystem resolves them to the same identity.
 bytes are scoped to the opaque root ID and its filesystem identity, so an exported digest
 is stable only within that documented normalization and scope boundary. Lifecycle
 transitions, callback health, blocked counts, and callback overflow gaps are bounded status
-records; the raw callback path is never written to a payload or diagnostic. The remaining
-validation-to-use race, hard-link policy, and exclusion gates are still required before
-ambient CLI capture can be enabled.
+records; the raw callback path is never written to a payload or diagnostic. If a later
+consumer must open a path, `SelectedRoot::open_contained` uses a descriptor walk with
+no-follow component opens, rejects symlink replacement and regular-file hard-link
+aliases, and exposes only descriptor metadata. Symlink and hard-link callback flags are
+retained as source facts without opening their targets. Exclusion, cursor, and ambient
+CLI gates are still required before capture can be enabled.
 
 ## Local storage and export
 

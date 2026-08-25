@@ -57,7 +57,7 @@ pub use fsevents::{
     FLAG_USE_CF_TYPES, FLAG_USE_EXTENDED_DATA, FLAG_WITH_DOC_ID,
 };
 pub use fsevents_collector::{
-    CollectedFilesystemEvent, CollectorState, CollectorStatus, FseventsCollector,
+    CollectedFilesystemEvent, CollectorState, CollectorStatus, ContainedFile, FseventsCollector,
     FseventsCollectorConfig, FseventsCollectorError, SelectedRoot, MAX_PENDING_EVENTS,
     MAX_SELECTED_ROOTS,
 };

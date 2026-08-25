@@ -40,7 +40,7 @@ matrix covers:
 | --- | --- |
 | Consent | Deny-by-default, explicit scope, versioned policy, stop/revoke behavior |
 | Minimization | Field inventory, redaction tests, prohibited-field regression |
-| Scope | Root canonicalization, symlink containment, exclusions, malformed Unicode/path tests |
+| Scope | Root canonicalization, descriptor-backed no-follow symlink/hard-link containment, exclusions, malformed Unicode/path tests |
 | Coverage | Source flags, cursor continuity, coalescing/omission behavior, first-class gaps |
 | Recovery | Crash before/after commit, cursor/event atomicity, restart discontinuity, idempotent replay, explicit reset/wrap/invalidation |
 | Backpressure | Bounded memory under bursts, measurable drops, visible loss records |
@@ -81,11 +81,11 @@ number without its workload would be a misleading guarantee.
 Task 0063 adds a platform lifecycle gate beneath the selected-root collector:
 macOS integration tests exercise creation, owner-run-loop scheduling, callback
 copying, start/stop/restart, flush, invalidation, and explicit refusal states.
-Task 0013 adds the next gate: explicit consent confirmation, exact root mapping,
-path-free filesystem payloads, lifecycle records, writer admission, controlled
-create/modify/move/delete integration, and revocation before pending events commit.
-Its startup canonicalization and lexical containment are intentionally not a
-substitute for the race-resistant path policy and cursor/recovery work below.
+Task 0013 adds the first live-source gate: explicit consent confirmation, exact
+root mapping, path-free filesystem payloads, lifecycle records, writer admission,
+controlled create/modify/move/delete integration, and revocation before pending
+events commit. Task 0068 adds the descriptor-backed no-follow walk for later opens;
+cursor/recovery, exclusion, and ambient capture work below remains separate.
 Cross-platform lifecycle-model tests inject schedule/start failures and assert that
 stop, invalidate, and release occur exactly once. AddressSanitizer is a required
 macOS evidence lane when the pinned nightly sanitizer toolchain is available; a
