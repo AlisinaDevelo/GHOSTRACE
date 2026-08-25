@@ -85,6 +85,7 @@ encryption or key-management claim.
 | Selected-root FSEvents collector API | Available only behind explicit consent; no ambient CLI |
 | Storm/lifecycle corpus and native-safe macOS receipt | Available as a bounded test contract; sleep/wake, logout, and volume detach are explicit no-go rows |
 | Reproducible filesystem benchmark corpus | Available as an offline synthetic workload contract; native results require the named macOS device and retain observed gaps/failures |
+| Event-storm backpressure and loss accounting | Available as a bounded synthetic stress contract; queue pressure exposes pending limits, an emergency status slot, auditable gaps, and recovery-required state |
 | Shell, Git, frontmost-app, or browser collectors | Not shipped |
 | macOS Keychain-backed production encryption | Not shipped |
 | Signed/notarized release artifacts | Not shipped |

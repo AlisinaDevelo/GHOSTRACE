@@ -107,6 +107,28 @@ prove process causality. Energy is a value only when the unprivileged
 Hardware and OS are part of the receipt, and results are not cross-machine
 comparable without an explicit normalization study.
 
+## Event-storm backpressure and loss accounting (task 0016)
+
+The selected-root collector exposes the current pending callback count, cumulative
+pending overflow count, writer reservations, dropped-event count, and
+`recovery_required` state without retaining paths. The callback queue is capped at
+`MAX_PENDING_EVENTS` (4096); a single bounded emergency writer reservation remains
+available for the resulting status/gap event when normal admissions are saturated.
+The native-safe synthetic stress test admits 64 events, then injects 4224 more,
+retains exactly 4096 pending events, persists one `callback_queue_overflow` gap for
+the 128 refused deliveries, and stops further claims until reconciliation. Its
+receipt reports elapsed admission/loss-record times and no path or content data.
+Run it on macOS with:
+
+```sh
+cargo +1.88.0 test --locked --lib \
+  fsevents_collector::tests::synthetic_event_storm_backpressure_stays_bounded_and_emits_durable_gap \
+  -- --exact --nocapture
+```
+
+This is a bounded stress measurement on the named device, not a claim of
+cross-machine throughput or process causality.
+
 ## Test layers
 
 1. **Unit tests:** model validation, URL sanitization, policy decisions, evidence

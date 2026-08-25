@@ -15,6 +15,20 @@ workload repetition count, latency distribution, coverage classes, duplicate/gap
 counts, CPU, memory, energy status, and journal disk growth. Non-macOS builds are an
 explicit no-go for the native lane, never a CI substitution.
 
+The backpressure lane is a separate macOS-only native-safe stress test. It uses
+synthetic path metadata, proves the copied callback queue never exceeds 4096
+events, fills the normal writer queue without losing the emergency status slot,
+and checks that an induced overflow becomes a durable `callback_queue_overflow`
+gap plus `recovery_required` status. It is run with:
+
+```sh
+cargo +1.88.0 test --locked --lib \
+  fsevents_collector::tests::synthetic_event_storm_backpressure_stays_bounded_and_emits_durable_gap \
+  -- --exact --nocapture
+```
+
+Non-macOS builds retain an explicit no-go for this native lane.
+
 ## Install the pinned inputs
 
 On a clean machine, install Rust through the official rustup channel manifest:
