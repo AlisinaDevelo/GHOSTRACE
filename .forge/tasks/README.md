@@ -82,7 +82,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0076 | Publish a reproducible filesystem benchmark corpus | M2 | done | filesystem | performance-engineer | 0017 | 0075 |
 | 0077 | Define snapshot-consistent query pagination | M3 | done | explain-export | database-expert | 0018 | 0010, 0012 |
 | 0078 | Model clock skew and deterministic total ordering | M3 | done | explain-export | architect | 0018 | 0010, 0012 |
-| 0079 | Make query windows gap-aware | M3 | backlog | explain-export | implementation-engineer | 0018 | 0071, 0077, 0078 |
+| 0079 | Make query windows gap-aware | M3 | done | explain-export | implementation-engineer | 0018 | 0071, 0077, 0078 |
 | 0080 | Define a bounded evidence-claim grammar | M3 | backlog | explain-export | researcher | 0019 | 0017, 0018, 0046 |
 | 0081 | Version the cross-source correlation rule registry | M3 | backlog | explain-export | architect | 0019 | 0079, 0080 |
 | 0082 | Build explanation determinism and counterexample tests | M3 | backlog | explain-export | test-engineer | 0019 | 0080, 0081 |
