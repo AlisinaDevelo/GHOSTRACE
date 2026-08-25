@@ -143,6 +143,14 @@ only private, non-disruptive rows and emits path-free counts. Sleep/wake, logout
 volume-detach rows are guarded no-go cases: they require an explicitly authorized
 interactive run and cannot be satisfied by replay or hosted CI.
 
+The reproducible benchmark contract in
+[`fixtures/filesystem-benchmark-corpus-v1.json`](../fixtures/filesystem-benchmark-corpus-v1.json)
+extends this evaluation with small, deep, wide, Unicode, case-variant, Git,
+build-output, and event-storm trees. The native runner reports workload-to-journal
+latency percentiles, evidence classes, duplicates, gaps, CPU, resident memory,
+journal growth, and power-telemetry status. A cursor regression remains a recorded
+failure/gap; the runner never turns it into a completeness claim.
+
 When a later consumer must open an existing item, `SelectedRoot::open_contained`
 performs a descriptor walk from the selected root. Each component is opened with
 `O_NOFOLLOW`; parent descriptors, not a revalidated pathname, authorize the next

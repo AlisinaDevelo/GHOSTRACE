@@ -7,6 +7,14 @@ digests and install commands are recorded in [`toolchain/manifest.json`](../tool
 The Python planning and fixture checks use only the Python standard library and
 require Python 3.9 or newer.
 
+The filesystem benchmark contract is checked offline by
+`python3 scripts/filesystem-benchmark.py check`. A native measurement is a separate
+macOS-only run (`python3 scripts/filesystem-benchmark.py run --profile release`);
+its receipt must retain the source revision, model, OS, architecture, toolchain,
+workload repetition count, latency distribution, coverage classes, duplicate/gap
+counts, CPU, memory, energy status, and journal disk growth. Non-macOS builds are an
+explicit no-go for the native lane, never a CI substitution.
+
 ## Install the pinned inputs
 
 On a clean machine, install Rust through the official rustup channel manifest:

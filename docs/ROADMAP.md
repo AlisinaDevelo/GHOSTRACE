@@ -84,7 +84,11 @@ edge cases, prevents feedback loops, and publishes controlled storm and lifecycl
 measurements. Task 0075 supplies the versioned storm/lifecycle corpus and a native
 macOS receipt for private safe rows; sleep/wake, logout, and volume-detach remain
 explicit guarded no-go rows until an authorized interactive device run. It does not
-claim process attribution.
+claim process attribution. Task 0076 adds a versioned synthetic benchmark contract
+for small, deep, wide, Unicode, case-variant, Git, build-output, and event-storm
+trees, with bounded latency, coverage, gap, CPU, memory, energy, and disk reports.
+Results are tied to the named device and are not cross-machine comparable without
+normalization.
 
 ### Query, explanation, export, and integrity
 

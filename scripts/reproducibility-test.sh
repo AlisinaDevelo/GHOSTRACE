@@ -16,6 +16,7 @@ echo "reproducibility: pinned inputs"
 python3 scripts/reproducibility.py check
 python3 scripts/fixture-manifest.py check
 python3 scripts/fsevents-lifecycle-corpus.py check
+python3 scripts/filesystem-benchmark.py check
 python3 scripts/identity-audit.py check
 
 echo "reproducibility: rustfmt"
