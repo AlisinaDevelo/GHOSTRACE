@@ -71,7 +71,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0065 | Normalize every FSEvents flag into evidence status | M2 | done | filesystem | macos-engineer | 0013 | 0006, 0063 |
 | 0066 | Track volume identity and mount transitions | M2 | backlog | filesystem | macos-engineer | 0015 | 0013, 0014 |
 | 0067 | Test APFS case, Unicode, and root-containment behavior | M2 | done | filesystem | test-engineer | 0014 | 0013, 0045 |
-| 0068 | Harden symlink, hard-link, and open-race containment | M2 | backlog | filesystem | security-auditor | 0014 | 0013, 0057 |
+| 0068 | Harden symlink, hard-link, and open-race containment | M2 | done | filesystem | security-auditor | 0014 | 0013, 0057 |
 | 0069 | Version exclusion precedence and matching rules | M2 | done | filesystem | privacy-engineer | 0014 | 0007, 0050 |
 | 0070 | Persist one replay boundary per source and volume | M2 | backlog | filesystem | database-expert | 0015 | 0061, 0063, 0066 |
 | 0071 | Emit gaps for dropped, wrapped, and root-changed history | M2 | backlog | filesystem | macos-engineer | 0015 | 0065, 0070 |
