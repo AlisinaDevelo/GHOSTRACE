@@ -18,6 +18,7 @@ use crate::{
     crypto::{decrypt_payload, encrypt_payload, KeyProvider, SharedKeyProvider},
     cursor::{CursorIdentity, CursorKind, CursorState, CursorStatus, CursorToken},
     error::GhostraceError,
+    fault::{FaultPlan, FaultPoint},
     model::{
         CollectorInstanceId, EventEnvelope, EventKind, EventSource, Evidence, IngestionOrigin,
         OriginBinding, PolicyProfileId, ProvenanceVersion, SourceCursor, EVENT_SCHEMA_VERSION,
@@ -118,6 +119,7 @@ pub struct Journal {
     key_provider: SharedKeyProvider,
     path: Option<PathBuf>,
     wal_policy: WalPolicy,
+    faults: FaultPlan,
 }
 
 impl Journal {
@@ -155,20 +157,51 @@ impl Journal {
         P: AsRef<Path>,
         K: KeyProvider + 'static,
     {
-        Self::open_with_provider(path, Arc::new(provider), wal_policy)
+        Self::open_with_provider(path, Arc::new(provider), wal_policy, FaultPlan::none())
+    }
+
+    /// Opens a fixture journal with an explicit deterministic fault plan.
+    /// Production callers should use [`Journal::open_fixture_with_policy`],
+    /// which supplies the inert plan.
+    pub fn open_fixture_with_fault_plan<P, K>(
+        path: P,
+        provider: K,
+        faults: FaultPlan,
+    ) -> Result<Self, GhostraceError>
+    where
+        P: AsRef<Path>,
+        K: KeyProvider + 'static,
+    {
+        Self::open_fixture_with_policy_and_fault_plan(path, provider, WalPolicy::default(), faults)
+    }
+
+    pub fn open_fixture_with_policy_and_fault_plan<P, K>(
+        path: P,
+        provider: K,
+        wal_policy: WalPolicy,
+        faults: FaultPlan,
+    ) -> Result<Self, GhostraceError>
+    where
+        P: AsRef<Path>,
+        K: KeyProvider + 'static,
+    {
+        Self::open_with_provider(path, Arc::new(provider), wal_policy, faults)
     }
 
     fn open_with_provider<P>(
         path: P,
         provider: SharedKeyProvider,
         wal_policy: WalPolicy,
+        faults: FaultPlan,
     ) -> Result<Self, GhostraceError>
     where
         P: AsRef<Path>,
     {
         let path = path.as_ref().to_path_buf();
+        faults.hit(FaultPoint::StorageBeforeOpen)?;
         let connection = storage::open_database(&path)?;
-        Self::from_connection(connection, provider, Some(path), wal_policy)
+        faults.hit(FaultPoint::StorageAfterOpen)?;
+        Self::from_connection(connection, provider, Some(path), wal_policy, faults)
     }
 
     pub fn in_memory<K>(provider: K) -> Result<Self, GhostraceError>
@@ -185,7 +218,40 @@ impl Journal {
     where
         K: KeyProvider + 'static,
     {
-        Self::from_connection(Connection::open_in_memory()?, Arc::new(provider), None, wal_policy)
+        Self::from_connection(
+            Connection::open_in_memory()?,
+            Arc::new(provider),
+            None,
+            wal_policy,
+            FaultPlan::none(),
+        )
+    }
+
+    pub fn in_memory_with_fault_plan<K>(
+        provider: K,
+        faults: FaultPlan,
+    ) -> Result<Self, GhostraceError>
+    where
+        K: KeyProvider + 'static,
+    {
+        Self::in_memory_with_policy_and_fault_plan(provider, WalPolicy::default(), faults)
+    }
+
+    pub fn in_memory_with_policy_and_fault_plan<K>(
+        provider: K,
+        wal_policy: WalPolicy,
+        faults: FaultPlan,
+    ) -> Result<Self, GhostraceError>
+    where
+        K: KeyProvider + 'static,
+    {
+        Self::from_connection(
+            Connection::open_in_memory()?,
+            Arc::new(provider),
+            None,
+            wal_policy,
+            faults,
+        )
     }
 
     fn from_connection(
@@ -193,18 +259,22 @@ impl Journal {
         provider: SharedKeyProvider,
         path: Option<PathBuf>,
         wal_policy: WalPolicy,
+        faults: FaultPlan,
     ) -> Result<Self, GhostraceError> {
         let mut connection = connection;
         configure_connection(&connection, path.is_some(), wal_policy)?;
-        run_migrations(&mut connection)?;
+        run_migrations(&mut connection, &faults)?;
         if let Some(path) = path.as_deref() {
+            faults.hit(FaultPoint::StorageBeforeVerify)?;
             storage::verify_database_artifacts(path)?;
+            faults.hit(FaultPoint::StorageAfterVerify)?;
         }
         Ok(Self {
             conn: Arc::new(Mutex::new(connection)),
             key_provider: provider,
             path,
             wal_policy,
+            faults,
         })
     }
 
@@ -214,6 +284,14 @@ impl Journal {
 
     pub fn wal_policy(&self) -> WalPolicy {
         self.wal_policy
+    }
+
+    /// Replace the inert plan after opening a journal.  This is useful for
+    /// exercising write, checkpoint, backup, and control transitions without
+    /// also faulting the migration/open path.
+    pub fn with_fault_plan(mut self, faults: FaultPlan) -> Self {
+        self.faults = faults;
+        self
     }
 
     /// Returns the SQLite mode.  File-backed journals should report `wal`; an
@@ -281,6 +359,7 @@ impl Journal {
         let Some(path) = self.path.as_deref() else {
             return Ok(WalCheckpointReport::memory(mode, self.wal_policy.max_wal_bytes));
         };
+        self.faults.hit(FaultPoint::CheckpointBefore)?;
         let connection = self.lock_connection()?;
         let (busy, frames_in_wal, frames_checkpointed): (i64, i64, i64) = connection.query_row(
             &format!("PRAGMA wal_checkpoint({})", mode.pragma_name()),
@@ -288,7 +367,9 @@ impl Journal {
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?;
         let wal_bytes = storage::wal_size_bytes(path)?;
+        self.faults.hit(FaultPoint::StorageBeforeVerify)?;
         storage::verify_database_artifacts(path)?;
+        self.faults.hit(FaultPoint::StorageAfterVerify)?;
         let frames_in_wal = frames_in_wal.max(0) as u64;
         let frames_checkpointed = frames_checkpointed.max(0) as u64;
         let report = WalCheckpointReport {
@@ -307,6 +388,7 @@ impl Journal {
                 max_wal_bytes: report.max_wal_bytes,
             });
         }
+        self.faults.hit(FaultPoint::CheckpointAfter)?;
         Ok(report)
     }
 
@@ -343,6 +425,7 @@ impl Journal {
         let Some(path) = self.path.as_deref() else {
             return Err(GhostraceError::BackupUnavailable);
         };
+        self.faults.hit(FaultPoint::BackupBeforeCopy)?;
         let connection = self.lock_connection()?;
         let (busy, frames_in_wal, frames_checkpointed): (i64, i64, i64) =
             connection.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
@@ -362,6 +445,7 @@ impl Journal {
         }
         let destination = destination.as_ref();
         let bytes = storage::copy_database_snapshot(path, destination)?;
+        self.faults.hit(FaultPoint::BackupAfterCopy)?;
         Ok(BackupReceipt { bytes, wal_bytes, frames_in_wal, frames_checkpointed })
     }
 
@@ -411,14 +495,21 @@ impl Journal {
         for diagnostic in diagnostics {
             diagnostic.validate()?;
         }
+        self.faults.hit(FaultPoint::IngestBeforeTransaction)?;
         let mut connection = self.lock_connection()?;
         let transaction = connection.transaction()?;
+        self.faults.hit(FaultPoint::IngestAfterTransaction)?;
         record_policy_profile(&transaction, policy)?;
-        let sequences = insert_events(&transaction, events, self.key_provider.as_ref())?;
-        insert_diagnostics(&transaction, diagnostics)?;
+        let sequences =
+            insert_events(&transaction, events, self.key_provider.as_ref(), &self.faults)?;
+        insert_diagnostics(&transaction, diagnostics, &self.faults)?;
+        self.faults.hit(FaultPoint::IngestBeforeCommit)?;
         transaction.commit()?;
+        self.faults.hit(FaultPoint::IngestAfterCommit)?;
         if let Some(path) = self.path.as_deref() {
+            self.faults.hit(FaultPoint::StorageBeforeVerify)?;
             storage::verify_database_artifacts(path)?;
+            self.faults.hit(FaultPoint::StorageAfterVerify)?;
         }
         Ok(sequences)
     }
@@ -460,8 +551,10 @@ impl Journal {
     /// Ingestion remains fail-closed until [`Journal::reset_cursor`] or
     /// [`Journal::wrap_cursor`] establishes a new epoch.
     pub fn invalidate_cursor(&self, identity: &CursorIdentity) -> Result<(), GhostraceError> {
+        self.faults.hit(FaultPoint::ControlBeforeTransaction)?;
         let mut connection = self.lock_connection()?;
         let transaction = connection.transaction()?;
+        self.faults.hit(FaultPoint::ControlAfterTransaction)?;
         let changed = transaction.execute(
             "UPDATE cursors SET state = 'invalidated' WHERE source = ?1 AND collector_instance = ?2",
             params![identity.source.to_string(), identity.collector_instance()],
@@ -469,7 +562,9 @@ impl Journal {
         if changed == 0 {
             return Err(GhostraceError::CursorStateMissing { event_source: identity.source });
         }
+        self.faults.hit(FaultPoint::ControlBeforeCommit)?;
         transaction.commit()?;
+        self.faults.hit(FaultPoint::ControlAfterCommit)?;
         Ok(())
     }
 
@@ -488,8 +583,10 @@ impl Journal {
         {
             return Err(GhostraceError::CursorControlInvalid);
         }
+        self.faults.hit(FaultPoint::ControlBeforeTransaction)?;
         let mut connection = self.lock_connection()?;
         let transaction = connection.transaction()?;
+        self.faults.hit(FaultPoint::ControlAfterTransaction)?;
         record_policy_profile(&transaction, policy)?;
         let current: Option<u64> = transaction
             .query_row(
@@ -522,7 +619,9 @@ impl Journal {
                 policy.version,
             ],
         )?;
+        self.faults.hit(FaultPoint::ControlBeforeCommit)?;
         transaction.commit()?;
+        self.faults.hit(FaultPoint::ControlAfterCommit)?;
         Ok(())
     }
 
@@ -608,6 +707,7 @@ fn insert_events(
     transaction: &Transaction<'_>,
     events: &[EventEnvelope],
     provider: &dyn KeyProvider,
+    faults: &FaultPlan,
 ) -> Result<Vec<u64>, GhostraceError> {
     let mut sequences = Vec::with_capacity(events.len());
     for event in events {
@@ -674,7 +774,10 @@ fn insert_events(
 
         let payload = serde_json::to_vec(&event.payload)?;
         let aad = associated_data(event)?;
+        faults.hit(FaultPoint::KeyBeforeAccess)?;
         let ciphertext = encrypt_payload(provider, &aad, &payload)?;
+        faults.hit(FaultPoint::KeyAfterAccess)?;
+        faults.hit(FaultPoint::EventBeforeInsert)?;
         transaction.execute(
             "INSERT INTO events(
                 event_id, schema_version, observed_at, ingested_at, source, kind,
@@ -698,10 +801,12 @@ fn insert_events(
                 ciphertext,
             ],
         )?;
+        faults.hit(FaultPoint::EventAfterInsert)?;
         let sequence = transaction.last_insert_rowid() as u64;
         if let Some(token) = token {
             let epoch =
                 token.epoch().or_else(|| current.as_ref().map(|state| state.epoch)).unwrap_or(0);
+            faults.hit(FaultPoint::CursorBeforeUpdate)?;
             transaction.execute(
                 "INSERT INTO cursors(
                     source, collector_instance, source_cursor, updated_at, epoch, state,
@@ -725,6 +830,7 @@ fn insert_events(
                     event.event_id.to_string(),
                 ],
             )?;
+            faults.hit(FaultPoint::CursorAfterUpdate)?;
         }
         sequences.push(sequence);
     }
@@ -810,12 +916,15 @@ fn validate_cursor_transition(
 fn insert_diagnostics(
     transaction: &Transaction<'_>,
     diagnostics: &[DiagnosticRecord],
+    faults: &FaultPlan,
 ) -> Result<(), GhostraceError> {
     for diagnostic in diagnostics {
+        faults.hit(FaultPoint::DiagnosticBeforeInsert)?;
         transaction.execute(
             "INSERT INTO diagnostics(code, detail, created_at) VALUES (?1, ?2, ?3)",
             params![diagnostic.code, diagnostic.detail, Utc::now().to_rfc3339()],
         )?;
+        faults.hit(FaultPoint::DiagnosticAfterInsert)?;
     }
     Ok(())
 }
@@ -1123,12 +1232,12 @@ fn migration_checksum(sql: &str) -> String {
     checksum
 }
 
-fn run_migrations(connection: &mut Connection) -> Result<(), GhostraceError> {
+fn run_migrations(connection: &mut Connection, faults: &FaultPlan) -> Result<(), GhostraceError> {
     // The ledger is validated before any event query or write is allowed. A
     // missing tail is safe to apply; a gap, mutation, or schema ahead of the
     // compiled catalog is never guessed at.
     let specs = migration_specs();
-    initialize_migration_ledger(connection, &specs)?;
+    initialize_migration_ledger(connection, &specs, faults)?;
 
     let mut records = load_applied_migrations(connection)?;
     let applied_count = validate_applied_prefix(&records, &specs)?;
@@ -1156,7 +1265,7 @@ fn run_migrations(connection: &mut Connection) -> Result<(), GhostraceError> {
         if schema_versions.contains(&spec.schema_version) || user_version >= spec.schema_version {
             return Err(GhostraceError::PartialMigration { migration_id: spec.id.to_owned() });
         }
-        apply_migration(connection, spec)?;
+        apply_migration(connection, spec, faults)?;
         records = load_applied_migrations(connection)?;
         validate_applied_prefix(&records, &specs)?;
     }
@@ -1167,28 +1276,33 @@ fn run_migrations(connection: &mut Connection) -> Result<(), GhostraceError> {
 fn initialize_migration_ledger(
     connection: &mut Connection,
     specs: &[MigrationSpec; 4],
+    faults: &FaultPlan,
 ) -> Result<(), GhostraceError> {
     let ledger_exists = table_exists(connection, "migration_records")?;
     if !ledger_exists {
         let legacy_candidate = table_exists(connection, "schema_versions")?;
         let mode = if legacy_candidate { "legacy-candidate" } else { "new" };
+        faults.hit(FaultPoint::MigrationBeforeTransaction)?;
         let transaction = connection.transaction()?;
         transaction.execute_batch(specs[0].sql)?;
+        faults.hit(FaultPoint::MigrationAfterSql)?;
         insert_applied_migration(&transaction, &specs[0])?;
         transaction.execute(
             "INSERT INTO migration_state(state_key, state_value) VALUES (?1, ?2)",
             params![MIGRATION_MODE_KEY, mode],
         )?;
+        faults.hit(FaultPoint::MigrationBeforeCommit)?;
         transaction.commit()?;
+        faults.hit(FaultPoint::MigrationAfterCommit)?;
         if legacy_candidate {
-            adopt_legacy_v1(connection, &specs[1])?;
+            adopt_legacy_v1(connection, &specs[1], faults)?;
         }
         return Ok(());
     }
 
     let mode = migration_state(connection)?;
     if mode == "legacy-candidate" {
-        adopt_legacy_v1(connection, &specs[1])?;
+        adopt_legacy_v1(connection, &specs[1], faults)?;
     } else if mode != "new" && mode != "legacy-v1" {
         return Err(GhostraceError::MigrationLedger("unknown migration mode".to_owned()));
     }
@@ -1198,6 +1312,7 @@ fn initialize_migration_ledger(
 fn adopt_legacy_v1(
     connection: &mut Connection,
     spec: &MigrationSpec,
+    faults: &FaultPlan,
 ) -> Result<(), GhostraceError> {
     validate_legacy_v1(connection)?;
     let records = load_applied_migrations(connection)?;
@@ -1206,14 +1321,18 @@ fn adopt_legacy_v1(
             "legacy adoption requires only the ledger bootstrap record".to_owned(),
         ));
     }
+    faults.hit(FaultPoint::MigrationBeforeTransaction)?;
     let transaction = connection.transaction()?;
     transaction.execute_batch("PRAGMA user_version = 1")?;
+    faults.hit(FaultPoint::MigrationAfterSql)?;
     insert_applied_migration(&transaction, spec)?;
     transaction.execute(
         "UPDATE migration_state SET state_value = ?1 WHERE state_key = ?2",
         params!["legacy-v1", MIGRATION_MODE_KEY],
     )?;
+    faults.hit(FaultPoint::MigrationBeforeCommit)?;
     transaction.commit()?;
+    faults.hit(FaultPoint::MigrationAfterCommit)?;
     Ok(())
 }
 
@@ -1237,9 +1356,12 @@ fn validate_legacy_v1(connection: &Connection) -> Result<(), GhostraceError> {
 fn apply_migration(
     connection: &mut Connection,
     spec: &MigrationSpec,
+    faults: &FaultPlan,
 ) -> Result<(), GhostraceError> {
+    faults.hit(FaultPoint::MigrationBeforeTransaction)?;
     let transaction = connection.transaction()?;
     transaction.execute_batch(spec.sql)?;
+    faults.hit(FaultPoint::MigrationAfterSql)?;
     maybe_crash_after_migration_sql(spec.id);
     if spec.version > 0 {
         transaction.execute(
@@ -1249,7 +1371,9 @@ fn apply_migration(
     }
     transaction.execute_batch(&format!("PRAGMA user_version = {}", spec.schema_version))?;
     insert_applied_migration(&transaction, spec)?;
+    faults.hit(FaultPoint::MigrationBeforeCommit)?;
     transaction.commit()?;
+    faults.hit(FaultPoint::MigrationAfterCommit)?;
     Ok(())
 }
 

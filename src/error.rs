@@ -189,6 +189,12 @@ pub enum GhostraceError {
 
     #[error("cursor reset or wrap requires an explicitly typed ordered token")]
     CursorControlInvalid,
+
+    #[error("fault injection fired at {point}")]
+    InjectedFault { point: String },
+
+    #[error("invalid fault plan: {0}")]
+    InvalidFaultPlan(String),
 }
 
 /// Errors from payload encryption and authenticated decryption.

@@ -159,6 +159,18 @@ Production sensitive payloads require authenticated encryption with a macOS Keyc
 backing key. That key path is not represented as shipped live-capture capability in
 the current headstart. Missing keys or failed authentication must fail closed.
 
+### Storage fault matrix
+
+The fixture journal exposes an inert-by-default `FaultPlan` for recovery drills.
+Named points bracket storage open/verification, migration SQL and commits, key
+access, event/cursor/diagnostic writes, ingest commits, cursor controls, WAL
+checkpoints, and database-only backups. A schedule can return a bounded
+`InjectedFault` to prove transaction rollback or abort a child process to model
+power loss. Each schedule has a bounded occurrence and seed; the minimized
+regression fixture is `tests/fixtures/fault-schedules-v1.json`. The plan is an
+explicit test capability and is never installed by the normal journal
+constructors or live capture.
+
 The macOS key provider uses only the data-protection Keychain generic-password path:
 non-synchronizable items, `WhenUnlockedThisDeviceOnly` access control, and an explicit
 service/account identity. The default app has no access-group entitlement; a signed
