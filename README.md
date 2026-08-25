@@ -99,6 +99,7 @@ encryption or key-management claim.
 | ghostrace demo --fixture ... --event <uuid> | Available |
 | ghostrace export --journal ... --output ... [--force] | Available |
 | ghostrace export --fixture ... --output ... [--force] | Available in-memory shortcut |
+| ghostrace validate --export ... | Available; rejects incomplete, mixed-version, or digest-drifted JSONL before consumption |
 | ghostrace schema | Available |
 | ghostrace capture | Refuses by design |
 | Local journal and bounded durable writer | Scaffolded for the fixture path; live ingestion is gated |
@@ -110,6 +111,7 @@ encryption or key-management claim.
 | Evidence-claim grammar | Available as a versioned bounded renderer; templates preserve evidence labels and cited event IDs, expose gap limits, and refuse intent, completeness, process-attribution, causality, and unsupported rename claims |
 | Cross-source correlation rule registry | Available as a versioned, policy-bounded adjacency rule; unknown coverage, unsupported scope, and clock skew abstain instead of becoming positive evidence |
 | Explanation determinism and counterexamples | Available as an offline golden/property/mutation matrix; every claim template and evidence level is exercised, ordering/page permutations are compared, and required-observation removal must downgrade or remove a claim |
+| Export schema and manifest registry | Available as six strict v1 contracts with stable IDs, golden examples, version declarations, and fail-closed export validation for mixed versions, counts, bytes, and body digests |
 | Shell, Git, frontmost-app, or browser collectors | Not shipped |
 | macOS Keychain-backed production encryption | Not shipped |
 | Signed/notarized release artifacts | Not shipped |
@@ -239,6 +241,8 @@ docs/adr/            Immutable architecture decisions
 - [Query coverage fixture](fixtures/query-gap-coverage-v1.json) — nested, adjacent, open-ended, and cross-source gap intervals
 - [Correlation rule fixture](fixtures/correlation-rules-v1.json) — positive, negative, ambiguous, adversarial, and clock-skew cases
 - [Explanation counterexample fixture](fixtures/explanation-counterexamples-v1.json) — claim-template/evidence/gap matrix, conflict outcomes, and required-observation mutations
+- [Export schema registry](schemas/export-registry-v1.json) — strict manifest, event, gap, claim, policy, and source-coverage contracts
+- [Export contract goldens](fixtures/export-manifest-v1.golden.json) — manifest example; sibling `*-record-v1.golden.json` files cover every registered record
 - [Filesystem benchmark corpus](fixtures/filesystem-benchmark-corpus-v1.json) — bounded synthetic trees and native measurement contract
 - [Reproducibility](docs/REPRODUCIBILITY.md) — pinned toolchain, fixture provenance, and clean-machine smoke
 - [Research](docs/RESEARCH.md) — landscape, differentiation, and primary sources

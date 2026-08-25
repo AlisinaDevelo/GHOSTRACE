@@ -147,6 +147,14 @@ irrelevant events, and query page boundaries. Mutation tests require a removed
 cross-source observation to downgrade to unknown and a removed parent observation
 to remove its claim from the chain.
 
+Task 0083 publishes the strict export schema registry. The registry gives the
+manifest, event, gap, claim, policy, and source-coverage records stable IDs,
+version numbers, compatibility classes, and checked-in golden examples. The
+manifest binds the tool and contract versions, query scope, policy profiles,
+coverage gaps, body record counts, byte counts, and SHA-256 body digest. A
+consumer must validate the manifest first; mixed, undeclared, out-of-order, or
+unknown-field records fail closed before an export is considered complete.
+
 ### Explicit developer and application context
 
 M4 adds only integrations the person deliberately enables. The shell wrapper cannot

@@ -67,6 +67,26 @@ The key is intentionally deterministic only for the synthetic headstart; it is n
 the production Keychain design. `capture` remains an explicit refusal, and no CLI
 command enables a live collector or network path.
 
+## Export schema and manifest boundary
+
+JSONL export is a two-part contract: one strict `manifest` record followed by the
+body records. [`schemas/export-registry-v1.json`](../schemas/export-registry-v1.json)
+registers stable IDs and version `1` for manifest, event, gap, claim, policy, and
+source-coverage records. Each descriptor declares `strict` compatibility, rejects
+unknown fields, and points to a checked-in golden example. The manifest binds the
+registry and tool versions, schema-version map, deterministic `all_committed`
+query scope, policy profile identities, coverage gaps, and body-only record counts,
+byte lengths, and SHA-256 digests. Body-only accounting deliberately excludes the
+manifest line from its own digest so the contract is not self-referential.
+
+`validate_export` is the consumer gate. It parses the manifest first, verifies its
+registry and scope, then accepts only declared event records with the event schema
+version and the shared `(observed_at, ingest_seq, event_id)` stable order. It
+compares the declared body count, byte length, and digest before returning a
+validated result. Unknown fields, mixed versions, undeclared record types,
+duplicate/order regressions, or any accounting drift are bounded errors; no
+caller can treat a partially validated body as a complete export.
+
 ## FSEvents lifecycle boundary
 
 The `fsevents` module is a deliberately small native boundary beneath the selected-root

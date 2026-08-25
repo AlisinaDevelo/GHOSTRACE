@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/AlisinaDevelo/GHOSTRACE/schemas/source-coverage-v1.json",
+  "title": "GHOSTRACE source coverage record v1",
+  "x-ghostrace": { "schema_id": "ghostrace.source-coverage", "schema_version": 1, "compatibility": "strict", "unknown_fields": "reject" },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["record_type", "schema_id", "schema_version", "contract_version", "observed_event_count", "statuses", "gaps", "gaps_truncated", "retention_deletion_detected", "marker_filter_ignored", "opted_out"],
+  "properties": {
+    "record_type": { "const": "source_coverage" },
+    "schema_id": { "const": "ghostrace.source-coverage" },
+    "schema_version": { "const": 1 },
+    "contract_version": { "const": 1 },
+    "observed_event_count": { "type": "integer", "minimum": 0 },
+    "statuses": { "type": "array", "items": { "$ref": "#/$defs/status" } },
+    "gaps": { "type": "array", "items": { "$ref": "#/$defs/gap" } },
+    "gaps_truncated": { "type": "boolean" },
+    "retention_deletion_detected": { "type": "boolean" },
+    "marker_filter_ignored": { "type": "boolean" },
+    "opted_out": { "type": "boolean" }
+  },
+  "$defs": {
+    "source": { "enum": ["filesystem", "frontmost_app", "shell", "git", "browser", "lifecycle", "fixture"] },
+    "status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "source", "count"],
+      "properties": {
+        "kind": { "enum": ["events_observed", "no_events_observed", "source_disabled", "policy_denied", "source_gap", "retention_deletion", "unknown_history"] },
+        "source": { "oneOf": [{ "$ref": "#/$defs/source" }, { "type": "null" }] },
+        "count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_id", "interval", "reason_code", "dropped_count", "from_cursor", "to_cursor"],
+      "properties": {
+        "event_id": { "type": "string", "format": "uuid" },
+        "interval": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source", "start", "end"],
+          "properties": {
+            "source": { "$ref": "#/$defs/source" },
+            "start": { "oneOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }] },
+            "end": { "oneOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }] }
+          }
+        },
+        "reason_code": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,127}$" },
+        "dropped_count": { "type": "integer", "minimum": 0 },
+        "from_cursor": { "oneOf": [{ "type": "string" }, { "type": "null" }] },
+        "to_cursor": { "oneOf": [{ "type": "string" }, { "type": "null" }] }
+      }
+    }
+  }
+}

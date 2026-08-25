@@ -78,6 +78,54 @@
       "seed": "ghostrace-fixture-seed-v1",
       "sha256": "7b2158d83919ef03649c54bedbd5bed2b2f259f1e05c9b6e7b8de377298b7d49",
       "bytes": 2115
+    },
+    {
+      "path": "fixtures/export-manifest-v1.golden.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "b3e0de741a93350899464e2ac301985327e92b21d677948647ac601ec6f5b11a",
+      "bytes": 1197
+    },
+    {
+      "path": "fixtures/event-envelope-v1.golden.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "59d671680cf4a8c575a8d04d3456d1d5d65ed2930fbb58de90ab9df3e9cfaeb1",
+      "bytes": 509
+    },
+    {
+      "path": "fixtures/gap-record-v1.golden.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "beb8ebc382662c768157520041133567bc76610b44b9aca4051d79ff8bc799dc",
+      "bytes": 198
+    },
+    {
+      "path": "fixtures/claim-record-v1.golden.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "157fda40d642a4f5a7f298683e2c4110e90b1f26024bcacd4893f3575fcfa26f",
+      "bytes": 414
+    },
+    {
+      "path": "fixtures/policy-record-v1.golden.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "56ee5ee4005dee57789bb61724210af0a66d027b856341c2a81c1c4e5b33496c",
+      "bytes": 120
+    },
+    {
+      "path": "fixtures/source-coverage-v1.golden.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "321d071b79b512a6d5ed6094ac88231f3021d56f5db08de148780d0bd88f223a",
+      "bytes": 578
     }
   ],
   "privacy": {

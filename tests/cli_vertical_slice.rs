@@ -97,6 +97,10 @@ fn durable_fixture_cli_path_is_reopenable_deterministic_and_capture_disabled() {
     assert_eq!(first_record["coverage"]["gap_count"], 1);
     assert_eq!(records.lines().count(), 9);
 
+    let validate = run(&[OsStr::new("validate"), OsStr::new("--export"), export.as_os_str()]);
+    assert_success(&validate, "validate export");
+    assert!(String::from_utf8_lossy(&validate.stdout).contains("validated 8 event(s)"));
+
     let capture = run(&[OsStr::new("capture")]);
     assert!(!capture.status.success());
     assert!(String::from_utf8_lossy(&capture.stderr).contains("intentionally disabled"));

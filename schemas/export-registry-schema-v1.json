@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/AlisinaDevelo/GHOSTRACE/schemas/export-registry-schema-v1.json",
+  "title": "GHOSTRACE export registry document v1",
+  "x-ghostrace": { "schema_id": "ghostrace.export-registry", "schema_version": 1, "compatibility": "strict", "unknown_fields": "reject" },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["registry_version", "schemas"],
+  "properties": {
+    "registry_version": { "const": 1 },
+    "schemas": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": { "$ref": "#/$defs/descriptor" }
+    }
+  },
+  "$defs": {
+    "descriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_id", "version", "compatibility", "strict_unknown_fields", "record_type", "format", "schema_path", "golden_path"],
+      "properties": {
+        "schema_id": { "type": "string", "pattern": "^ghostrace\\.[a-z0-9-]+$" },
+        "version": { "const": 1 },
+        "compatibility": { "const": "strict" },
+        "strict_unknown_fields": { "const": true },
+        "record_type": { "enum": ["manifest", "event", "gap", "claim", "policy", "source_coverage"] },
+        "format": { "const": "json" },
+        "schema_path": { "type": "string", "pattern": "^schemas/[a-z0-9-]+\\.json$" },
+        "golden_path": { "type": "string", "pattern": "^fixtures/[a-z0-9-]+(?:\\.[a-z0-9-]+)*\\.json$" }
+      }
+    }
+  }
+}
