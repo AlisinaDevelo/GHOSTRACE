@@ -86,6 +86,27 @@ session or risk user data. They are never converted into a pass by hosted CI or 
 synthetic replay; a future authorized interactive run must attach separate native
 evidence and verify the required gap before those rows can close.
 
+## Reproducible filesystem benchmark corpus (task 0076)
+
+[`fixtures/filesystem-benchmark-corpus-v1.json`](../fixtures/filesystem-benchmark-corpus-v1.json)
+defines eight synthetic, offline workload families: small, deep, wide, Unicode,
+case-variant, Git, build-output, and event-storm trees. The generator is bounded
+by entry, file-byte, run-time, and journal-growth limits; it never reads or retains
+user file contents or paths. Validate the contract with
+`python3 scripts/filesystem-benchmark.py check`.
+
+The native device command is
+`python3 scripts/filesystem-benchmark.py run --profile release`. It runs each
+workload three times on the selected private root and reports latency percentiles,
+direct/contextual/inferred/unknown coverage classes, duplicate and gap rates, CPU,
+resident memory, journal disk growth, and the available power-telemetry delta.
+An observed cursor regression is retained as `cursor_regression` rather than
+converted into a pass; FSEvents remains a change-notification source and does not
+prove process causality. Energy is a value only when the unprivileged
+`IOPMPowerSource` counter advances; privileged `powermetrics` is never substituted.
+Hardware and OS are part of the receipt, and results are not cross-machine
+comparable without an explicit normalization study.
+
 ## Test layers
 
 1. **Unit tests:** model validation, URL sanitization, policy decisions, evidence

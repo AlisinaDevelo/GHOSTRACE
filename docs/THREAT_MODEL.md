@@ -111,7 +111,9 @@ plaintext chosen by the user.
   rotation, and explicit loss/reset receipts; it does not claim that a live
   collector or signed Keychain helper is enabled.
 - A malicious path, fixture, or source can consume resources unless every adapter
-  honors bounds.
+  honors bounds. The benchmark corpus keeps entry, file-byte, run-time, and journal
+  growth limits explicit; it records CPU, memory, disk, and energy limitations rather
+  than treating a fast run as a safety proof.
 
 These risks are communicated, not silently accepted as evidence quality.
 

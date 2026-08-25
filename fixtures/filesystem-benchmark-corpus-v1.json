@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "program": "ghostrace-filesystem-benchmark-v1",
+  "generator": {
+    "version": 1,
+    "seed": "ghostrace-filesystem-benchmark-seed-v1",
+    "algorithm": "deterministic-tree-v1",
+    "command": "python3 scripts/filesystem-benchmark.py check"
+  },
+  "repeat_runs": 3,
+  "platform_no_go": "FSEvents native benchmark requires an authorized macOS device",
+  "privacy": {
+    "synthetic_only": true,
+    "network": false,
+    "reads_file_contents": false,
+    "retains_paths": false,
+    "max_path_bytes": 512,
+    "max_file_bytes": 4096
+  },
+  "metrics": [
+    "latency_ms",
+    "coverage_classes",
+    "duplicate_rate",
+    "gap_rate",
+    "cpu_user_ms",
+    "cpu_system_ms",
+    "rss_peak_bytes",
+    "energy_nj",
+    "disk_growth_bytes"
+  ],
+  "resource_limits": {
+    "max_entries": 512,
+    "max_file_bytes": 4096,
+    "max_run_ms": 30000,
+    "max_journal_growth_bytes": 8388608
+  },
+  "scenarios": [
+    {
+      "id": "small_tree",
+      "mode": "device_safe",
+      "native_test": "native_safe",
+      "tree_shape": "small",
+      "expected_operations_min": 8,
+      "expected_operations_max": 24,
+      "expected_entry_min": 4,
+      "expected_entry_max": 24,
+      "mutations": ["create", "modify", "rename", "delete"],
+      "coverage_classes": ["direct", "contextual", "unknown"],
+      "resource_budget": {"max_entries": 32, "max_run_ms": 5000}
+    },
+    {
+      "id": "deep_tree",
+      "mode": "device_safe",
+      "native_test": "native_safe",
+      "tree_shape": "deep",
+      "expected_operations_min": 12,
+      "expected_operations_max": 48,
+      "expected_entry_min": 12,
+      "expected_entry_max": 48,
+      "mutations": ["create", "modify", "rename"],
+      "coverage_classes": ["direct", "contextual", "unknown"],
+      "resource_budget": {"max_entries": 64, "max_run_ms": 6000}
+    },
+    {
+      "id": "wide_tree",
+      "mode": "device_safe",
+      "native_test": "native_safe",
+      "tree_shape": "wide",
+      "expected_operations_min": 32,
+      "expected_operations_max": 128,
+      "expected_entry_min": 32,
+      "expected_entry_max": 128,
+      "mutations": ["create", "modify"],
+      "coverage_classes": ["direct", "contextual", "unknown"],
+      "resource_budget": {"max_entries": 160, "max_run_ms": 8000}
+    },
+    {
+      "id": "unicode_tree",
+      "mode": "device_safe",
+      "native_test": "native_safe",
+      "tree_shape": "unicode",
+      "expected_operations_min": 8,
+      "expected_operations_max": 32,
+      "expected_entry_min": 6,
+      "expected_entry_max": 32,
+      "mutations": ["create", "modify", "rename"],
+      "coverage_classes": ["direct", "contextual", "unknown"],
+      "resource_budget": {"max_entries": 48, "max_run_ms": 6000}
+    },
+    {
+      "id": "case_variant_tree",
+      "mode": "device_safe",
+      "native_test": "native_safe",
+      "tree_shape": "case_variant",
+      "expected_operations_min": 5,
+      "expected_operations_max": 24,
+      "expected_entry_min": 3,
+      "expected_entry_max": 24,
+      "mutations": ["create", "modify", "rename"],
+      "coverage_classes": ["direct", "contextual", "unknown"],
+      "resource_budget": {"max_entries": 40, "max_run_ms": 6000}
+    },
+    {
+      "id": "git_tree",
+      "mode": "device_safe",
+      "native_test": "native_safe",
+      "tree_shape": "git",
+      "expected_operations_min": 24,
+      "expected_operations_max": 160,
+      "expected_entry_min": 16,
+      "expected_entry_max": 256,
+      "mutations": ["git_init", "create", "modify", "rename"],
+      "coverage_classes": ["direct", "contextual", "unknown"],
+      "resource_budget": {"max_entries": 320, "max_run_ms": 12000}
+    },
+    {
+      "id": "build_output_tree",
+      "mode": "device_safe",
+      "native_test": "native_safe",
+      "tree_shape": "build_output",
+      "expected_operations_min": 32,
+      "expected_operations_max": 192,
+      "expected_entry_min": 24,
+      "expected_entry_max": 256,
+      "mutations": ["create", "modify", "rename", "delete"],
+      "coverage_classes": ["direct", "contextual", "unknown"],
+      "resource_budget": {"max_entries": 320, "max_run_ms": 12000}
+    },
+    {
+      "id": "event_storm_tree",
+      "mode": "device_safe",
+      "native_test": "native_safe",
+      "tree_shape": "event_storm",
+      "expected_operations_min": 128,
+      "expected_operations_max": 512,
+      "expected_entry_min": 64,
+      "expected_entry_max": 512,
+      "mutations": ["create", "modify", "rename", "delete"],
+      "coverage_classes": ["direct", "contextual", "unknown"],
+      "resource_budget": {"max_entries": 512, "max_run_ms": 30000}
+    }
+  ]
+}
