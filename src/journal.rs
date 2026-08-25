@@ -23,6 +23,7 @@ use crate::{
         CollectorInstanceId, EventEnvelope, EventKind, EventSource, Evidence, IngestionOrigin,
         OriginBinding, PolicyProfileId, ProvenanceVersion, SourceCursor, EVENT_SCHEMA_VERSION,
     },
+    ordering::compare_event_order,
     policy::PolicyProfile,
     query::{
         decode_page_token, make_token, validate_token_request, QueryOrderKey, QueryPage,
@@ -749,6 +750,24 @@ impl Journal {
             result.push(decode_stored(row_to_stored(row)?, self.key_provider.as_ref())?);
         }
         Ok(result)
+    }
+
+    /// Returns committed events in the versioned display order shared by
+    /// query and export.  `events()` remains the durable ingest order; callers
+    /// must choose deliberately because neither order is a causal claim.
+    pub fn ordered_events(&self) -> Result<Vec<StoredEvent>, GhostraceError> {
+        let mut events = self.events()?;
+        events.sort_by(|left, right| {
+            compare_event_order(
+                left.event.observed_at,
+                left.ingest_seq,
+                left.event.event_id,
+                right.event.observed_at,
+                right.ingest_seq,
+                right.event.event_id,
+            )
+        });
+        Ok(events)
     }
 
     /// Read one bounded page from a logical ingest snapshot.  The read

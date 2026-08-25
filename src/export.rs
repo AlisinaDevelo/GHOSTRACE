@@ -16,6 +16,7 @@ use crate::{
     fixture::ingest_fixture,
     journal::{Journal, StoredEvent},
     model::{EventKind, EventPayload, EventSource, GapPayload, EVENT_SCHEMA_VERSION},
+    ordering::ORDERING_CONTRACT_VERSION,
     policy::PolicyProfile,
     storage,
 };
@@ -42,6 +43,7 @@ pub struct ExportManifest {
     pub record_type: &'static str,
     pub export_version: u32,
     pub event_schema_version: u32,
+    pub ordering_contract_version: u32,
     pub policy_profiles: Vec<ExportPolicyProfile>,
     pub coverage: ExportCoverage,
     pub collector_status: String,
@@ -98,7 +100,7 @@ pub fn export_journal(
         .map_err(|source| GhostraceError::Io { path: parent.to_path_buf(), source })?;
     storage::set_private_file_permissions(temporary.path())?;
 
-    let events = journal.events()?;
+    let events = journal.ordered_events()?;
     let manifest = build_manifest(&events);
     {
         let mut writer = BufWriter::new(temporary.as_file_mut());
@@ -194,6 +196,7 @@ fn build_manifest(events: &[StoredEvent]) -> ExportManifest {
         record_type: "manifest",
         export_version: EXPORT_VERSION,
         event_schema_version: EVENT_SCHEMA_VERSION,
+        ordering_contract_version: ORDERING_CONTRACT_VERSION,
         policy_profiles,
         coverage: ExportCoverage {
             event_count: events.len(),

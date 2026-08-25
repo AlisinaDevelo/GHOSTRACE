@@ -46,6 +46,14 @@
       "seed": "ghostrace-fixture-seed-v1",
       "sha256": "8f749a756eaf4ff36e78ddf9d5d8822a13d981f138115463b76e02741923b3cf",
       "bytes": 4613
+    },
+    {
+      "path": "fixtures/temporal-ordering-v1.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "9092a7682a300ed51fca9e88be191feac4438e3d1223b55e55dac77d9adb19aa",
+      "bytes": 2963
     }
   ],
   "privacy": {

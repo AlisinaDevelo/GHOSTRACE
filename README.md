@@ -86,13 +86,23 @@ encryption or key-management claim.
 | Storm/lifecycle corpus and native-safe macOS receipt | Available as a bounded test contract; sleep/wake, logout, and volume detach are explicit no-go rows |
 | Reproducible filesystem benchmark corpus | Available as an offline synthetic workload contract; native results require the named macOS device and retain observed gaps/failures |
 | Event-storm backpressure and loss accounting | Available as a bounded synthetic stress contract; queue pressure exposes pending limits, an emergency status slot, auditable gaps, and recovery-required state |
-| Snapshot-consistent query pagination | Available as a bounded library API; encrypted page tokens bind policy scope, filters, ordering, schema, and an ingest snapshot boundary |
+| Snapshot-consistent query pagination | Available as a bounded library API; encrypted page tokens bind policy scope, filters, the versioned ordering contract, schema, and an ingest snapshot boundary |
 | Shell, Git, frontmost-app, or browser collectors | Not shipped |
 | macOS Keychain-backed production encryption | Not shipped |
 | Signed/notarized release artifacts | Not shipped |
 
 The roadmap is a plan, not a promise. A capability is shipped only when its privacy,
 failure, and coverage tests are present.
+
+### Temporal ordering contract
+
+The display order contract is version `1`: known source observation time, durable
+`ingest_seq`, then canonical `event_id`. The same key is used by query pages and
+JSONL export. Source observation time, local receipt time, and optional
+process-local monotonic sequence are retained as distinct timing evidence; none
+is a causal proof. Equal timestamps, source clock rollback, delayed delivery,
+sleep-sized ingest gaps, and missing source time are surfaced as temporal
+ambiguity, with ingest sequence used only as the explicit fallback.
 
 ## Architecture
 
@@ -178,6 +188,7 @@ docs/adr/            Immutable architecture decisions
 - [Event model](docs/EVENT_MODEL.md) — evidence levels, provenance, and gaps
 - [Evaluation](docs/EVALUATION.md) — correctness, privacy, and performance gates
 - [FSEvents lifecycle corpus](fixtures/fsevents-lifecycle-corpus-v1.json) — ground truth, coalescing, gaps, and guarded device rows
+- [Temporal ordering fixture](fixtures/temporal-ordering-v1.json) — clock skew, delayed delivery, tie-breaking, and missing source time
 - [Filesystem benchmark corpus](fixtures/filesystem-benchmark-corpus-v1.json) — bounded synthetic trees and native measurement contract
 - [Reproducibility](docs/REPRODUCIBILITY.md) — pinned toolchain, fixture provenance, and clean-machine smoke
 - [Research](docs/RESEARCH.md) — landscape, differentiation, and primary sources

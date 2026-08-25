@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "scenarios": [
+    {
+      "id": "clock_rollback",
+      "observations": [
+        {
+          "event_id": "00000000-0000-4000-8000-000000000101",
+          "source_observed_at": "2026-01-01T10:00:00Z",
+          "ingested_at": "2026-01-01T10:00:01Z",
+          "monotonic_sequence": 1,
+          "ingest_seq": 1
+        },
+        {
+          "event_id": "00000000-0000-4000-8000-000000000102",
+          "source_observed_at": "2026-01-01T09:59:59Z",
+          "ingested_at": "2026-01-01T10:00:02Z",
+          "monotonic_sequence": 2,
+          "ingest_seq": 2
+        }
+      ]
+    },
+    {
+      "id": "leap_adjustment",
+      "observations": [
+        {
+          "event_id": "00000000-0000-4000-8000-000000000103",
+          "source_observed_at": "2016-12-31T23:59:59Z",
+          "ingested_at": "2016-12-31T23:59:59Z",
+          "monotonic_sequence": 3,
+          "ingest_seq": 3
+        },
+        {
+          "event_id": "00000000-0000-4000-8000-000000000104",
+          "source_observed_at": "2017-01-01T00:00:00Z",
+          "ingested_at": "2017-01-01T00:00:00Z",
+          "monotonic_sequence": 4,
+          "ingest_seq": 4
+        }
+      ]
+    },
+    {
+      "id": "sleep",
+      "observations": [
+        {
+          "event_id": "00000000-0000-4000-8000-000000000105",
+          "source_observed_at": "2026-01-01T12:00:00Z",
+          "ingested_at": "2026-01-01T14:00:00Z",
+          "monotonic_sequence": 5,
+          "ingest_seq": 5
+        }
+      ]
+    },
+    {
+      "id": "equal_timestamps",
+      "observations": [
+        {
+          "event_id": "00000000-0000-4000-8000-000000000106",
+          "source_observed_at": "2026-01-01T15:00:00Z",
+          "ingested_at": "2026-01-01T15:00:01Z",
+          "monotonic_sequence": 6,
+          "ingest_seq": 6
+        },
+        {
+          "event_id": "00000000-0000-4000-8000-000000000107",
+          "source_observed_at": "2026-01-01T15:00:00Z",
+          "ingested_at": "2026-01-01T15:00:02Z",
+          "monotonic_sequence": 7,
+          "ingest_seq": 7
+        }
+      ]
+    },
+    {
+      "id": "delayed_batch",
+      "observations": [
+        {
+          "event_id": "00000000-0000-4000-8000-000000000108",
+          "source_observed_at": "2026-01-01T16:00:00Z",
+          "ingested_at": "2026-01-01T16:05:00Z",
+          "monotonic_sequence": 8,
+          "ingest_seq": 8
+        },
+        {
+          "event_id": "00000000-0000-4000-8000-000000000109",
+          "source_observed_at": "2026-01-01T16:00:01Z",
+          "ingested_at": "2026-01-01T16:05:01Z",
+          "monotonic_sequence": 9,
+          "ingest_seq": 9
+        }
+      ]
+    },
+    {
+      "id": "missing_source_time",
+      "observations": [
+        {
+          "event_id": "00000000-0000-4000-8000-000000000110",
+          "source_observed_at": null,
+          "ingested_at": "2026-01-01T17:00:00Z",
+          "monotonic_sequence": 10,
+          "ingest_seq": 10
+        }
+      ]
+    }
+  ]
+}

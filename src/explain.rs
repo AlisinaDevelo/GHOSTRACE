@@ -1,6 +1,6 @@
 //! Deterministic parent-chain explanation with explicit evidence labels.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 use uuid::Uuid;
@@ -9,6 +9,7 @@ use crate::{
     error::GhostraceError,
     journal::Journal,
     model::{EventEnvelope, EventKind, Evidence},
+    ordering::{analyze_temporal_observations, TemporalObservation},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -67,6 +68,23 @@ pub fn explain(journal: &Journal, target: Uuid) -> Result<Explanation, Ghostrace
     warnings.extend(reverse_chain.iter().filter(|event| event.kind == EventKind::SourceError).map(
         |event| format!("source error limits coverage; evidence cites event {}", event.event_id),
     ));
+    let ingest_sequences = journal
+        .events()?
+        .into_iter()
+        .map(|stored| (stored.event.event_id, stored.ingest_seq))
+        .collect::<HashMap<_, _>>();
+    let mut temporal_observations = reverse_chain
+        .iter()
+        .map(|event| TemporalObservation {
+            event_id: event.event_id,
+            source_observed_at: Some(event.observed_at),
+            ingested_at: event.ingested_at,
+            monotonic_sequence: None,
+            ingest_seq: *ingest_sequences.get(&event.event_id).unwrap_or(&0),
+        })
+        .collect::<Vec<_>>();
+    temporal_observations.sort_by_key(|observation| observation.ingest_seq);
+    warnings.extend(analyze_temporal_observations(&temporal_observations).warnings);
     let statements = reverse_chain
         .iter()
         .map(|event| ExplanationStatement {

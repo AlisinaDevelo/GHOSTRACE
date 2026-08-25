@@ -21,6 +21,7 @@ pub mod key_lifecycle;
 #[cfg(target_os = "macos")]
 pub mod keychain;
 pub mod model;
+pub mod ordering;
 pub mod policy;
 pub mod query;
 pub(crate) mod storage;
@@ -105,6 +106,11 @@ pub use model::{
     MAX_APP_IDENTIFIER_BYTES, MAX_BRANCH_BYTES, MAX_BROWSER_URL_BYTES, MAX_CURSOR_BYTES,
     MAX_EVENT_PAYLOAD_BYTES, MAX_IDENTIFIER_BYTES, PROVENANCE_VERSION, REPAIR_PROVENANCE_VERSION,
     SHA256_DIGEST_BYTES,
+};
+pub use ordering::{
+    analyze_temporal_observations, compare_event_order, StableOrderKey, TemporalAnalysis,
+    TemporalEvidenceBasis, TemporalObservation, TemporalOrderDecision, ORDERING_CONTRACT_VERSION,
+    TEMPORAL_DELAY_THRESHOLD_SECONDS, TEMPORAL_OBSERVATION_SCHEMA_VERSION,
 };
 pub use policy::{
     PolicyChange, PolicyDecision, PolicyDecisionRecord, PolicyDiagnostic, PolicyDocument,
