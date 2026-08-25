@@ -128,7 +128,7 @@
           "artifact": "docs/evidence/M2-fsevents-benchmark.md",
           "scope": ["M2", "performance", "minimum-target"],
           "freshness_days": 180,
-          "evidence": {"state": "planned", "artifact": "docs/evidence/M2-fsevents-benchmark.md", "observed_at": null, "scope": ["M2", "performance", "minimum-target"], "notes": "A green narrow unit test is not this benchmark evidence."}
+          "evidence": {"state": "observed", "artifact": "docs/evidence/M2-fsevents-benchmark.md", "observed_at": "2026-08-25", "scope": ["M2", "performance", "minimum-target"], "notes": "Protected-main release reproduction on the named arm64 macOS device; receipt, fixture digest, repetitions, percentile distribution, resource limits, bounded failure counts, and normalization limitation are retained in the artifact."}
         }
       ]
     },
