@@ -15,8 +15,10 @@ use std::{
     collections::{BTreeSet, VecDeque},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::Duration,
 };
+
+#[cfg(target_os = "macos")]
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
