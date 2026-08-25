@@ -39,9 +39,33 @@ descriptor-backed no-follow walk is available for later opens; exclusion changes
 and source-loss gap taxonomy remain separate gates, while the durable cursor
 boundary now persists volume, stream, scope, and FSEvents settings atomically.
 
+### Filesystem delivery limits
+
+The selected-root filesystem payload has two optional, path-free qualifiers. An
+`observation` of `source_coalesced` means the stream was configured without
+per-file delivery and may have combined source changes; `repeated_modification`
+marks a distinct source delivery for a path digest already admitted as created or
+modified. These are observations about delivery shape, not claims about a user's
+action. Exact transport duplicates are not persisted as events: the collector
+uses the deterministic key `(source event ID, raw flag word, path digest)` in a
+window bounded to 1,024 keys and a 4,096 event-ID horizon, and exposes suppressed
+deliveries only through the path-free `CollectorStatus.transport_duplicates`
+counter. A different source ID, flag word, or digest is never erased as a
+duplicate.
+
+Renames carry a `rename_pairing` qualifier. The current adapter emits `unknown`
+because one callback supplies one path digest and cannot establish an old-to-new
+pair. `contextual` is reserved for a future bounded relationship that has support
+stronger than unknown but still does not prove identity. There is deliberately no
+`inferred` wire value: temporal proximity or two rename-shaped notifications do
+not authorize an invented old path. Rename qualifiers also require the normalized
+operation to be `renamed`; all event summaries state the limitation without
+including a plaintext path.
+
 The published JSON Schema describes the canonical normalized serialization emitted
 by Rust, so nullable/defaulted fields are present even when their value is `null` or
-`false`. Rust semantic validation remains mandatory for cross-field timestamp
+`false`; the delivery qualifiers above are optional and may be omitted when they do
+not apply. Rust semantic validation remains mandatory for cross-field timestamp
 ordering, UTF-8 byte limits, and other invariants JSON Schema cannot express
 portably. A structural or semantic breaking change creates a new schema version and migration
 rule; consumers must not guess at unknown fields.

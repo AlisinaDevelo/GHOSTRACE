@@ -45,15 +45,15 @@ use crate::{
     fsevents::{
         CallbackHealth, FseventsError, FseventsEvent, FseventsOptions, FseventsStream,
         StartupCursor, StartupCursorDecision, StartupCursorError, StartupCursorRejection,
-        StreamState, EVENT_ID_SINCE_NOW,
+        StreamState, EVENT_ID_SINCE_NOW, FLAG_FILE_EVENTS,
     },
     fsevents_flags::{FseventsEventFlag, FseventsEvidenceStatus, NormalizedFseventsEvent},
     journal::{DiagnosticRecord, Journal},
     model::{
         CollectorLifecyclePayload, EntryKind, EventEnvelope, EventKind, EventPayload, EventSource,
-        Evidence, FileOperation, FilesystemChangedPayload, GapRemediation, IngestionOrigin,
-        InstanceLabel, PathClass, PathDigest, PolicyBlockedSummaryPayload, ReasonCode, RootId,
-        SnapshotDigest, SourceCursor,
+        Evidence, FileOperation, FilesystemChangedPayload, FilesystemObservation, GapRemediation,
+        IngestionOrigin, InstanceLabel, PathClass, PathDigest, PolicyBlockedSummaryPayload,
+        ReasonCode, RenamePairing, RootId, SnapshotDigest, SourceCursor,
     },
     policy::{PolicyDocument, PolicyProfile},
     volume::VolumeIdentity,
@@ -64,6 +64,11 @@ use crate::{
 pub const MAX_SELECTED_ROOTS: usize = 64;
 /// Upper bound on copied callback events waiting for the owner thread.
 pub const MAX_PENDING_EVENTS: usize = 4 * 1024;
+/// Maximum exact transport-duplicate keys retained by one collector.
+pub const MAX_TRANSPORT_DEDUP_ENTRIES: usize = 1024;
+/// Event-ID horizon for exact duplicate keys. A duplicate outside this span is
+/// treated as a new delivery so a long-running collector cannot retain history.
+pub const MAX_TRANSPORT_DEDUP_EVENT_ID_SPAN: u64 = 4096;
 /// A historical stream must announce `HistoryDone` within this bounded window
 /// or it becomes an explicit unavailable-history gap.
 pub const DEFAULT_HISTORY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -312,6 +317,8 @@ pub struct CollectedFilesystemEvent {
     pub path_digest: PathDigest,
     pub source_event_id: u64,
     pub evidence: Evidence,
+    pub observation: Option<FilesystemObservation>,
+    pub rename_pairing: Option<RenamePairing>,
     pub normalized: NormalizedFseventsEvent,
 }
 
@@ -330,6 +337,9 @@ pub struct CollectorStatus {
     pub rescan_required: u64,
     pub unsupported_events: u64,
     pub contradictory_events: u64,
+    /// Exact callback deliveries suppressed by the bounded transport window.
+    /// Distinct source event IDs are never counted here or suppressed.
+    pub transport_duplicates: u64,
     /// A source-loss gap has stopped automatic resume until a later
     /// reconciliation stage explicitly clears this condition.
     pub recovery_required: bool,
@@ -394,6 +404,46 @@ struct PendingState {
     overflowed: u64,
 }
 
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct TransportDedupKey {
+    event_id: u64,
+    flags: u32,
+    path_digest: PathDigest,
+}
+
+impl TransportDedupKey {
+    fn new(event_id: u64, flags: u32, path_digest: PathDigest) -> Self {
+        Self { event_id, flags, path_digest }
+    }
+}
+
+#[derive(Default)]
+struct TransportDedupWindow {
+    entries: VecDeque<TransportDedupKey>,
+}
+
+impl TransportDedupWindow {
+    fn is_duplicate(&mut self, key: TransportDedupKey) -> bool {
+        let oldest_allowed = key.event_id.saturating_sub(MAX_TRANSPORT_DEDUP_EVENT_ID_SPAN);
+        while self.entries.front().is_some_and(|entry| entry.event_id < oldest_allowed) {
+            self.entries.pop_front();
+        }
+        if self.entries.iter().any(|entry| entry == &key) {
+            return true;
+        }
+        if self.entries.len() >= MAX_TRANSPORT_DEDUP_ENTRIES {
+            self.entries.pop_front();
+        }
+        self.entries.push_back(key);
+        false
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
+}
+
 struct GapSubmission {
     dropped_count: u64,
     reason_code: &'static str,
@@ -412,6 +462,8 @@ pub struct FseventsCollector {
     pending: Arc<Mutex<PendingState>>,
     roots: Vec<SelectedRoot>,
     seen_path_digests: BTreeSet<PathDigest>,
+    source_coalescing_possible: bool,
+    transport_dedup: TransportDedupWindow,
     policy: PolicyProfile,
     consent: ConsentStateMachine,
     consent_receipt: ConsentReceipt,
@@ -433,6 +485,7 @@ pub struct FseventsCollector {
     rescan_required: u64,
     unsupported_events: u64,
     contradictory_events: u64,
+    transport_duplicates: u64,
     recovery_required: bool,
 }
 
@@ -527,6 +580,8 @@ impl FseventsCollector {
             pending,
             roots,
             seen_path_digests: BTreeSet::new(),
+            source_coalescing_possible: requested_options.flags & FLAG_FILE_EVENTS == 0,
+            transport_dedup: TransportDedupWindow::default(),
             policy,
             consent,
             consent_receipt,
@@ -548,6 +603,7 @@ impl FseventsCollector {
             rescan_required: 0,
             unsupported_events: 0,
             contradictory_events: 0,
+            transport_duplicates: 0,
             recovery_required: false,
         };
         if let Some(reason_code) = startup_gap_reason {
@@ -569,6 +625,7 @@ impl FseventsCollector {
             rescan_required: self.rescan_required,
             unsupported_events: self.unsupported_events,
             contradictory_events: self.contradictory_events,
+            transport_duplicates: self.transport_duplicates,
             recovery_required: self.recovery_required,
             callback_health: self.stream.callback_health(),
         }
@@ -802,17 +859,30 @@ impl FseventsCollector {
                 continue;
             }
             let path_digest = root.path_digest(&event.path)?;
+            if self.transport_dedup.is_duplicate(TransportDedupKey::new(
+                event.event_id,
+                event.flags,
+                path_digest.clone(),
+            )) {
+                self.transport_duplicates = self.transport_duplicates.saturating_add(1);
+                continue;
+            }
             let Some(mut operation) = operation_for(&normalized) else {
                 continue;
             };
+            let repeated_modification = self.seen_path_digests.contains(&path_digest)
+                && matches!(operation, FileOperation::Created | FileOperation::Modified);
             // Some macOS releases report a metadata write with the creation
             // bit still set. Once the same path digest has been observed, the
             // repeated create bit is a bounded modify rather than a second
             // creation. Rename/remove precedence remains explicit below.
-            if operation == FileOperation::Created && self.seen_path_digests.contains(&path_digest)
-            {
+            if operation == FileOperation::Created && repeated_modification {
                 operation = FileOperation::Modified;
             }
+            let observation =
+                classify_observation(self.source_coalescing_possible, repeated_modification);
+            let rename_pairing = rename_pairing_for(operation);
+            let evidence = evidence_for(normalized.is_complete(), observation, rename_pairing);
             let collected = CollectedFilesystemEvent {
                 root_id,
                 path_class: PathClass::AbsoluteRedacted,
@@ -820,11 +890,9 @@ impl FseventsCollector {
                 entry_kind: entry_kind_for(&normalized),
                 path_digest,
                 source_event_id: event.event_id,
-                evidence: if normalized.is_complete() {
-                    Evidence::Direct
-                } else {
-                    Evidence::Unknown
-                },
+                evidence,
+                observation,
+                rename_pairing,
                 normalized: normalized.clone(),
             };
             let payload = EventPayload::FilesystemChanged(FilesystemChangedPayload {
@@ -834,6 +902,8 @@ impl FseventsCollector {
                 entry_kind: collected.entry_kind,
                 path_digest: Some(collected.path_digest.clone()),
                 size_bytes: None,
+                observation: collected.observation,
+                rename_pairing: collected.rename_pairing,
             });
             let event = EventEnvelope::new(
                 &self.origin,
@@ -1592,6 +1662,37 @@ fn operation_for(event: &NormalizedFseventsEvent) -> Option<FileOperation> {
     }
 }
 
+fn classify_observation(
+    source_coalescing_possible: bool,
+    repeated_modification: bool,
+) -> Option<FilesystemObservation> {
+    if repeated_modification {
+        Some(FilesystemObservation::RepeatedModification)
+    } else if source_coalescing_possible {
+        Some(FilesystemObservation::SourceCoalesced)
+    } else {
+        None
+    }
+}
+
+fn rename_pairing_for(operation: FileOperation) -> Option<RenamePairing> {
+    (operation == FileOperation::Renamed).then_some(RenamePairing::Unknown)
+}
+
+fn evidence_for(
+    complete: bool,
+    observation: Option<FilesystemObservation>,
+    rename_pairing: Option<RenamePairing>,
+) -> Evidence {
+    if !complete {
+        Evidence::Unknown
+    } else if observation.is_some() || rename_pairing.is_some() {
+        Evidence::Contextual
+    } else {
+        Evidence::Direct
+    }
+}
+
 fn entry_kind_for(event: &NormalizedFseventsEvent) -> EntryKind {
     let file = event.flags.contains(FseventsEventFlag::ItemIsFile);
     let directory = event.flags.contains(FseventsEventFlag::ItemIsDir);
@@ -1836,5 +1937,57 @@ mod tests {
         );
         assert_eq!(entry_kind_for(&hard_link_event), EntryKind::File);
         assert!(hard_link_event.flags.contains(FseventsEventFlag::ItemIsHardlink));
+    }
+
+    #[test]
+    fn transport_dedup_is_exact_bounded_and_time_scoped() {
+        let path_digest = PathDigest::try_from(
+            "sha256:abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+        )
+        .expect("path digest");
+        let mut window = TransportDedupWindow::default();
+        let first = TransportDedupKey::new(10, 0x100, path_digest.clone());
+        assert!(!window.is_duplicate(first.clone()));
+        assert!(window.is_duplicate(first));
+
+        // A different source event ID or raw flag word is distinct evidence,
+        // even when the path digest is identical.
+        assert!(!window.is_duplicate(TransportDedupKey::new(11, 0x100, path_digest.clone())));
+        assert!(!window.is_duplicate(TransportDedupKey::new(10, 0x101, path_digest.clone())));
+
+        // The event-ID horizon expires an old exact key deterministically.
+        assert!(!window.is_duplicate(TransportDedupKey::new(
+            10 + MAX_TRANSPORT_DEDUP_EVENT_ID_SPAN + 1,
+            0x100,
+            path_digest.clone(),
+        )));
+        assert!(!window.is_duplicate(TransportDedupKey::new(10, 0x100, path_digest.clone())));
+
+        for event_id in 1..=MAX_TRANSPORT_DEDUP_ENTRIES as u64 + 1 {
+            assert!(!window.is_duplicate(TransportDedupKey::new(
+                event_id,
+                0x200,
+                path_digest.clone(),
+            )));
+        }
+        assert_eq!(window.len(), MAX_TRANSPORT_DEDUP_ENTRIES);
+    }
+
+    #[test]
+    fn observation_contract_separates_coalescing_and_repeated_modification() {
+        assert_eq!(classify_observation(false, false), None);
+        assert_eq!(classify_observation(true, false), Some(FilesystemObservation::SourceCoalesced));
+        assert_eq!(
+            classify_observation(false, true),
+            Some(FilesystemObservation::RepeatedModification)
+        );
+    }
+
+    #[test]
+    fn rename_observation_is_contextual_and_never_infers_an_old_path() {
+        assert_eq!(rename_pairing_for(FileOperation::Renamed), Some(RenamePairing::Unknown));
+        assert_eq!(rename_pairing_for(FileOperation::Modified), None);
+        assert_eq!(evidence_for(true, None, Some(RenamePairing::Unknown)), Evidence::Contextual);
+        assert_eq!(evidence_for(true, None, None), Evidence::Direct);
     }
 }

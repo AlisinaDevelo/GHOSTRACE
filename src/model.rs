@@ -429,6 +429,31 @@ pub enum FileOperation {
     Renamed,
 }
 
+/// A bounded explanation qualifier for filesystem delivery ambiguity.
+///
+/// These qualifiers are deliberately separate from [`Evidence`].  Evidence
+/// describes how strongly a fact is supported; this enum describes why a
+/// filesystem delivery may not be a one-to-one user action. Exact transport
+/// duplicates are not persisted as events and are counted on the collector
+/// receipt instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FilesystemObservation {
+    SourceCoalesced,
+    RepeatedModification,
+}
+
+/// How much of a rename relationship the source supports.
+///
+/// The selected-root adapter currently has only one path digest per callback,
+/// so it records `Unknown` rather than inventing an old-to-new pairing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RenamePairing {
+    Unknown,
+    Contextual,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EntryKind {
@@ -550,6 +575,12 @@ pub struct FilesystemChangedPayload {
     pub path_digest: Option<PathDigest>,
     #[serde(default)]
     pub size_bytes: Option<u64>,
+    /// Why this delivery may not correspond one-to-one with a user action.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation: Option<FilesystemObservation>,
+    /// Explicitly states whether an old-to-new rename relationship is known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rename_pairing: Option<RenamePairing>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -737,13 +768,28 @@ impl EventPayload {
 
     pub fn summary(&self) -> String {
         match self {
-            Self::FilesystemChanged(payload) => format!(
-                "filesystem {} ({:?}, {:?}) in root {}",
-                format_args!("{:?}", payload.operation).to_string().to_lowercase(),
-                payload.entry_kind,
-                payload.path_class,
-                payload.root_id
-            ),
+            Self::FilesystemChanged(payload) => {
+                let mut summary = format!(
+                    "filesystem {} ({:?}, {:?}) in root {}",
+                    format_args!("{:?}", payload.operation).to_string().to_lowercase(),
+                    payload.entry_kind,
+                    payload.path_class,
+                    payload.root_id
+                );
+                if let Some(observation) = payload.observation {
+                    summary.push_str(match observation {
+                        FilesystemObservation::SourceCoalesced => "; source coalesced changes",
+                        FilesystemObservation::RepeatedModification => "; repeated modification",
+                    });
+                }
+                if let Some(pairing) = payload.rename_pairing {
+                    summary.push_str(match pairing {
+                        RenamePairing::Unknown => "; rename pairing unknown",
+                        RenamePairing::Contextual => "; rename pairing contextual",
+                    });
+                }
+                summary
+            }
             Self::FrontmostAppChanged(payload) => {
                 format!("frontmost app {} ({:?})", payload.app_id, payload.change)
             }
@@ -794,6 +840,11 @@ impl EventPayload {
                     "path_digest",
                     payload.path_digest.as_ref().map(PathDigest::as_str),
                 )?;
+                if payload.rename_pairing.is_some() && payload.operation != FileOperation::Renamed {
+                    return Err(GhostraceError::InvalidEvent(
+                        "rename pairing requires a renamed filesystem operation".to_owned(),
+                    ));
+                }
             }
             Self::FrontmostAppChanged(payload) => {
                 validate_app_identifier("app_id", payload.app_id.as_str())?;

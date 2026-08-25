@@ -84,6 +84,14 @@ plaintext chosen by the user.
   swap, or file-system snapshots.
 - FSEvents may coalesce, delay, reorder, or omit changes and does not provide
   process attribution or completeness. An explanation cannot repair that limitation.
+- Exact callback re-delivery can inflate an explanation if it is mistaken for a
+  new source fact. The selected-root collector therefore uses a bounded,
+  deterministic `(event ID, flags, path digest)` window and exposes only a
+  path-free suppression counter; distinct source IDs remain distinct evidence.
+- A rename callback contains one redacted path digest, not an old-to-new pair.
+  Rename output says `unknown` (or a future bounded `contextual` relationship)
+  and has no inferred wire value, so temporal adjacency cannot manufacture a
+  sensitive old path.
 - The lifecycle adapter and selected-root collector cannot make an FSEvents callback
   complete or attributable. They retain normalized flags, lifecycle state, explicit
   overflow gaps, policy outcomes, volume transition metadata, and durable metadata,

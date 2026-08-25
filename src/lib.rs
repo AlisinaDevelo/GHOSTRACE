@@ -64,6 +64,7 @@ pub use fsevents_collector::{
     CollectedFilesystemEvent, CollectorCoverageState, CollectorState, CollectorStatus,
     ContainedFile, FseventsCollector, FseventsCollectorConfig, FseventsCollectorError,
     SelectedRoot, DEFAULT_HISTORY_TIMEOUT, MAX_PENDING_EVENTS, MAX_SELECTED_ROOTS,
+    MAX_TRANSPORT_DEDUP_ENTRIES, MAX_TRANSPORT_DEDUP_EVENT_ID_SPAN,
 };
 pub use fsevents_flags::{
     normalize_fsevents_event, FseventsBoundaryReason, FseventsCompleteness,
@@ -92,15 +93,16 @@ pub use model::{
     BrowserBookmarkChangedPayload, BrowserName, BrowserNavigationPayload, BrowserUrl,
     CollectorInstanceId, CollectorLifecyclePayload, Confidence, EntryKind, EventEnvelope, EventId,
     EventKind, EventPayload, EventSource, Evidence, FileOperation, FilesystemChangedPayload,
-    FixtureOrigin, FolderId, FrontmostAppChangedPayload, GapPayload, GapRemediation, GitObjectId,
-    GitSnapshotPayload, ImportOrigin, IngestionOrigin, IngestionOriginKind, InstanceLabel,
-    LiveOrigin, OpaqueIdentifier, PathClass, PathDigest, PolicyBlockedSummaryPayload,
-    PolicyProfileId, ProvenanceVersion, ReasonCode, RepairOrigin, RepositoryId, RootId,
-    SanitizedUrl, SessionId, ShellFinishedPayload, ShellKind, ShellStartedPayload, ShellStatus,
-    SnapshotDigest, Source, SourceCursor, SourceErrorPayload, EVENT_SCHEMA_VERSION,
-    IMPORT_PROVENANCE_VERSION, LIVE_PROVENANCE_VERSION, MAX_APP_IDENTIFIER_BYTES, MAX_BRANCH_BYTES,
-    MAX_BROWSER_URL_BYTES, MAX_CURSOR_BYTES, MAX_EVENT_PAYLOAD_BYTES, MAX_IDENTIFIER_BYTES,
-    PROVENANCE_VERSION, REPAIR_PROVENANCE_VERSION, SHA256_DIGEST_BYTES,
+    FilesystemObservation, FixtureOrigin, FolderId, FrontmostAppChangedPayload, GapPayload,
+    GapRemediation, GitObjectId, GitSnapshotPayload, ImportOrigin, IngestionOrigin,
+    IngestionOriginKind, InstanceLabel, LiveOrigin, OpaqueIdentifier, PathClass, PathDigest,
+    PolicyBlockedSummaryPayload, PolicyProfileId, ProvenanceVersion, ReasonCode, RenamePairing,
+    RepairOrigin, RepositoryId, RootId, SanitizedUrl, SessionId, ShellFinishedPayload, ShellKind,
+    ShellStartedPayload, ShellStatus, SnapshotDigest, Source, SourceCursor, SourceErrorPayload,
+    EVENT_SCHEMA_VERSION, IMPORT_PROVENANCE_VERSION, LIVE_PROVENANCE_VERSION,
+    MAX_APP_IDENTIFIER_BYTES, MAX_BRANCH_BYTES, MAX_BROWSER_URL_BYTES, MAX_CURSOR_BYTES,
+    MAX_EVENT_PAYLOAD_BYTES, MAX_IDENTIFIER_BYTES, PROVENANCE_VERSION, REPAIR_PROVENANCE_VERSION,
+    SHA256_DIGEST_BYTES,
 };
 pub use policy::{
     PolicyChange, PolicyDecision, PolicyDecisionRecord, PolicyDiagnostic, PolicyDocument,

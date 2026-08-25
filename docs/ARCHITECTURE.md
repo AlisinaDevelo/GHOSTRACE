@@ -110,6 +110,13 @@ enable operation; it records a typed lifecycle event before native observation b
 Callback batches are copied into a bounded owner-thread queue. The drain step normalizes
 the flags, resolves the reported path through the operating system's canonicalization,
 checks component containment plus device/inode identity, applies the versioned policy,
+and then applies the filesystem delivery contract. Exact transport duplicates are
+suppressed only when their source event ID, raw flags, and path digest all match a
+bounded event-ID window; the suppression count is exposed in collector status and
+never becomes a missing filesystem event. Source coalescing and repeated
+modification remain explicit path-free qualifiers. A rename is recorded with an
+unknown old-to-new pairing unless a future bounded adapter can provide contextual
+support; the collector never infers a path from temporal adjacency.
 hashes canonical path bytes inside a root-scoped `sha256:...` digest domain, and creates
 only a `FilesystemChanged` payload with operation, entry kind, root ID, path class, and
 digest. It never opens the reported path or reads file content. Case and Unicode
