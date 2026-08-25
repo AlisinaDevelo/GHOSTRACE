@@ -139,6 +139,14 @@ unknown evidence, equal timestamps, and clock rollback abstain. Positive,
 negative, ambiguous, adversarial, and clock-skew fixtures are manifest-bound,
 and rule versions participate in explanation identities and export manifests.
 
+Task 0082 adds the manifest-bound explanation counterexample matrix. It covers all
+twelve claim templates, four evidence levels, ordinary and status gap behavior,
+and explicit unknown conflict outcomes. Determinism tests compare repeated claim
+bytes and explanation identities while permuting ingestion, equal timestamps,
+irrelevant events, and query page boundaries. Mutation tests require a removed
+cross-source observation to downgrade to unknown and a removed parent observation
+to remove its claim from the chain.
+
 ### Explicit developer and application context
 
 M4 adds only integrations the person deliberately enables. The shell wrapper cannot

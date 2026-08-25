@@ -84,6 +84,17 @@ The checker rejects a missing fixture, byte drift, digest drift, changed generat
 version or seed, unsafe path, schema drift, or a privacy declaration that permits
 user data or network access.
 
+The explanation counterexample fixture is included in the same manifest. Run its
+focused deterministic matrix with the pinned toolchain:
+
+```sh
+cargo +1.88.0 test --locked --test explanation_determinism
+```
+
+The matrix is intentionally offline and synthetic. It records no machine paths,
+accounts, or user payloads, and it does not substitute for native macOS collector
+or lifecycle evidence.
+
 The filesystem lifecycle corpus has a separate validator because its contract also
 binds scenario ground truth and reporting semantics:
 

@@ -77,6 +77,19 @@ unknown result. Explanation identities and export manifests carry the registry
 and rule versions, so changing a rule version changes identity while replaying
 the same historical events remains deterministic.
 
+## Explanation determinism and counterexamples (task 0082)
+
+The manifest-bound [`explanation-counterexamples-v1.json`](../fixtures/explanation-counterexamples-v1.json)
+defines the required golden dimensions: every claim template, direct/contextual/
+inferred/unknown evidence label, ordinary and status gap behavior, and explicit
+unknown conflict outcomes. `tests/explanation_determinism.rs` renders each matrix
+cell twice and compares bytes, then exercises all declared permutation dimensions:
+ingestion order, equal observed timestamps, irrelevant events, and query page
+sizes. Mutation cases remove a required cross-source observation and a parent
+observation; the first must downgrade to unknown and the second must remove the
+corresponding statement from the explanation chain. These tests are offline and
+synthetic; they do not claim native collector coverage.
+
 ## Future live-source gates
 
 The selected-root FSEvents API is a bounded first slice, not a release-ready ambient

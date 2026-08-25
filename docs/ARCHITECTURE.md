@@ -479,6 +479,19 @@ evidence, equal timestamps, and source clock rollback are explicit `unknown`
 results. Registry and rule versions participate in explanation identity and
 are recorded in export manifests.
 
+### Explanation determinism and counterexamples (task 0082)
+
+`fixtures/explanation-counterexamples-v1.json` is the manifest-bound contract for
+the explanation renderer's deterministic and fail-closed behavior. The golden
+matrix names all twelve claim templates, all four evidence levels, both gap
+states, and explicit unknown outcomes for coverage gaps, policy denials, source
+errors, and unknown evidence. `tests/explanation_determinism.rs` compares
+serialized claims across repeated rendering, ingestion permutations, equal source
+timestamps, irrelevant events, and query page boundaries. Its mutation cases
+remove a required cross-source observation or a parent observation and require an
+unknown correlation or a shorter explanation chain. The corpus is synthetic,
+offline, and contains no user data.
+
 ## Extension rules
 
 A new source or output is acceptable only when it:
