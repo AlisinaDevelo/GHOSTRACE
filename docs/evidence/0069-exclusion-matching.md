@@ -24,8 +24,9 @@ Policy history is bounded to 64 retained versions.
 
 ## Target-device receipt
 
-All receipts below were run from protected `main` commit
-`6f4e6b9e9548cc7549ed4c5ab8710ad58f899899` on 2026-08-25:
+The implementation-branch receipts below were run on 2026-08-25 from commit
+`24c608a0b824992e29c2dee4bb815b80c2439302`, based on protected `main`
+`6f4e6b9e9548cc7549ed4c5ab8710ad58f899899`:
 
 | Field | Value |
 | --- | --- |
@@ -44,6 +45,22 @@ policy-property, and privacy tests. Static checks passed formatting, locked rele
 Clippy with `-D warnings`, fixture/identity/release-evidence/roadmap/reproducibility
 checks, 38 Python tests, generated-index parity, ShellCheck, actionlint, and the
 product network-surface scan.
+
+## Merged-main reproduction
+
+The same checks were rerun from the exact squash merge on protected `main`,
+`40154a5fbac8359a8960eff269731699ef1c4e32`, on the same device:
+
+| Field | Value |
+| --- | --- |
+| Full release all-target/all-feature suite | `/private/tmp/ghostrace-0069-postmerge-release-v1.log`; SHA-256 `0b985aa8973d69ca2b3a272211f413588c29d0ea21c29218f88e3f0d66f32f5b` |
+| Enforced macOS sandbox canary and focused exclusion/policy/privacy tests | `/private/tmp/ghostrace-0069-postmerge-sandbox-v1.log`; SHA-256 `508f3a76bad22becfc995f3b9edd2750bb38574f57188030660d266d33528bf3` |
+| Static and repository checks | `/private/tmp/ghostrace-0069-postmerge-static-v2.log`; SHA-256 `d133854ed2f7dc650fc0a3ed92f2d883c1efdfabc8392ce60516e7b01da937d2` |
+
+All three merged-main receipts exited zero. The post-merge static lane repeated
+formatting, locked release Clippy, fixture/identity/release-evidence/roadmap/
+reproducibility checks, all 38 Python tests, generated-index parity, ShellCheck,
+actionlint, and a source-only network API scan.
 
 ## Limitations
 
