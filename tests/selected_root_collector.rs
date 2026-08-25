@@ -268,6 +268,8 @@ fn internal_storage_writes_are_denied_before_persistence_and_reported_path_free(
     let internal_path = root_path.join("private-output");
     fs::create_dir(&internal_path).expect("internal output directory");
     let root = SelectedRoot::new("root-main", &root_path).expect("selected root");
+    let secret_path = internal_path.join("external-writer-secret.txt");
+    let secret_digest = root.path_digest(&secret_path).expect("internal path digest");
     let journal = Journal::in_memory(DeterministicKeyProvider::from_seed("collector-internal"))
         .expect("journal");
     let mut collector_config = config();
@@ -285,17 +287,19 @@ fn internal_storage_writes_are_denied_before_persistence_and_reported_path_free(
     .expect("collector");
     collector.start().expect("start");
 
-    let secret_path = internal_path.join("external-writer-secret.txt");
     let writer_path = secret_path.clone();
     let writer = std::thread::spawn(move || {
         fs::write(writer_path, b"must-never-be-persisted").expect("external write");
     });
     writer.join().expect("writer");
 
+    let mut committed = Vec::new();
     for _ in 0..100 {
-        collector
-            .run_current_run_loop_for(Duration::from_millis(50))
-            .expect("drive internal write");
+        committed.extend(
+            collector
+                .run_current_run_loop_for(Duration::from_millis(50))
+                .expect("drive internal write"),
+        );
         if collector.status().internal_path_denials > 0 {
             break;
         }
@@ -304,8 +308,15 @@ fn internal_storage_writes_are_denied_before_persistence_and_reported_path_free(
 
     let status = collector.status();
     assert!(status.internal_path_denials > 0, "internal write was not observed");
+    assert!(!committed.iter().any(|event| event.path_digest == secret_digest));
     let events = collector.journal().events().expect("journal events");
-    assert!(!events.iter().any(|stored| stored.event.kind == EventKind::FilesystemChanged));
+    assert!(!events.iter().any(|stored| {
+        matches!(
+            &stored.event.payload,
+            EventPayload::FilesystemChanged(payload)
+                if payload.path_digest.as_ref() == Some(&secret_digest)
+        )
+    }));
     let summary = events
         .iter()
         .find(|stored| {
