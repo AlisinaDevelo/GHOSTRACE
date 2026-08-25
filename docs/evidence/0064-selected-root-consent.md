@@ -1,7 +1,8 @@
 # Task 0064 evidence: selected-root consent and lifecycle receipts
 
-Status: complete on protected `main` at
-`af362e41c402a155fbad56a75882920b3d02752b` (PR #238). This child gate makes
+Status: complete on protected `main`; implementation merge
+`af362e41c402a155fbad56a75882920b3d02752b` (PR #238) and final evidence readback
+`13e627d3a8e289ecfd293761c5dcfe09e6297184` (PR #239). This child gate makes
 selected-root consent inspectable before a future collector can be enabled; it does
 not itself start a live source.
 
@@ -44,6 +45,8 @@ and Python 3.9.6.
 | Protected-main rustdoc with warnings denied | Pass; `/tmp/ghostrace-0064-postmerge-doc.log`; SHA-256 `1f7da74d3483937255ed2fbaae32b30cfcc0a2ed03cb7b7b3c518b25fa3b7e14` |
 | Protected-main macOS network-denial lane | Pass under `sandbox-exec`, including denial canary, privacy fixture, and complete product suite; `/tmp/ghostrace-0064-postmerge-offline.log`; SHA-256 `79db70da52ecee1fa76a9827ef3eff8144b8faa9161e03c7485f384c85314f93` |
 | Hosted merge gates | PR #238 passed both CI runs, roadmap, audit, dependency review, deny, network-denial, rustfmt, Clippy, and Linux/macOS/MSRV lanes |
+| Final protected-main focused readback at `13e627d3` | Pass: 3/3; `/tmp/ghostrace-0064-final-main-consent.log`; SHA-256 `59946437e7df52adb8117d1138e077ac928627048c7ee943e52c6f6fbd4244ff` |
+| Final protected-main reproducibility readback at `13e627d3` | Pass: same complete local pipe; `/tmp/ghostrace-0064-final-main-repro.log`; SHA-256 `e7d52feea57d4c20e9ddb366cc070675ecd4efdb3d4858dc3ed41c6acf9822bb` |
 
 The local device receipts are the acceptance evidence. Hosted checks are protected
 merge gates, not a substitute for reproducing the behavior on the target device.
