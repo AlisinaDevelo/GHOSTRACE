@@ -43,6 +43,15 @@ labels rollback, delayed delivery, equal-time tie-breaking, monotonic evidence
 regression, and missing source time as ambiguity; it never upgrades them to
 causality.
 
+## Gap-aware query coverage (task 0079)
+
+`fixtures/query-gap-coverage-v1.json` is the versioned golden corpus for nested,
+adjacent, open-ended, and cross-source coverage intervals. Query pages return a
+coverage contract even when a kind filter excludes marker rows. The integration
+matrix proves policy-denied, source-disabled, source-gap, no-event,
+unknown-history, retention-deletion, and explicit opt-out states; marker scans
+remain bounded and path-free.
+
 ## Future live-source gates
 
 The selected-root FSEvents API is a bounded first slice, not a release-ready ambient

@@ -18,18 +18,132 @@ use crate::{
     crypto::{decrypt_payload, encrypt_payload, KeyProvider},
     error::GhostraceError,
     journal::StoredEvent,
-    model::{EventKind, EventSource, PolicyProfileId, SnapshotDigest, EVENT_SCHEMA_VERSION},
+    model::{
+        EventKind, EventSource, PolicyProfileId, SnapshotDigest, SourceCursor, EVENT_SCHEMA_VERSION,
+    },
     ordering::ORDERING_CONTRACT_VERSION,
     policy::PolicyProfile,
 };
 
-pub const QUERY_CONTRACT_VERSION: u32 = 1;
+pub const QUERY_CONTRACT_VERSION: u32 = 2;
+pub const COVERAGE_CONTRACT_VERSION: u32 = 1;
 pub const DEFAULT_QUERY_PAGE_SIZE: usize = 50;
 pub const MAX_QUERY_PAGE_SIZE: usize = 256;
 pub const QUERY_TOKEN_TTL_SECONDS: i64 = 15 * 60;
+pub const MAX_COVERAGE_MARKERS: usize = 1024;
 const QUERY_TOKEN_AAD: &[u8] = b"ghostrace:query-token:v1";
 const MAX_QUERY_TOKEN_BYTES: usize = 16 * 1024;
 const QUERY_DIGEST_BYTES: usize = 71;
+
+fn default_include_coverage() -> bool {
+    true
+}
+
+/// The reason a query's result may not represent complete source history.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CoverageStatusKind {
+    EventsObserved,
+    NoEventsObserved,
+    SourceDisabled,
+    PolicyDenied,
+    SourceGap,
+    RetentionDeletion,
+    UnknownHistory,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CoverageStatus {
+    pub kind: CoverageStatusKind,
+    pub source: Option<EventSource>,
+    pub count: u64,
+}
+
+/// A time interval used to decide whether a coverage marker intersects a
+/// bounded query window. `None` is an explicit open end, not an invented date.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CoverageInterval {
+    pub source: EventSource,
+    pub start: Option<DateTime<Utc>>,
+    pub end: Option<DateTime<Utc>>,
+}
+
+impl CoverageInterval {
+    pub fn intersects(
+        &self,
+        window_start: Option<DateTime<Utc>>,
+        window_end: Option<DateTime<Utc>>,
+    ) -> bool {
+        if self.start.zip(self.end).is_some_and(|(start, end)| start > end) {
+            return false;
+        }
+        if let (Some(start), Some(end)) = (self.start, window_end) {
+            if start > end {
+                return false;
+            }
+        }
+        if let (Some(start), Some(end)) = (window_start, self.end) {
+            if end < start {
+                return false;
+            }
+        }
+        true
+    }
+
+    pub fn intersects_source(
+        &self,
+        source: Option<EventSource>,
+        window_start: Option<DateTime<Utc>>,
+        window_end: Option<DateTime<Utc>>,
+    ) -> bool {
+        source.is_none_or(|source| source == self.source)
+            && self.intersects(window_start, window_end)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CoverageGap {
+    pub event_id: Uuid,
+    pub interval: CoverageInterval,
+    pub reason_code: String,
+    pub dropped_count: u64,
+    pub from_cursor: Option<SourceCursor>,
+    pub to_cursor: Option<SourceCursor>,
+}
+
+/// Coverage metadata is returned with every query page unless the caller
+/// explicitly opts out. Marker discovery intentionally ignores `kind` so a
+/// query for ordinary events cannot hide a relevant gap or denial marker.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueryCoverage {
+    pub contract_version: u32,
+    pub observed_event_count: u64,
+    pub statuses: Vec<CoverageStatus>,
+    pub gaps: Vec<CoverageGap>,
+    pub gaps_truncated: bool,
+    pub retention_deletion_detected: bool,
+    pub marker_filter_ignored: bool,
+    pub opted_out: bool,
+}
+
+impl QueryCoverage {
+    pub(crate) fn opted_out() -> Self {
+        Self {
+            contract_version: COVERAGE_CONTRACT_VERSION,
+            observed_event_count: 0,
+            statuses: Vec::new(),
+            gaps: Vec::new(),
+            gaps_truncated: false,
+            retention_deletion_detected: false,
+            marker_filter_ignored: false,
+            opted_out: true,
+        }
+    }
+}
 
 /// A complete, immutable query shape.  The policy identity and scope digest
 /// are part of the shape so a token cannot be reused across profiles or scope
@@ -45,6 +159,8 @@ pub struct QueryRequest {
     pub observed_from: Option<DateTime<Utc>>,
     pub observed_until: Option<DateTime<Utc>>,
     pub page_size: usize,
+    #[serde(default = "default_include_coverage")]
+    pub include_coverage: bool,
 }
 
 impl QueryRequest {
@@ -68,6 +184,7 @@ impl QueryRequest {
             observed_from: None,
             observed_until: None,
             page_size: DEFAULT_QUERY_PAGE_SIZE,
+            include_coverage: true,
         })
     }
 
@@ -89,6 +206,7 @@ pub struct QueryPage {
     pub events: Vec<StoredEvent>,
     pub next_page_token: Option<String>,
     pub snapshot_boundary: u64,
+    pub coverage: QueryCoverage,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -102,6 +220,7 @@ pub(crate) struct QueryTokenPayload {
     pub scope_digest: SnapshotDigest,
     pub query_digest: String,
     pub snapshot_boundary: u64,
+    pub snapshot_match_count: u64,
     pub issued_at: i64,
     pub expires_at: i64,
     pub last_order: Option<QueryOrderKey>,
@@ -161,6 +280,7 @@ pub(crate) fn make_token(
     request: &QueryRequest,
     storage_schema_version: u32,
     snapshot_boundary: u64,
+    snapshot_match_count: u64,
     last_order: Option<QueryOrderKey>,
     provider: &dyn KeyProvider,
     now: i64,
@@ -177,6 +297,7 @@ pub(crate) fn make_token(
         scope_digest: request.scope_digest.clone(),
         query_digest: query_digest(request)?,
         snapshot_boundary,
+        snapshot_match_count,
         issued_at: now,
         expires_at,
         last_order,
@@ -294,6 +415,7 @@ mod tests {
             scope_digest: request.scope_digest.clone(),
             query_digest: query_digest(&request).expect("digest"),
             snapshot_boundary: 1,
+            snapshot_match_count: 1,
             issued_at: now - QUERY_TOKEN_TTL_SECONDS - 1,
             expires_at: now - 1,
             last_order: None,

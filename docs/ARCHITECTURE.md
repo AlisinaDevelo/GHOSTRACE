@@ -327,6 +327,18 @@ retention or deletion operation may remove a row after the snapshot; pagination
 does not resurrect it or fabricate a continuity claim. New writes remain outside
 the original logical snapshot.
 
+Every page also carries coverage contract version `1`. Coverage scans use the
+same policy, source, time window, and snapshot boundary but deliberately ignore
+the requested event-kind filter, so a filesystem query cannot hide a relevant
+gap, denial marker, or collector stop. Gap intervals are conservative
+open-ended intervals when the source supplies no end boundary. Statuses
+distinguish observed events, no events observed, source disabled, policy denied,
+source gap, retention deletion detected between pages, and unknown history.
+Callers may set `include_coverage=false`, but the response then sets
+`coverage.opted_out=true` rather than silently presenting an incomplete result.
+The query token contract is version `2` because the authenticated snapshot now
+also binds the matching-row count used to detect retention deletion.
+
 ## Components
 
 | Component | Responsibility | Current state |
