@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Validate the Forge roadmap and synchronize narrowly scoped GitHub metadata.
+"""Validate the roadmap and synchronize narrowly scoped GitHub metadata.
 
-The GitHub adapter owns labels, milestones, and the configured owner's assignment
-policy only. Forge-native issue title/body/state and relationship parity remains an
-explicit prerequisite and is never silently approximated by this script.
+The versioned task files own issue identity, content, state, and relationships.
+GitHub exposes task titles and acceptance evidence publicly; internal Forge
+identity and routing metadata is never part of a public issue body. Labels,
+milestones, assignments, and metadata hygiene are reconciled idempotently here.
 """
 
 from __future__ import annotations
@@ -44,8 +45,11 @@ MARKER_RE = re.compile(
     r"<!-- forge-task:v1 id=([0-9]{4})(?: sync=([0-9a-f]{64}))? -->"
 )
 MARKER_HINT_RE = re.compile(r"forge-task:v1", re.IGNORECASE)
+PUBLIC_ROUTING_LINE_RE = re.compile(
+    r"^\s*(?:Assigned|Depends on|Parent):\s*.*$", re.IGNORECASE
+)
 FINAL_GATE_TASK_IDS = ("0153",)
-SYNC_SCOPE = ("labels", "milestones", "assignees")
+SYNC_SCOPE = ("labels", "milestones", "assignees", "public-issue-bodies")
 OWNER_MANAGED_STATUSES = frozenset({"ready", "in-progress", "review"})
 MUTATION_INTERVAL_SECONDS = 1.0
 MANAGED_EXACT = set()
@@ -1022,6 +1026,24 @@ def _issue_markers(body: str | None) -> list[tuple[str, str | None]]:
     ]
 
 
+def sanitize_public_issue_body(body: str | None) -> str:
+    """Remove internal Forge identity and routing metadata from public bodies.
+
+    Task titles remain the stable public identity used by the metadata publisher.
+    This deliberately removes only metadata lines and leaves the goal,
+    acceptance criteria, context, notes, and ordinary prose unchanged.
+    """
+    if body is None:
+        return ""
+    kept: list[str] = []
+    for line in body.splitlines():
+        if MARKER_HINT_RE.search(line) or PUBLIC_ROUTING_LINE_RE.fullmatch(line):
+            continue
+        kept.append(line.rstrip())
+    content = "\n".join(kept).strip()
+    return f"{content}\n" if content else ""
+
+
 def _validate_issue_fields(issue_number: int, issue: dict[str, Any]) -> None:
     for field in ("title", "state", "updated_at"):
         if type(issue.get(field)) is not str or not issue[field].strip():
@@ -1081,6 +1103,7 @@ def metadata_plan(
             raise RoadmapError(f"GitHub milestone {title!r} has malformed number metadata")
     managed_labels = {label["name"] for label in program["labels"]}
     tasks_by_id = {task.task_id: task for task in tasks}
+    title_to_task = {task.title: task.task_id for task in tasks}
     operations: list[dict[str, Any]] = []
     for label in program["labels"]:
         current = current_labels.get(label["name"])
@@ -1144,6 +1167,19 @@ def metadata_plan(
         body = issue.get("body") or ""
         markers = _issue_markers(body)
         marker_ids = [task_id for task_id, _ in markers]
+        title_task_id = title_to_task.get(issue["title"])
+        sanitized_body = sanitize_public_issue_body(body)
+        body_needs_sanitization = sanitized_body != body
+        if (markers or title_task_id is not None) and body_needs_sanitization:
+            operations.append(
+                {
+                    "action": "sanitize_issue_body",
+                    "blocking": False,
+                    "task": title_task_id or (marker_ids[0] if marker_ids else None),
+                    "number": issue_number,
+                    "body": sanitized_body,
+                }
+            )
         declaration_count = len(MARKER_HINT_RE.findall(body))
         if declaration_count != len(markers):
             operations.append(
@@ -1163,6 +1199,28 @@ def metadata_plan(
                 )
             )
         if not markers:
+            if title_task_id is None:
+                continue
+            previous = marker_to_issue.get(title_task_id)
+            if previous is not None and previous != issue_number:
+                operations.append(
+                    _blocking(
+                        "duplicate_identity",
+                        task=title_task_id,
+                        numbers=[previous, issue_number],
+                    )
+                )
+            marker_to_issue[title_task_id] = issue_number
+            mapped_issue = mapping.get(title_task_id)
+            if mapped_issue is not None and mapped_issue != issue_number:
+                operations.append(
+                    _blocking(
+                        "mapping_conflict",
+                        task=title_task_id,
+                        mapped_issue=mapped_issue,
+                        title_issue=issue_number,
+                    )
+                )
             continue
         task_id, sync_hash = markers[0]
         if task_id not in tasks_by_id:
@@ -1170,27 +1228,27 @@ def metadata_plan(
             continue
         expected_sync_hash = forge_task_sync_hash(tasks_by_id[task_id])
         if sync_hash is None:
-            operations.append(
-                _blocking("marker_sync_missing", number=issue_number, task=task_id)
-            )
-        elif sync_hash != expected_sync_hash:
-            operations.append(
-                _blocking(
-                    "marker_sync_conflict",
-                    number=issue_number,
-                    task=task_id,
-                    expected=expected_sync_hash,
-                    actual=sync_hash,
+            if not (body_needs_sanitization and title_task_id == task_id):
+                operations.append(
+                    _blocking("marker_sync_missing", number=issue_number, task=task_id)
                 )
-            )
+        elif sync_hash != expected_sync_hash:
+            if not (body_needs_sanitization and title_task_id == task_id):
+                operations.append(
+                    _blocking(
+                        "marker_sync_conflict",
+                        number=issue_number,
+                        task=task_id,
+                        expected=expected_sync_hash,
+                        actual=sync_hash,
+                    )
+                )
         previous = marker_to_issue.get(task_id)
         if previous is not None and previous != issue_number:
             operations.append(_blocking("duplicate_identity", task=task_id, numbers=[previous, issue_number]))
         marker_to_issue[task_id] = issue_number
         mapped_issue = mapping.get(task_id)
-        if mapped_issue is None:
-            operations.append(_blocking("missing_mapping", task=task_id, marker_issue=issue_number))
-        elif mapped_issue != issue_number:
+        if mapped_issue is not None and mapped_issue != issue_number:
             operations.append(
                 _blocking("mapping_conflict", task=task_id, mapped_issue=mapped_issue, marker_issue=issue_number)
             )
@@ -1198,7 +1256,7 @@ def metadata_plan(
     owner = program["owner"]
     deferred_tasks: list[str] = []
     for task in tasks:
-        issue_number = mapping.get(task.task_id)
+        issue_number = mapping.get(task.task_id) or marker_to_issue.get(task.task_id)
         if issue_number is None:
             operations.append(_blocking("missing_mapping", task=task.task_id))
             continue
@@ -1208,7 +1266,10 @@ def metadata_plan(
             continue
         markers = _issue_markers(issue.get("body"))
         marker_ids = [task_id for task_id, _ in markers]
-        if len(markers) != 1 or markers[0][0] != task.task_id:
+        title_matches = issue.get("title") == task.title
+        if (len(markers) != 1 or markers[0][0] != task.task_id) and not (
+            not markers and title_matches
+        ):
             operations.append(
                 _blocking(
                     "marker_conflict" if markers else "marker_missing",
@@ -1418,6 +1479,12 @@ def apply_metadata(
                 "PATCH",
                 f"{prefix}/issues/{operation['number']}",
                 {"milestone": operation["milestone"]},
+            )
+        elif action == "sanitize_issue_body":
+            github.request(
+                "PATCH",
+                f"{prefix}/issues/{operation['number']}",
+                {"body": operation["body"]},
             )
         elif action == "defer_issue_metadata":
             continue
