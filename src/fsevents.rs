@@ -1,8 +1,9 @@
 //! A bounded, owner-thread FSEvents stream lifecycle adapter.
 //!
 //! The adapter deliberately stops at the native stream boundary.  It does not
-//! canonicalize selected roots, make a consent decision, normalize event flags,
-//! or write to the journal; those are separate collector gates.  A caller must
+//! canonicalize selected roots, make a consent decision, or write to the
+//! journal; those are separate collector gates. Event flags can be normalized
+//! through [`FseventsEvent::normalize_flags`]. A caller must
 //! schedule and drive the stream on one run-loop thread, and must keep the
 //! returned value on that thread until it is dropped.
 //!
@@ -162,12 +163,20 @@ impl FseventsOptions {
 /// A bounded event delivered by an FSEvents callback.
 ///
 /// Paths are metadata only.  The adapter never opens them or reads their
-/// contents.  `flags` remains numeric until the later flag-normalization task.
+/// contents. The raw `flags` value is retained alongside the canonical,
+/// path-free result returned by [`FseventsEvent::normalize_flags`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FseventsEvent {
     pub path: PathBuf,
     pub event_id: u64,
     pub flags: u32,
+}
+
+impl FseventsEvent {
+    /// Normalize the raw Core Services flag word without retaining its path.
+    pub fn normalize_flags(&self) -> crate::fsevents_flags::NormalizedFseventsEvent {
+        crate::fsevents_flags::normalize_fsevents_event(self.event_id, self.flags)
+    }
 }
 
 /// Callback health counters, useful for a collector's lifecycle receipt.

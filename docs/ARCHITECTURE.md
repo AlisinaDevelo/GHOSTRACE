@@ -57,9 +57,23 @@ strict: stop a running stream, invalidate a scheduled stream, release the native
 object exactly once, then reclaim the boxed callback state. Callback parsing rejects
 null pointers, oversized batches, and oversized paths. User callback panics are
 caught at the ABI boundary and exposed as a bounded health counter rather than
-unwinding into CoreServices. Root canonicalization, consent, exclusions, flag
-normalization, cursor persistence, backpressure, and journal writes remain later
-collector gates.
+unwinding into CoreServices. Root canonicalization, consent, exclusions, cursor
+persistence, backpressure, and journal writes remain later collector gates.
+
+### FSEvents flag normalization
+
+`FseventsEvent::normalize_flags` converts the raw `u32` callback word into the
+strict `fsevents-normalized-v1` contract. Every documented Apple event bit has a
+typed enum member and remains in the canonical numeric order; the raw word and any
+future bits are retained as bounded numeric evidence. Unknown bits produce an
+explicit `unsupported` status and lower completeness rather than disappearing.
+
+Loss and coverage boundaries are first-class: dropped buffers, a required subtree
+scan, or wrapped event IDs produce `rescan_required`; root, mount, unmount, and
+history markers produce `boundary`. File/dir and mount/unmount contradictions are
+refused as `contradictory` while preserving the complete raw flag set. A normalized
+record intentionally contains no path; path containment and digest policy remain
+the responsibility of the selected-root collector.
 
 ## Policy-document boundary
 

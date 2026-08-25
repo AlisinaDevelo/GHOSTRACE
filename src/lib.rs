@@ -14,6 +14,7 @@ pub mod export;
 pub mod fault;
 pub mod fixture;
 pub mod fsevents;
+pub mod fsevents_flags;
 pub mod journal;
 #[cfg(target_os = "macos")]
 pub mod keychain;
@@ -46,6 +47,20 @@ pub use fsevents::{
     CallbackHealth, FseventsError, FseventsEvent, FseventsOptions, FseventsStream, StreamState,
     DEFAULT_LATENCY, EVENT_ID_SINCE_NOW, FLAG_FILE_EVENTS, FLAG_FULL_HISTORY, FLAG_NO_DEFER,
     FLAG_USE_CF_TYPES, FLAG_USE_EXTENDED_DATA, FLAG_WITH_DOC_ID,
+};
+pub use fsevents_flags::{
+    normalize_fsevents_event, FseventsBoundaryReason, FseventsCompleteness,
+    FseventsContradictionReason, FseventsEventFlag, FseventsEvidenceStatus, FseventsFlagSet,
+    FseventsRescanReason, NormalizedFseventsEvent, DOCUMENTED_EVENT_FLAGS,
+    DOCUMENTED_EVENT_FLAG_MASK, EVENT_FLAG_EVENT_IDS_WRAPPED, EVENT_FLAG_HISTORY_DONE,
+    EVENT_FLAG_ITEM_CHANGE_OWNER, EVENT_FLAG_ITEM_CLONED, EVENT_FLAG_ITEM_CREATED,
+    EVENT_FLAG_ITEM_FINDER_INFO_MOD, EVENT_FLAG_ITEM_INODE_META_MOD, EVENT_FLAG_ITEM_IS_DIR,
+    EVENT_FLAG_ITEM_IS_FILE, EVENT_FLAG_ITEM_IS_HARDLINK, EVENT_FLAG_ITEM_IS_LAST_HARDLINK,
+    EVENT_FLAG_ITEM_IS_SYMLINK, EVENT_FLAG_ITEM_MODIFIED, EVENT_FLAG_ITEM_REMOVED,
+    EVENT_FLAG_ITEM_RENAMED, EVENT_FLAG_ITEM_XATTR_MOD, EVENT_FLAG_KERNEL_DROPPED,
+    EVENT_FLAG_MOUNT, EVENT_FLAG_MUST_SCAN_SUB_DIRS, EVENT_FLAG_NONE, EVENT_FLAG_OWN_EVENT,
+    EVENT_FLAG_ROOT_CHANGED, EVENT_FLAG_UNMOUNT, EVENT_FLAG_USER_DROPPED,
+    FSEVENTS_NORMALIZED_SCHEMA_VERSION,
 };
 pub use journal::{AppliedMigration, BackupReceipt, DiagnosticRecord, Journal, StoredEvent};
 #[cfg(target_os = "macos")]
@@ -80,6 +95,8 @@ pub use writer::{
 pub const EVENT_SCHEMA_JSON: &str = include_str!("../schemas/event-envelope-v1.json");
 pub const POLICY_DOCUMENT_SCHEMA_JSON: &str = include_str!("../schemas/policy-document-v1.json");
 pub const EXCLUSION_POLICY_SCHEMA_JSON: &str = include_str!("../schemas/exclusion-policy-v1.json");
+pub const FSEVENTS_NORMALIZED_SCHEMA_JSON: &str =
+    include_str!("../schemas/fsevents-normalized-v1.json");
 
 pub fn capture() -> Result<(), GhostraceError> {
     Err(GhostraceError::LiveCaptureDisabled)

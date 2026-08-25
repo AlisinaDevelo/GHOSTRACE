@@ -68,7 +68,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0062 | Build the storage crash and fault-injection matrix | M1 | done | storage | test-engineer | 0011 | 0055, 0058, 0061 |
 | 0063 | Build a memory-safe FSEvents stream lifecycle adapter | M2 | done | filesystem | macos-engineer | 0013 | 0010, 0012 |
 | 0064 | Implement selected-root consent and lifecycle receipts | M2 | backlog | filesystem | privacy-engineer | 0013 | 0007, 0012 |
-| 0065 | Normalize every FSEvents flag into evidence status | M2 | backlog | filesystem | macos-engineer | 0013 | 0006, 0063 |
+| 0065 | Normalize every FSEvents flag into evidence status | M2 | done | filesystem | macos-engineer | 0013 | 0006, 0063 |
 | 0066 | Track volume identity and mount transitions | M2 | backlog | filesystem | macos-engineer | 0015 | 0013, 0014 |
 | 0067 | Test APFS case, Unicode, and root-containment behavior | M2 | backlog | filesystem | test-engineer | 0014 | 0013, 0045 |
 | 0068 | Harden symlink, hard-link, and open-race containment | M2 | backlog | filesystem | security-auditor | 0014 | 0013, 0057 |

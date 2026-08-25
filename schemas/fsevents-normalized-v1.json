@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/AlisinaDevelo/GHOSTRACE/schemas/fsevents-normalized-v1.json",
+  "title": "GHOSTRACE normalized FSEvents evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "event_id", "flags", "status", "completeness"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "event_id": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615
+    },
+    "flags": { "$ref": "#/$defs/flag_set" },
+    "status": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": { "status": { "const": "observed" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason"],
+          "properties": {
+            "status": { "const": "rescan_required" },
+            "reason": {
+              "enum": [
+                "event_ids_wrapped",
+                "both_dropped",
+                "kernel_dropped",
+                "user_dropped",
+                "must_scan_sub_dirs"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason"],
+          "properties": {
+            "status": { "const": "boundary" },
+            "reason": { "enum": ["root_changed", "unmount", "mount", "history_done"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "unknown_bits"],
+          "properties": {
+            "status": { "const": "unsupported" },
+            "unknown_bits": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason"],
+          "properties": {
+            "status": { "const": "contradictory" },
+            "reason": { "enum": ["multiple_entry_kinds", "mount_and_unmount"] }
+          }
+        }
+      ]
+    },
+    "completeness": { "enum": ["complete", "lowered"] }
+  },
+  "$defs": {
+    "flag_set": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["raw_flags", "known_flags", "unknown_bits"],
+      "properties": {
+        "raw_flags": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "known_flags": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "must_scan_sub_dirs",
+              "user_dropped",
+              "kernel_dropped",
+              "event_ids_wrapped",
+              "history_done",
+              "root_changed",
+              "mount",
+              "unmount",
+              "item_created",
+              "item_removed",
+              "item_inode_meta_mod",
+              "item_renamed",
+              "item_modified",
+              "item_finder_info_mod",
+              "item_change_owner",
+              "item_xattr_mod",
+              "item_is_file",
+              "item_is_dir",
+              "item_is_symlink",
+              "own_event",
+              "item_is_hardlink",
+              "item_is_last_hardlink",
+              "item_cloned"
+            ]
+          }
+        },
+        "unknown_bits": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+      }
+    }
+  }
+}

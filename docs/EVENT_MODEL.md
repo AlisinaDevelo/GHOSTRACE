@@ -20,6 +20,15 @@ An event has these conceptual fields:
 | evidence | direct, contextual, inferred, or unknown | A claim cannot be stronger than its supporting observations |
 | gap/status | Missing coverage, denial, drop, restart, or source limitation | First-class and visible to explain/export |
 
+For a future FSEvents source, the raw callback flag word is normalized by the
+`fsevents-normalized-v1` contract before it can become a filesystem event. The
+contract maps all documented Apple bits, retains the raw `u32` and unknown-bit
+remainder, and records a status of observed, rescan-required, boundary,
+unsupported, or contradictory. Unknown bits and loss boundaries lower completeness;
+they are never silently treated as ordinary file changes. The normalized evidence
+record is path-free, so selected-root canonicalization and exclusion policy still
+run before persistence.
+
 The published JSON Schema describes the canonical normalized serialization emitted
 by Rust, so nullable/defaulted fields are present even when their value is `null` or
 `false`. Rust semantic validation remains mandatory for cross-field timestamp
