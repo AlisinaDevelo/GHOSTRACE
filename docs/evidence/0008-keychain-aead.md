@@ -1,9 +1,9 @@
 # Task 0008 evidence: Keychain-backed DEK and AEAD envelopes
 
-Status: review candidate. The production implementation is already on protected
-`main`; this review adds a focused regression suite and records target-device
-receipts. A protected-main rerun and final issue closure remain gated on merge of
-this review.
+Status: complete on protected `main` at
+`fd5213fb2576c40c918df6be549596e0e8f8a568`. The production implementation and
+focused regression suite are merged, and the same device matrix was rerun at
+that exact SHA.
 
 ## Contract and implementation
 
@@ -75,14 +75,34 @@ Rust/Cargo 1.88.0 and no network dependency during the offline lanes.
 | Keychain lifecycle probe | Pass; `/tmp/ghostrace-0008-source-keychain-lifecycle.log`; SHA-256 `b2d23a5010a0887f9b2fcc57741262c9adf90ed18fbbd797cc835fa95c56a39a` |
 | Lifecycle matrix | Pass; `/tmp/ghostrace-0008-source-key-availability-matrix.json`; SHA-256 `7550269db06c2af06876bc4a0cb28e349ade859bb436e39f76ac0128ec936119` |
 
+## Protected-main rerun receipts
+
+The merge of [PR #225](https://github.com/AlisinaDevelo/GHOSTRACE/pull/225) was
+verified at `fd5213fb2576c40c918df6be549596e0e8f8a568` on the same device before
+this task was closed.
+
+| Lane | Result and retained receipt |
+| --- | --- |
+| Focused AEAD regression | Pass; `/tmp/ghostrace-0008-postmerge-keychain-aead.log`; SHA-256 `2c77624a9d79a27c27ae22d21f4ba13e47cc81614da6d2e1a086587a85b3e178` |
+| Debug all-target/all-feature suite | Pass; `/tmp/ghostrace-0008-postmerge-debug.log`; SHA-256 `32534ea8e67c362b65ca86e9d5c9b01ee495f1d5bfc2643b8dac53da1031587e` |
+| Clippy with warnings denied | Pass; `/tmp/ghostrace-0008-postmerge-clippy.log`; SHA-256 `f2066ca264b9a8598ecd436c70919e1efe1acea4098ad2a13b5d82d67bc049ec` |
+| Reproducibility/static pipe | Pass; 40 Python tests and the complete pinned suite; `/tmp/ghostrace-0008-postmerge-repro.log`; SHA-256 `566a857fd9e93e791271e4ad222a496d6d5e70525b32fd3b7331c5a204ce7283` |
+| Explicit network-denial pipe | Pass; `/tmp/ghostrace-0008-postmerge-offline.log`; SHA-256 `4b46ec3deb51d085f76b56462a14b3171116d1a3de39ff4f261f4784a93e8091` |
+| Release all-target/all-feature suite | Pass; `/tmp/ghostrace-0008-postmerge-release.log`; SHA-256 `d26880c4963e1eaf6fb560b52327e65d8f52c088293756b60563ebfd53ce559e` |
+| Rust documentation | Pass; `/tmp/ghostrace-0008-postmerge-doc.log`; SHA-256 `4b2ea224c8b640f69ea430e08205ebb85c6fbde2dd1b33e4cfe27b736a3062d2` |
+| Shell/action lint | Pass; `/tmp/ghostrace-0008-postmerge-shellcheck.log` and `/tmp/ghostrace-0008-postmerge-actionlint.log` (both empty-success receipts) |
+| Keychain lifecycle probe | Pass; `/tmp/ghostrace-0008-postmerge-keychain-lifecycle.log`; SHA-256 `a05a3e8f321e649d0b4630ea635730e6891bb09b4b3a3cfd3625f7786a928ed1` |
+| Lifecycle matrix | Pass; `/tmp/ghostrace-0008-postmerge-key-availability-matrix.json`; SHA-256 `3945478347e37670094c09069176eb6c03b0e55aeb923fcb908f1200397b6c9a` |
+
 The lifecycle matrix's observed rows are limited to the current unlocked
 session and an isolated Keychain lock/unlock. Sleep, wake, fast-user-switch,
 logout, and launchd restart remain explicit `no-go`/`not-exercised` rows; hosted
 checks are not used as a substitute for those device transitions.
 
-## Merge gate
+## Closure
 
-After this review is merged, rerun the focused AEAD test, complete debug and
-offline lanes, and the release lane at the exact protected-main merge SHA. Add
-those post-merge receipt hashes here and only then change task 0008 to `done`,
-close issue #12, and publish the zero-delta roadmap result.
+Issue #12 can be closed against this evidence. The lifecycle matrix's observed
+rows remain limited to the current unlocked session and an isolated Keychain
+lock/unlock; sleep, wake, fast-user-switch, logout, and launchd restart remain
+explicit `no-go`/`not-exercised` rows. No hosted check is used as a substitute
+for those device transitions.
