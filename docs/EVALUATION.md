@@ -46,7 +46,8 @@ workload, journal size, collector mix, warm-up method, and build profile. Measur
 - source-to-journal latency distribution;
 - duplicate, reordered, coalesced, delayed, missing, and attributed events;
 - restart recovery and cursor replay;
-- bounded queue depth and loss accounting;
+- bounded queue depth, admission wait, retry attempts, cancellation, and explicit
+  loss/gap accounting;
 - idle CPU, resident memory, WAL growth, query time, and export throughput.
 
 Performance budgets are not declared until a representative workload exists. A
@@ -61,7 +62,8 @@ number without its workload would be a misleading guarantee.
 3. **Fixture tests:** deterministic replay, explanation citations, gap propagation,
    export compatibility, and privacy regression.
 4. **Integration tests:** SQLite migrations, WAL behavior, permissions, crash
-   injection, and cursor commits.
+   injection, cursor/policy/diagnostic atomicity, FIFO acknowledgements, bounded
+   queue policies, cancellation, and retry limits.
 5. **Platform tests:** selected-root FSEvents behavior and macOS permission changes.
 6. **Release checks:** locked build, advisories, license/source policy, SBOM,
    signing/notarization, and network-surface review.

@@ -63,6 +63,28 @@ source, policy identity/version, root presence, private-context state, and a sta
 reason code. Rejected roots and observations never enter the record or its debug
 representation.
 
+## Bounded durable writer contract
+
+All adapters hand accepted batches to one FIFO `Writer`; they never open a second
+SQLite write path. The default contract admits at most 64 outstanding requests, 16
+events per batch, 4 MiB of serialized request memory, and a 250 ms admission wait.
+SQLite busy/locked retries are capped at two (three total attempts). These limits are
+part of `WriterConfig`, whose validation rejects zero, oversized, or otherwise unsafe
+values before a worker starts. A source may select `Block`, `Reject`, or `EmitGap`
+queue pressure behavior independently; an emitted gap contains the source and count
+and is a caller-visible repair obligation, never an implicit drop.
+
+Each queued request carries its typed origin, one source, events, policy profile, and
+bounded diagnostic records. The journal commits the event rows, cursor updates,
+policy reference, and diagnostics in one transaction. Only the successful return
+from that transaction produces `WriteAck`, including request ID, event IDs, ingest
+sequences, attempt count, and commit time. A request cancelled before the worker
+starts is reported as `WriterCancelled`; once the transaction starts, cancellation
+cannot make a committed write disappear. Queue, memory, cancellation, busy-retry,
+and acknowledgement-timeout paths are covered by deterministic tests. Diagnostic
+codes are short ASCII identifiers and details are limited to 512 non-control bytes;
+payloads and paths are not accepted as diagnostic text.
+
 ## Components
 
 | Component | Responsibility | Current state |
@@ -72,7 +94,7 @@ representation.
 | Source adapters | Translate bounded platform observations into the envelope | Live adapters not shipped |
 | Policy gate | Apply consent, selected scope, exclusions, private-context rules, and redaction | Required before live capture |
 | Event envelope | Preserve source facts, provenance, evidence level, and schema version | Versioned contract is documented; journal ingestion requires an origin capability |
-| Ingest writer | Bound memory, serialize writes, and commit event plus cursor atomically | Fixture path is the current exercise; live gate remains |
+| Ingest writer | Bound memory, serialize writes, and commit event, cursor, policy reference, and diagnostics atomically | Bounded fixture writer is implemented and tested; live gate remains |
 | Journal | Store local event metadata and encrypted payloads when the production key path exists | SQLite/WAL design documented; Keychain production path not shipped |
 | Explain/export | Produce deterministic evidence-linked explanations and explicit exports | Fixture surface available |
 
@@ -89,9 +111,9 @@ representation.
    immutable policy profile ID and version. A typed adapter-origin capability owns
    the provenance version and collector namespace; the envelope retains what the
    source actually established, not what a caller wished it had established.
-5. The bounded writer persists the event and source cursor in one transaction when
-   the live path is enabled. Queue pressure and unrecoverable source history become
-   visible gaps.
+5. The bounded writer persists the event, source cursor, policy reference, and
+   diagnostics in one transaction when the live path is enabled. Queue pressure and
+   unrecoverable source history become visible gaps.
 6. Query, explanation, and export read committed records. They never mutate source
    history and never silently repair a gap.
 

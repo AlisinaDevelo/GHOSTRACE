@@ -132,6 +132,39 @@ pub enum GhostraceError {
 
     #[error("a SQLite WAL or SHM sidecar cannot be used as an independent backup")]
     SidecarBackupRefused,
+
+    #[error("invalid writer configuration: {0}")]
+    InvalidWriterConfig(String),
+
+    #[error("writer queue is full for source {event_source}")]
+    WriterQueueFull { event_source: crate::model::EventSource },
+
+    #[error("writer queue wait exceeded {max_wait_ms}ms for source {event_source}")]
+    WriterQueueWaitTimeout { event_source: crate::model::EventSource, max_wait_ms: u64 },
+
+    #[error("writer batch has {items} item(s), exceeding the {max_items}-item bound")]
+    WriterBatchBound { items: usize, max_items: usize },
+
+    #[error("writer request requires {bytes} bytes, exceeding the {max_bytes}-byte bound")]
+    WriterMemoryBound { bytes: u64, max_bytes: u64 },
+
+    #[error("writer has stopped")]
+    WriterStopped,
+
+    #[error("writer request was cancelled before commit")]
+    WriterCancelled,
+
+    #[error("writer acknowledgement wait exceeded {max_wait_ms}ms")]
+    WriterAckTimeout { max_wait_ms: u64 },
+
+    #[error("writer exhausted its {attempts} bounded attempt(s)")]
+    WriterRetryExhausted { attempts: u32 },
+
+    #[error("writer batch contains multiple event sources")]
+    WriterMixedSources,
+
+    #[error("invalid writer diagnostic: {0}")]
+    InvalidWriterDiagnostic(String),
 }
 
 /// Errors from payload encryption and authenticated decryption.
