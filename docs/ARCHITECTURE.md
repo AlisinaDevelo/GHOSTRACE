@@ -94,6 +94,30 @@ matrix, explicit redaction/summarization, migration reason codes, consent replay
 and rejection of silent reactivation before this gate is connected to a live
 collector.
 
+## Versioned exclusion matching
+
+The pre-persistence exclusion engine is a separate `exclusion-policy-v1` document
+with a positive version and at most 128 rules. It evaluates an ephemeral subject
+(root identity, relative path, file kind, application, temporary-file flag, and VCS
+flag) and returns only an action, rule class, reason code, and policy version. It
+never places the observed path, application, or pattern in a decision record.
+
+Precedence is deterministic and independent of input order:
+
+1. Safety action: `deny` > `redact` > `summarize` > `allow`.
+2. Rule class: user pattern > subtree > root > application > file kind > temporary
+   file > VCS.
+3. Specificity: more literal pattern content wins; an identical decision does not
+   depend on which equal rule appeared first.
+
+Subtree, application, and user patterns use a bounded glob language (`*`, `?`, and
+explicit backslash escapes). Matching is greedy and linear rather than regex
+backtracking. Paths reject absolute, traversal, control-character, and oversized
+inputs before matching; case-folding is deterministic and no cross-volume identity
+is inferred. `ExclusionPolicyHistory` applies a newly installed version only to
+future subjects while retaining validated prior versions for explicitly recorded
+evidence.
+
 ## Bounded durable writer contract
 
 All adapters hand accepted batches to one FIFO `Writer`; they never open a second
