@@ -661,6 +661,7 @@ impl FseventsCollector {
         if self.state != CollectorState::Running {
             return Err(FseventsCollectorError::InvalidState { action: "drive the run loop" });
         }
+        self.check_history_timeout()?;
         self.stream.run_current_run_loop_for(duration)?;
         let committed = self.drain_pending()?;
         self.check_history_timeout()?;
@@ -674,6 +675,7 @@ impl FseventsCollector {
         if self.state != CollectorState::Running {
             return Err(FseventsCollectorError::InvalidState { action: "flush" });
         }
+        self.check_history_timeout()?;
         self.stream.flush()?;
         let committed = self.drain_pending()?;
         self.check_history_timeout()?;
