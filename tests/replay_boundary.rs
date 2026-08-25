@@ -3,9 +3,9 @@ use std::fs;
 use chrono::{TimeZone, Utc};
 use ghostrace::{
     CursorIdentity, CursorStreamMode, DeterministicKeyProvider, EventEnvelope, EventKind,
-    EventPayload, EventSource, Evidence, FaultPlan, FaultPoint, GapPayload, GhostraceError,
-    IngestionOrigin, Journal, PolicyProfile, ReasonCode, ReplayBoundary, ReplayConfiguration,
-    SnapshotDigest, SourceCursor, VolumeIdentity,
+    EventPayload, EventSource, Evidence, FaultPlan, FaultPoint, GapPayload, GapRemediation,
+    GhostraceError, IngestionOrigin, Journal, PolicyProfile, ReasonCode, ReplayBoundary,
+    ReplayConfiguration, SnapshotDigest, SourceCursor, VolumeIdentity,
 };
 use tempfile::tempdir;
 use uuid::Uuid;
@@ -75,6 +75,34 @@ fn event(id: u128, cursor: &str) -> EventEnvelope {
         None,
     )
     .expect("event")
+}
+
+fn recovery_gap_event(id: u128, cursor: &str) -> EventEnvelope {
+    let timestamp = Utc.timestamp_opt(1_735_689_700 + id as i64, 0).single().expect("timestamp");
+    EventEnvelope::new(
+        &origin(),
+        Uuid::from_u128(id),
+        timestamp,
+        timestamp,
+        EventSource::Filesystem,
+        EventKind::Gap,
+        EventPayload::Gap(GapPayload {
+            source: EventSource::Filesystem,
+            reason_code: ReasonCode::try_from("fsevents_history_incomplete").expect("reason"),
+            dropped_count: 0,
+            from_cursor: None,
+            to_cursor: None,
+            volume_digest: Some(digest('c')),
+            root_ids: Vec::new(),
+            remediation: Some(GapRemediation::ReinitializeStream),
+        }),
+        Some(SourceCursor::try_from(cursor).expect("cursor")),
+        "replay-boundary-policy",
+        1,
+        Evidence::Unknown,
+        None,
+    )
+    .expect("recovery gap event")
 }
 
 fn private_tempdir() -> tempfile::TempDir {
@@ -171,6 +199,37 @@ fn restart_replays_idempotently_and_advances_atomically_with_boundary() {
             .expect("retry"),
         1
     );
+}
+
+#[test]
+fn recovery_gap_invalidates_cursor_atomically_and_survives_reopen() {
+    let directory = private_tempdir();
+    let path = directory.path().join("recovery-gap.sqlite3");
+    let base = boundary();
+    let policy = policy();
+    let journal = Journal::open_fixture(&path, DeterministicKeyProvider::from_seed("recovery-gap"))
+        .expect("open");
+    journal
+        .ingest_with_boundary(&origin(), &event(40, "cursor-1"), &policy, &base)
+        .expect("initial event");
+    journal
+        .ingest_with_boundary(&origin(), &recovery_gap_event(41, "cursor-2"), &policy, &base)
+        .expect("recovery gap");
+    let state = journal.cursor_state(&identity()).expect("state").expect("cursor");
+    assert_eq!(state.status, ghostrace::CursorStatus::Invalidated);
+    assert_eq!(state.token.raw().as_str(), "cursor-2");
+    assert!(matches!(
+        journal.ingest_with_boundary(&origin(), &event(42, "cursor-3"), &policy, &base),
+        Err(GhostraceError::CursorInvalidated { .. })
+    ));
+
+    let reopened =
+        Journal::open_fixture(&path, DeterministicKeyProvider::from_seed("recovery-gap"))
+            .expect("reopen");
+    let recovered = reopened.cursor_state(&identity()).expect("recovered state").expect("cursor");
+    assert_eq!(recovered.status, ghostrace::CursorStatus::Invalidated);
+    assert_eq!(recovered.token.raw().as_str(), "cursor-2");
+    assert_eq!(reopened.events().expect("events").len(), 2);
 }
 
 #[test]

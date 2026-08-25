@@ -563,6 +563,18 @@ impl Journal {
         read_cursor_state(&connection, identity)
     }
 
+    /// Read the durable row selected by source and collector instance without
+    /// hiding a stored volume or stream-identity mismatch. A restarting source
+    /// must inspect that mismatch and emit a recovery gap instead of silently
+    /// starting a fresh `SinceNow` stream.
+    pub(crate) fn cursor_state_for_recovery(
+        &self,
+        identity: &CursorIdentity,
+    ) -> Result<Option<CursorState>, GhostraceError> {
+        let connection = self.lock_connection()?;
+        read_cursor_state_for_recovery(&connection, identity)
+    }
+
     /// Explicitly establish a new cursor epoch after a collector reset.  A
     /// reset is durable control state; the first event in the new epoch is
     /// accepted only after this operation has committed.
@@ -816,6 +828,12 @@ fn validate_boundary_transition(
     let Some(current) = current else {
         return Ok(());
     };
+    if candidate.is_none() && event_requires_recovery_gap(event) {
+        // A path-free startup/recovery gap documents a boundary mismatch
+        // without pretending that the new adapter configuration can bind to
+        // the old replay contract.
+        return Ok(());
+    }
     match (current.boundary.as_ref(), candidate) {
         (Some(stored), Some(candidate)) if stored == candidate => Ok(()),
         (None, None) => Ok(()),
@@ -834,7 +852,8 @@ fn insert_events(
     let mut sequences = Vec::with_capacity(events.len());
     for event in events {
         let token = event.source_cursor.as_ref().map(|cursor| CursorToken::new(cursor.clone()));
-        let current = if token.is_some() || boundary.is_some() {
+        let recovery_gap = event_requires_recovery_gap(event);
+        let current = if token.is_some() || boundary.is_some() || recovery_gap {
             load_cursor_state_transaction(transaction, event.source, event.collector_instance())?
         } else {
             None
@@ -929,16 +948,17 @@ fn insert_events(
         if let Some(token) = token {
             let epoch =
                 token.epoch().or_else(|| current.as_ref().map(|state| state.epoch)).unwrap_or(0);
+            let cursor_status = if recovery_gap { "invalidated" } else { "active" };
             faults.hit(FaultPoint::CursorBeforeUpdate)?;
             transaction.execute(
                 "INSERT INTO cursors(
                     source, collector_instance, source_cursor, updated_at, epoch, state,
                     cursor_kind, policy_profile_id, policy_profile_version, last_event_id,
                     boundary_json
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6, ?7, ?8, ?9, ?10)
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
                  ON CONFLICT(source, collector_instance) DO UPDATE SET
                     source_cursor=excluded.source_cursor, updated_at=excluded.updated_at,
-                    epoch=excluded.epoch, state='active', cursor_kind=excluded.cursor_kind,
+                    epoch=excluded.epoch, state=excluded.state, cursor_kind=excluded.cursor_kind,
                     policy_profile_id=excluded.policy_profile_id,
                     policy_profile_version=excluded.policy_profile_version,
                     last_event_id=excluded.last_event_id,
@@ -949,12 +969,24 @@ fn insert_events(
                     token.raw().as_str(),
                     event.ingested_at.to_rfc3339(),
                     epoch as i64,
+                    cursor_status,
                     token.kind().as_str(),
                     event.policy_profile_id.as_str(),
                     event.policy_profile_version,
                     event.event_id.to_string(),
                     boundary.map(serde_json::to_string).transpose()?,
                 ],
+            )?;
+            faults.hit(FaultPoint::CursorAfterUpdate)?;
+        } else if recovery_gap && current.is_some() {
+            // Keep an incomparable recovery gap and the recovery gate in one
+            // SQLite transaction. A crash cannot leave the journal looking
+            // continuously covered after the gap was already visible.
+            faults.hit(FaultPoint::CursorBeforeUpdate)?;
+            transaction.execute(
+                "UPDATE cursors SET state = 'invalidated'
+                 WHERE source = ?1 AND collector_instance = ?2",
+                params![event.source.to_string(), event.collector_instance()],
             )?;
             faults.hit(FaultPoint::CursorAfterUpdate)?;
         }
@@ -981,6 +1013,14 @@ const EVENT_SELECT_BY_CURSOR: &str =
 
 fn same_event_semantics(left: &EventEnvelope, right: &EventEnvelope) -> bool {
     serde_json::to_vec(left).ok() == serde_json::to_vec(right).ok()
+}
+
+fn event_requires_recovery_gap(event: &EventEnvelope) -> bool {
+    matches!(
+        &event.payload,
+        crate::model::EventPayload::Gap(payload)
+            if payload.remediation.is_some() && payload.reason_code.as_str() != "cursor_jump"
+    )
 }
 
 fn validate_cursor_transition(
@@ -1119,6 +1159,21 @@ fn read_cursor_state(
     connection: &Connection,
     identity: &CursorIdentity,
 ) -> Result<Option<CursorState>, GhostraceError> {
+    read_cursor_state_with_filter(connection, identity, true)
+}
+
+fn read_cursor_state_for_recovery(
+    connection: &Connection,
+    identity: &CursorIdentity,
+) -> Result<Option<CursorState>, GhostraceError> {
+    read_cursor_state_with_filter(connection, identity, false)
+}
+
+fn read_cursor_state_with_filter(
+    connection: &Connection,
+    identity: &CursorIdentity,
+    require_identity_match: bool,
+) -> Result<Option<CursorState>, GhostraceError> {
     let row = connection
         .query_row(
             "SELECT source_cursor, epoch, state, cursor_kind, policy_profile_id,
@@ -1156,8 +1211,12 @@ fn read_cursor_state(
                 })
                 .transpose()?;
             let boundary = parse_boundary_json(boundary_json)?;
+            let stored_identity = boundary
+                .as_ref()
+                .map(|boundary| boundary.identity.clone())
+                .unwrap_or_else(|| identity.clone());
             Ok(CursorState {
-                identity: identity.clone(),
+                identity: stored_identity,
                 token: CursorToken::new(cursor),
                 status: CursorStatus::parse(&status)?,
                 epoch,
@@ -1170,9 +1229,13 @@ fn read_cursor_state(
     )
     .transpose()
     .map(|state| {
-        state.filter(|state| {
-            state.boundary.as_ref().is_none_or(|boundary| boundary.identity == *identity)
-        })
+        if require_identity_match {
+            state.filter(|state| {
+                state.boundary.as_ref().is_none_or(|boundary| boundary.identity == *identity)
+            })
+        } else {
+            state
+        }
     })
 }
 

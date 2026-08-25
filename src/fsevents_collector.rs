@@ -40,11 +40,12 @@ use uuid::Uuid;
 
 use crate::{
     consent::{ConsentConfirmation, ConsentReceipt, ConsentState, ConsentStateMachine},
-    cursor::{CursorIdentity, CursorToken, ReplayBoundary},
+    cursor::{CursorIdentity, CursorStatus, CursorToken, ReplayBoundary},
     error::GhostraceError,
     fsevents::{
         CallbackHealth, FseventsError, FseventsEvent, FseventsOptions, FseventsStream,
-        StartupCursorDecision, StartupCursorError, StreamState,
+        StartupCursor, StartupCursorDecision, StartupCursorError, StartupCursorRejection,
+        StreamState, EVENT_ID_SINCE_NOW,
     },
     fsevents_flags::{FseventsEventFlag, FseventsEvidenceStatus, NormalizedFseventsEvent},
     journal::{DiagnosticRecord, Journal},
@@ -376,6 +377,9 @@ pub enum FseventsCollectorError {
     #[error("the lifecycle event could not be durably admitted")]
     LifecycleAdmissionGap,
 
+    #[error("the startup recovery gap could not be durably admitted")]
+    StartupGapAdmission,
+
     #[error(transparent)]
     Stream(#[from] FseventsError),
 
@@ -448,7 +452,6 @@ impl FseventsCollector {
         if config.history_timeout.is_zero() || config.history_timeout > Duration::from_secs(3600) {
             return Err(FseventsCollectorError::InvalidHistoryTimeout);
         }
-        let startup_decision = config.options.startup_decision(None)?;
         let policy = PolicyProfile::from_document(&document)?;
         if !policy.is_source_enabled(EventSource::Filesystem)
             || !policy.is_source_enabled(EventSource::Lifecycle)
@@ -471,9 +474,16 @@ impl FseventsCollector {
             config.options.stream_mode,
             roots[0].volume.clone(),
         )?;
+        // The requested `since_when` belongs to the durable replay boundary.
+        // A restart may derive a different native start ID from that boundary's
+        // committed cursor, but that derived value must not look like a changed
+        // configuration to the journal.
+        let requested_options = config.options.clone();
         let replay_configuration =
-            config.options.replay_configuration(root_scope_digest, exclusions_digest)?;
+            requested_options.replay_configuration(root_scope_digest, exclusions_digest)?;
         let replay_boundary = ReplayBoundary::new(cursor_identity, replay_configuration)?;
+        let (stream_options, startup_decision, startup_gap_reason) =
+            startup_plan(&journal, &replay_boundary, &requested_options)?;
 
         let mut consent = ConsentStateMachine::new();
         let consent_receipt = consent.grant_preview(
@@ -495,7 +505,7 @@ impl FseventsCollector {
         let pending = Arc::new(Mutex::new(PendingState::default()));
         let callback_pending = Arc::clone(&pending);
         let paths = roots.iter().map(|root| root.path().to_path_buf()).collect::<Vec<_>>();
-        let stream = FseventsStream::new(paths, config.options, move |batch| {
+        let stream = FseventsStream::new(paths, stream_options, move |batch| {
             let mut pending =
                 callback_pending.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             if !pending.accepting {
@@ -512,7 +522,7 @@ impl FseventsCollector {
         })?;
         let writer = Writer::new(journal.clone(), config.writer)?;
 
-        Ok(Self {
+        let mut collector = Self {
             stream,
             pending,
             roots,
@@ -539,7 +549,11 @@ impl FseventsCollector {
             unsupported_events: 0,
             contradictory_events: 0,
             recovery_required: false,
-        })
+        };
+        if let Some(reason_code) = startup_gap_reason {
+            collector.submit_startup_gap(reason_code)?;
+        }
+        Ok(collector)
     }
 
     pub fn status(&self) -> CollectorStatus {
@@ -562,6 +576,12 @@ impl FseventsCollector {
 
     pub fn consent_receipt(&self) -> &ConsentReceipt {
         &self.consent_receipt
+    }
+
+    /// Return the validated native startup mode. A restart with a committed
+    /// cursor reports `Replay`; an uninitialized journal reports `SinceNow`.
+    pub fn startup_cursor_decision(&self) -> StartupCursorDecision {
+        self.startup_decision
     }
 
     pub fn journal(&self) -> Journal {
@@ -961,6 +981,35 @@ impl FseventsCollector {
     }
 
     fn submit_gap(&mut self, gap: GapSubmission) -> Result<(), FseventsCollectorError> {
+        self.submit_gap_with_boundary(gap, Some(self.replay_boundary.clone()), false)
+    }
+
+    fn submit_startup_gap(
+        &mut self,
+        reason_code: &'static str,
+    ) -> Result<(), FseventsCollectorError> {
+        self.submit_gap_with_boundary(
+            GapSubmission {
+                dropped_count: 0,
+                reason_code,
+                source_cursor: None,
+                from_cursor: None,
+                to_cursor: None,
+                remediation: Some(GapRemediation::ReinitializeStream),
+                root_ids: self.all_root_ids(),
+                requires_reconciliation: true,
+            },
+            None,
+            true,
+        )
+    }
+
+    fn submit_gap_with_boundary(
+        &mut self,
+        gap: GapSubmission,
+        boundary: Option<ReplayBoundary>,
+        require_durable: bool,
+    ) -> Result<(), FseventsCollectorError> {
         let requires_reconciliation = gap.requires_reconciliation;
         let event = EventEnvelope::new(
             &self.origin,
@@ -985,13 +1034,14 @@ impl FseventsCollector {
             Evidence::Unknown,
             None,
         )?;
-        match self.writer.submit_with_boundary(
+        let outcome = self.writer.submit_with_boundary(
             self.origin.clone(),
             vec![event],
             self.policy.clone(),
             Vec::new(),
-            Some(self.replay_boundary.clone()),
-        )? {
+            boundary,
+        )?;
+        match outcome {
             WriterOutcome::Committed(_) => {
                 if requires_reconciliation {
                     self.recovery_required = true;
@@ -1007,6 +1057,9 @@ impl FseventsCollector {
                     self.recovery_required = true;
                     self.coverage_state = CollectorCoverageState::HistoryUnavailable;
                     self.history_started_at = None;
+                }
+                if require_durable {
+                    return Err(FseventsCollectorError::StartupGapAdmission);
                 }
                 Ok(())
             }
@@ -1155,6 +1208,78 @@ impl Drop for FseventsCollector {
     fn drop(&mut self) {
         self.set_accepting(false);
     }
+}
+
+fn startup_plan(
+    journal: &Journal,
+    boundary: &ReplayBoundary,
+    requested_options: &FseventsOptions,
+) -> Result<(FseventsOptions, StartupCursorDecision, Option<&'static str>), FseventsCollectorError>
+{
+    let mut stream_options = requested_options.clone();
+    let persisted = journal.cursor_state_for_recovery(&boundary.identity)?;
+    let Some(state) = persisted else {
+        return startup_result(stream_options, None);
+    };
+
+    // A row from a different boundary is still visible to recovery code. It
+    // must become an explicit durable gap, not disappear behind the normal
+    // identity-filtered cursor read and silently downgrade to SinceNow.
+    if state.boundary.as_ref() != Some(boundary) {
+        return Ok((
+            stream_options,
+            StartupCursorDecision::SinceNow,
+            Some("fsevents_cursor_boundary_mismatch"),
+        ));
+    }
+
+    match state.status {
+        CursorStatus::Invalidated => Ok((
+            stream_options,
+            StartupCursorDecision::SinceNow,
+            Some("fsevents_cursor_invalidated"),
+        )),
+        CursorStatus::Wrapped => {
+            Ok((stream_options, StartupCursorDecision::SinceNow, Some("fsevents_cursor_wrapped")))
+        }
+        CursorStatus::Reset if state.last_event_id.is_none() => {
+            startup_result(stream_options, None)
+        }
+        CursorStatus::Active if state.last_event_id.is_none() => {
+            startup_result(stream_options, None)
+        }
+        CursorStatus::Reset => {
+            Ok((stream_options, StartupCursorDecision::SinceNow, Some("fsevents_cursor_invalid")))
+        }
+        CursorStatus::Active => match StartupCursor::from_source_cursor(state.token.raw()) {
+            Ok(StartupCursor::EventId { event_id }) => {
+                if requested_options.since_when == EVENT_ID_SINCE_NOW {
+                    stream_options.since_when = event_id;
+                }
+                startup_result(stream_options, None)
+            }
+            Ok(StartupCursor::SinceNow) => startup_result(stream_options, None),
+            Err(StartupCursorError::Refused(StartupCursorRejection::Wrapped)) => Ok((
+                stream_options,
+                StartupCursorDecision::SinceNow,
+                Some("fsevents_cursor_wrapped"),
+            )),
+            Err(_) => Ok((
+                stream_options,
+                StartupCursorDecision::SinceNow,
+                Some("fsevents_cursor_invalid"),
+            )),
+        },
+    }
+}
+
+fn startup_result(
+    options: FseventsOptions,
+    recovery_gap_reason: Option<&'static str>,
+) -> Result<(FseventsOptions, StartupCursorDecision, Option<&'static str>), FseventsCollectorError>
+{
+    let decision = options.startup_decision(None)?;
+    Ok((options, decision, recovery_gap_reason))
 }
 
 fn validate_roots(
