@@ -45,6 +45,20 @@ The checker rejects a missing fixture, byte drift, digest drift, changed generat
 version or seed, unsafe path, schema drift, or a privacy declaration that permits
 user data or network access.
 
+The filesystem lifecycle corpus has a separate validator because its contract also
+binds scenario ground truth and reporting semantics:
+
+```sh
+python3 scripts/fsevents-lifecycle-corpus.py check
+```
+
+That command is offline and deterministic. It checks all nine rows, including the
+three guarded no-go rows, then replays the pinned operation projection 32 times and
+reports omission, duplicate, ordering, recovery, and resource distributions. The
+replay is a fixture-contract check, not a claim of native coverage. Native macOS
+evidence must come from the selected-root integration test and must state the exact
+device, run count, counters, retained receipt, and any no-go transition.
+
 ## Clean-machine smoke
 
 After installing the pinned inputs, run the complete local reproduction lane:

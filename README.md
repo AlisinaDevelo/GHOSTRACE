@@ -83,6 +83,7 @@ encryption or key-management claim.
 | ghostrace capture | Refuses by design |
 | Local journal and bounded durable writer | Scaffolded for the fixture path; live ingestion is gated |
 | Selected-root FSEvents collector API | Available only behind explicit consent; no ambient CLI |
+| Storm/lifecycle corpus and native-safe macOS receipt | Available as a bounded test contract; sleep/wake, logout, and volume detach are explicit no-go rows |
 | Shell, Git, frontmost-app, or browser collectors | Not shipped |
 | macOS Keychain-backed production encryption | Not shipped |
 | Signed/notarized release artifacts | Not shipped |
@@ -173,6 +174,7 @@ docs/adr/            Immutable architecture decisions
 - [Threat model](docs/THREAT_MODEL.md) — assets, STRIDE analysis, and residual risk
 - [Event model](docs/EVENT_MODEL.md) — evidence levels, provenance, and gaps
 - [Evaluation](docs/EVALUATION.md) — correctness, privacy, and performance gates
+- [FSEvents lifecycle corpus](fixtures/fsevents-lifecycle-corpus-v1.json) — ground truth, coalescing, gaps, and guarded device rows
 - [Reproducibility](docs/REPRODUCIBILITY.md) — pinned toolchain, fixture provenance, and clean-machine smoke
 - [Research](docs/RESEARCH.md) — landscape, differentiation, and primary sources
 - [Identity gate](docs/IDENTITY.md) — qualified descriptor, release identifiers, and legal-review boundary

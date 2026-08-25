@@ -30,6 +30,14 @@
       "seed": "ghostrace-fixture-seed-v1",
       "sha256": "4e7583fb843a1faac177ea14d6a7f6e4e61363178228fbf6a1c60858bbd0c462",
       "bytes": 8044
+    },
+    {
+      "path": "fixtures/fsevents-lifecycle-corpus-v1.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "f7c433d96bdb6d9c1260913b8168383a6d895d47dc468ec63a5e1b876287d322",
+      "bytes": 8396
     }
   ],
   "privacy": {

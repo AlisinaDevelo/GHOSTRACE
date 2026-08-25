@@ -135,6 +135,14 @@ overflow becomes a first-class gap, and blocked observations become a bounded su
 The public status exposes running/stopped/revoked state, callback health, accepted and
 dropped counts, and coverage-loss counters without retaining paths.
 
+The storm/lifecycle evaluation contract is kept separate from the source boundary in
+[`fixtures/fsevents-lifecycle-corpus-v1.json`](../fixtures/fsevents-lifecycle-corpus-v1.json).
+It records ground-truth operations, expected direct observations, allowed coalescing,
+required gaps, recovery gates, and resource limits. The macOS integration test executes
+only private, non-disruptive rows and emits path-free counts. Sleep/wake, logout, and
+volume-detach rows are guarded no-go cases: they require an explicitly authorized
+interactive run and cannot be satisfied by replay or hosted CI.
+
 When a later consumer must open an existing item, `SelectedRoot::open_contained`
 performs a descriptor walk from the selected root. Each component is opened with
 `O_NOFOLLOW`; parent descriptors, not a revalidated pathname, authorize the next
