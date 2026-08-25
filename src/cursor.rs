@@ -5,15 +5,19 @@
 //! makes ordering explicit, and requires a named reset/wrap operation whenever
 //! an opaque or regressed stream cannot be compared safely.
 
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::{
     error::GhostraceError,
-    model::{CollectorInstanceId, EventSource, SourceCursor},
+    model::{CollectorInstanceId, EventSource, SnapshotDigest, SourceCursor},
     volume::VolumeIdentity,
 };
 
 pub const CURSOR_CONTRACT_VERSION: u32 = 1;
+pub const REPLAY_BOUNDARY_CONTRACT_VERSION: u32 = 1;
 
 /// The FSEvents stream scope is part of cursor identity.  Per-host and
 /// per-device IDs are not interchangeable, and fixture cursors must never be
@@ -33,6 +37,99 @@ pub struct CursorIdentity {
     pub stream_mode: CursorStreamMode,
     #[serde(default)]
     pub volume: Option<VolumeIdentity>,
+}
+
+/// Settings that define which source history a cursor can safely replay.
+/// These are stored as bounded, path-free evidence alongside the cursor; a
+/// numeric event ID without this context is not a valid recovery boundary.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplayConfiguration {
+    pub contract_version: u32,
+    pub root_scope_digest: SnapshotDigest,
+    pub exclusions_digest: SnapshotDigest,
+    pub since_when: u64,
+    pub latency_millis: u64,
+    pub file_events: bool,
+}
+
+impl ReplayConfiguration {
+    pub fn new(
+        root_scope_digest: SnapshotDigest,
+        exclusions_digest: SnapshotDigest,
+        since_when: u64,
+        latency: Duration,
+        file_events: bool,
+    ) -> Result<Self, GhostraceError> {
+        let latency_millis = latency.as_millis();
+        if latency_millis > 3_600_000 || latency_millis > u128::from(u64::MAX) {
+            return Err(GhostraceError::InvalidEvent(
+                "replay latency exceeds the one-hour boundary".to_owned(),
+            ));
+        }
+        Ok(Self {
+            contract_version: REPLAY_BOUNDARY_CONTRACT_VERSION,
+            root_scope_digest,
+            exclusions_digest,
+            since_when,
+            latency_millis: latency_millis as u64,
+            file_events,
+        })
+    }
+
+    pub fn digest(&self) -> Result<SnapshotDigest, GhostraceError> {
+        if self.contract_version != REPLAY_BOUNDARY_CONTRACT_VERSION {
+            return Err(GhostraceError::InvalidEvent(
+                "replay configuration contract version is unsupported".to_owned(),
+            ));
+        }
+        let encoded = serde_json::to_vec(self)?;
+        let digest = Sha256::digest(encoded);
+        let hex = digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+        SnapshotDigest::try_from(format!("sha256:{hex}"))
+    }
+}
+
+/// The complete durable replay boundary.  A changed root, exclusion set,
+/// latency, since-when, or file-event setting is a different boundary and is
+/// refused until the caller explicitly establishes a new epoch.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplayBoundary {
+    pub contract_version: u32,
+    pub identity: CursorIdentity,
+    pub configuration: ReplayConfiguration,
+}
+
+impl ReplayBoundary {
+    pub fn new(
+        identity: CursorIdentity,
+        configuration: ReplayConfiguration,
+    ) -> Result<Self, GhostraceError> {
+        if identity.volume.is_none() || matches!(identity.stream_mode, CursorStreamMode::Fixture) {
+            return Err(GhostraceError::InvalidEvent(
+                "durable replay boundaries require a live volume identity".to_owned(),
+            ));
+        }
+        if configuration.contract_version != REPLAY_BOUNDARY_CONTRACT_VERSION {
+            return Err(GhostraceError::InvalidEvent(
+                "replay configuration contract version is unsupported".to_owned(),
+            ));
+        }
+        Ok(Self { contract_version: REPLAY_BOUNDARY_CONTRACT_VERSION, identity, configuration })
+    }
+
+    pub fn digest(&self) -> Result<SnapshotDigest, GhostraceError> {
+        if self.contract_version != REPLAY_BOUNDARY_CONTRACT_VERSION {
+            return Err(GhostraceError::InvalidEvent(
+                "replay boundary contract version is unsupported".to_owned(),
+            ));
+        }
+        let encoded = serde_json::to_vec(self)?;
+        let digest = Sha256::digest(encoded);
+        let hex = digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+        SnapshotDigest::try_from(format!("sha256:{hex}"))
+    }
 }
 
 impl CursorIdentity {
@@ -278,6 +375,7 @@ pub struct CursorState {
     pub policy_profile_id: Option<String>,
     pub policy_profile_version: Option<u32>,
     pub last_event_id: Option<String>,
+    pub boundary: Option<ReplayBoundary>,
 }
 
 impl CursorState {

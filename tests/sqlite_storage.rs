@@ -32,9 +32,9 @@ fn file_backed_journal_enforces_schema_pragmas_permissions_and_durable_state() {
     assert_eq!(journal.journal_mode().expect("journal mode").to_ascii_lowercase(), "wal");
     assert_eq!(journal.synchronous_mode().expect("synchronous mode"), "FULL");
     assert!(journal.foreign_keys_enabled().expect("foreign keys"));
-    assert_eq!(journal.schema_version_count().expect("schema versions"), 3);
-    assert_eq!(journal.schema_version().expect("user version"), 3);
-    assert_eq!(journal.applied_migrations().expect("migration ledger").len(), 4);
+    assert_eq!(journal.schema_version_count().expect("schema versions"), 4);
+    assert_eq!(journal.schema_version().expect("user version"), 4);
+    assert_eq!(journal.applied_migrations().expect("migration ledger").len(), 5);
     #[cfg(unix)]
     {
         assert_eq!(mode(directory.path()), 0o700);
@@ -63,11 +63,11 @@ fn reopening_the_file_journal_reuses_the_same_migration_ledger() {
 
     let first = Journal::open_fixture(&path, provider.clone()).expect("first open");
     let first_ledger = first.applied_migrations().expect("first ledger");
-    assert_eq!(first_ledger.len(), 4);
+    assert_eq!(first_ledger.len(), 5);
     drop(first);
 
     let reopened = Journal::open_fixture(&path, provider).expect("reopen");
     assert_eq!(reopened.applied_migrations().expect("reopened ledger"), first_ledger);
-    assert_eq!(reopened.schema_version().expect("reopened version"), 3);
-    assert_eq!(reopened.schema_version_count().expect("reopened schema"), 3);
+    assert_eq!(reopened.schema_version().expect("reopened version"), 4);
+    assert_eq!(reopened.schema_version_count().expect("reopened schema"), 4);
 }

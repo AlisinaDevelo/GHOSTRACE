@@ -21,6 +21,7 @@ use rusqlite::ErrorCode;
 use uuid::Uuid;
 
 use crate::{
+    cursor::ReplayBoundary,
     error::{CryptoError, GhostraceError},
     journal::{DiagnosticRecord, Journal},
     model::{EventEnvelope, EventSource, IngestionOrigin},
@@ -288,8 +289,19 @@ impl Writer {
         policy: PolicyProfile,
         diagnostics: Vec<DiagnosticRecord>,
     ) -> Result<WriterSubmission, GhostraceError> {
+        self.enqueue_with_boundary(origin, events, policy, diagnostics, None)
+    }
+
+    pub fn enqueue_with_boundary(
+        &self,
+        origin: IngestionOrigin,
+        events: Vec<EventEnvelope>,
+        policy: PolicyProfile,
+        diagnostics: Vec<DiagnosticRecord>,
+        boundary: Option<ReplayBoundary>,
+    ) -> Result<WriterSubmission, GhostraceError> {
         let source = validate_batch(&events, &self.config)?;
-        let bytes = estimate_request_bytes(&events, &policy, &diagnostics)?;
+        let bytes = estimate_request_bytes(&events, &policy, &diagnostics, boundary.as_ref())?;
         if bytes > self.config.max_memory_bytes {
             return Err(GhostraceError::WriterMemoryBound {
                 bytes,
@@ -329,6 +341,7 @@ impl Writer {
             response_sender,
             cancelled: Arc::clone(&cancelled),
             started: Arc::clone(&started),
+            boundary,
             reserved_bytes: bytes,
             enqueued_at: Instant::now(),
         };
@@ -356,9 +369,20 @@ impl Writer {
         policy: PolicyProfile,
         diagnostics: Vec<DiagnosticRecord>,
     ) -> Result<WriterOutcome, GhostraceError> {
+        self.submit_with_boundary(origin, events, policy, diagnostics, None)
+    }
+
+    pub fn submit_with_boundary(
+        &self,
+        origin: IngestionOrigin,
+        events: Vec<EventEnvelope>,
+        policy: PolicyProfile,
+        diagnostics: Vec<DiagnosticRecord>,
+        boundary: Option<ReplayBoundary>,
+    ) -> Result<WriterOutcome, GhostraceError> {
         let source = validate_batch(&events, &self.config)?;
         let event_count = events.len();
-        match self.enqueue(origin, events, policy, diagnostics)? {
+        match self.enqueue_with_boundary(origin, events, policy, diagnostics, boundary)? {
             WriterSubmission::Queued(ticket) => match ticket.wait() {
                 Ok(ack) => Ok(WriterOutcome::Committed(ack)),
                 Err(error)
@@ -487,6 +511,7 @@ struct WriteRequest {
     events: Vec<EventEnvelope>,
     policy: PolicyProfile,
     diagnostics: Vec<DiagnosticRecord>,
+    boundary: Option<ReplayBoundary>,
     response_sender: mpsc::Sender<Result<WriteAck, GhostraceError>>,
     cancelled: Arc<AtomicBool>,
     started: Arc<AtomicBool>,
@@ -534,11 +559,12 @@ fn process_request(
     let mut attempts = 0u32;
     let sequences = loop {
         attempts += 1;
-        match journal.ingest_batch_with_diagnostics(
+        match journal.ingest_batch_with_boundary(
             &request.origin,
             &request.events,
             &request.policy,
             &request.diagnostics,
+            request.boundary.as_ref(),
         ) {
             Ok(sequences) => break sequences,
             Err(error) if retryable(&error) && attempts <= u32::from(config.max_retries) => {
@@ -605,13 +631,17 @@ fn estimate_request_bytes(
     events: &[EventEnvelope],
     policy: &PolicyProfile,
     diagnostics: &[DiagnosticRecord],
+    boundary: Option<&ReplayBoundary>,
 ) -> Result<u64, GhostraceError> {
     let event_bytes = serde_json::to_vec(events)?.len() as u64;
     let policy_bytes = serde_json::to_vec(policy)?.len() as u64;
     let diagnostic_bytes = serde_json::to_vec(diagnostics)?.len() as u64;
+    let boundary_bytes =
+        boundary.map(serde_json::to_vec).transpose()?.map_or(0, |value| value.len()) as u64;
     let total = event_bytes
         .checked_add(policy_bytes)
         .and_then(|value| value.checked_add(diagnostic_bytes))
+        .and_then(|value| value.checked_add(boundary_bytes))
         .and_then(|value| value.checked_add(256))
         .ok_or_else(|| GhostraceError::WriterMemoryBound {
             bytes: u64::MAX,

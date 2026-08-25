@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::{
     crypto::{decrypt_payload, encrypt_payload, KeyProvider, SharedKeyProvider},
-    cursor::{CursorIdentity, CursorKind, CursorState, CursorStatus, CursorToken},
+    cursor::{CursorIdentity, CursorKind, CursorState, CursorStatus, CursorToken, ReplayBoundary},
     error::GhostraceError,
     fault::{FaultPlan, FaultPoint},
     model::{
@@ -32,6 +32,7 @@ const MIGRATION_LEDGER: &str = include_str!("../migrations/0000_migration_ledger
 const MIGRATION: &str = include_str!("../migrations/0001_init.sql");
 const MIGRATION_METADATA: &str = include_str!("../migrations/0002_journal_metadata.sql");
 const MIGRATION_CURSOR_CONTRACT: &str = include_str!("../migrations/0003_cursor_contract.sql");
+const MIGRATION_REPLAY_BOUNDARY: &str = include_str!("../migrations/0004_replay_boundary.sql");
 const MIGRATION_TOOL_VERSION: &str = concat!("ghostrace/", env!("CARGO_PKG_VERSION"));
 const MIGRATION_MODE_KEY: &str = "mode";
 
@@ -458,6 +459,24 @@ impl Journal {
         Ok(self.ingest_batch(origin, std::slice::from_ref(event), policy)?[0])
     }
 
+    /// Ingest one event while binding its cursor advancement to a durable
+    /// volume and stream configuration boundary.
+    pub fn ingest_with_boundary(
+        &self,
+        origin: &IngestionOrigin,
+        event: &EventEnvelope,
+        policy: &PolicyProfile,
+        boundary: &ReplayBoundary,
+    ) -> Result<u64, GhostraceError> {
+        Ok(self.ingest_batch_with_boundary(
+            origin,
+            std::slice::from_ref(event),
+            policy,
+            &[],
+            Some(boundary),
+        )?[0])
+    }
+
     /// Inserts accepted events and cursor progress in one SQLite transaction.
     /// Parent references must already exist or point to an earlier event in this
     /// batch; a missing parent is rejected before commit.
@@ -480,6 +499,21 @@ impl Journal {
         policy: &PolicyProfile,
         diagnostics: &[DiagnosticRecord],
     ) -> Result<Vec<u64>, GhostraceError> {
+        self.ingest_batch_with_boundary(origin, events, policy, diagnostics, None)
+    }
+
+    /// Insert accepted events, cursor progress, policy evidence, diagnostics,
+    /// and (when supplied) the replay boundary in one SQLite transaction.
+    /// A changed boundary is refused before any event or cursor row is
+    /// committed; callers must establish an explicit reset epoch first.
+    pub fn ingest_batch_with_boundary(
+        &self,
+        origin: &IngestionOrigin,
+        events: &[EventEnvelope],
+        policy: &PolicyProfile,
+        diagnostics: &[DiagnosticRecord],
+        boundary: Option<&ReplayBoundary>,
+    ) -> Result<Vec<u64>, GhostraceError> {
         let mut ids = HashSet::with_capacity(events.len());
         for event in events {
             origin.validate_event(event)?;
@@ -492,6 +526,7 @@ impl Journal {
                 )));
             }
         }
+        validate_boundary_events(boundary, events)?;
         for diagnostic in diagnostics {
             diagnostic.validate()?;
         }
@@ -500,8 +535,13 @@ impl Journal {
         let transaction = connection.transaction()?;
         self.faults.hit(FaultPoint::IngestAfterTransaction)?;
         record_policy_profile(&transaction, policy)?;
-        let sequences =
-            insert_events(&transaction, events, self.key_provider.as_ref(), &self.faults)?;
+        let sequences = insert_events(
+            &transaction,
+            events,
+            self.key_provider.as_ref(),
+            &self.faults,
+            boundary,
+        )?;
         insert_diagnostics(&transaction, diagnostics, &self.faults)?;
         self.faults.hit(FaultPoint::IngestBeforeCommit)?;
         transaction.commit()?;
@@ -532,7 +572,20 @@ impl Journal {
         cursor: &SourceCursor,
         policy: &PolicyProfile,
     ) -> Result<(), GhostraceError> {
-        self.control_cursor(identity, cursor, policy, CursorStatus::Reset)
+        self.control_cursor(identity, cursor, policy, CursorStatus::Reset, None)
+    }
+
+    /// Establish a reset epoch and bind it to the supplied live replay
+    /// boundary. The following first event must use the same boundary.
+    pub fn reset_cursor_with_boundary(
+        &self,
+        identity: &CursorIdentity,
+        cursor: &SourceCursor,
+        policy: &PolicyProfile,
+        boundary: &ReplayBoundary,
+    ) -> Result<(), GhostraceError> {
+        validate_boundary_identity(identity, boundary)?;
+        self.control_cursor(identity, cursor, policy, CursorStatus::Reset, Some(boundary))
     }
 
     /// Explicitly record a source wrap.  Wrapped cursors must use the typed
@@ -544,7 +597,18 @@ impl Journal {
         cursor: &SourceCursor,
         policy: &PolicyProfile,
     ) -> Result<(), GhostraceError> {
-        self.control_cursor(identity, cursor, policy, CursorStatus::Wrapped)
+        self.control_cursor(identity, cursor, policy, CursorStatus::Wrapped, None)
+    }
+
+    pub fn wrap_cursor_with_boundary(
+        &self,
+        identity: &CursorIdentity,
+        cursor: &SourceCursor,
+        policy: &PolicyProfile,
+        boundary: &ReplayBoundary,
+    ) -> Result<(), GhostraceError> {
+        validate_boundary_identity(identity, boundary)?;
+        self.control_cursor(identity, cursor, policy, CursorStatus::Wrapped, Some(boundary))
     }
 
     /// Invalidate a cursor after a source replacement or integrity failure.
@@ -574,6 +638,7 @@ impl Journal {
         cursor: &SourceCursor,
         policy: &PolicyProfile,
         status: CursorStatus,
+        boundary: Option<&ReplayBoundary>,
     ) -> Result<(), GhostraceError> {
         let token = CursorToken::new(cursor.clone());
         if !token.is_ordered()
@@ -588,25 +653,37 @@ impl Journal {
         let transaction = connection.transaction()?;
         self.faults.hit(FaultPoint::ControlAfterTransaction)?;
         record_policy_profile(&transaction, policy)?;
-        let current: Option<u64> = transaction
+        let current: Option<(u64, Option<String>)> = transaction
             .query_row(
-                "SELECT epoch, state FROM cursors WHERE source = ?1 AND collector_instance = ?2",
+                "SELECT epoch, boundary_json FROM cursors
+                 WHERE source = ?1 AND collector_instance = ?2",
                 params![identity.source.to_string(), identity.collector_instance()],
-                |row| Ok(row.get::<_, i64>(0)? as u64),
+                |row| Ok((row.get::<_, i64>(0)? as u64, row.get::<_, Option<String>>(1)?)),
             )
             .optional()?;
-        let epoch = token.epoch().unwrap_or_else(|| current.map(|epoch| epoch + 1).unwrap_or(0));
+        if let Some((_, stored_json)) = current.as_ref() {
+            let stored = parse_boundary_json(stored_json.clone())?;
+            if stored.as_ref() != boundary {
+                return Err(GhostraceError::CursorBoundaryMismatch {
+                    event_source: identity.source,
+                });
+            }
+        }
+        let epoch = token
+            .epoch()
+            .unwrap_or_else(|| current.as_ref().map(|(epoch, _)| epoch + 1).unwrap_or(0));
         transaction.execute(
             "INSERT INTO cursors(
                 source, collector_instance, source_cursor, updated_at, epoch, state,
-                cursor_kind, policy_profile_id, policy_profile_version, last_event_id
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL)
+                cursor_kind, policy_profile_id, policy_profile_version, last_event_id,
+                boundary_json
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10)
              ON CONFLICT(source, collector_instance) DO UPDATE SET
                 source_cursor=excluded.source_cursor, updated_at=excluded.updated_at,
                 epoch=excluded.epoch, state=excluded.state, cursor_kind=excluded.cursor_kind,
                 policy_profile_id=excluded.policy_profile_id,
                 policy_profile_version=excluded.policy_profile_version,
-                last_event_id=NULL",
+                last_event_id=NULL, boundary_json=excluded.boundary_json",
             params![
                 identity.source.to_string(),
                 identity.collector_instance(),
@@ -617,6 +694,7 @@ impl Journal {
                 token.kind().as_str(),
                 policy.id,
                 policy.version,
+                boundary.map(serde_json::to_string).transpose()?,
             ],
         )?;
         self.faults.hit(FaultPoint::ControlBeforeCommit)?;
@@ -703,14 +781,65 @@ fn record_policy_profile(
     Ok(())
 }
 
+fn validate_boundary_events(
+    boundary: Option<&ReplayBoundary>,
+    events: &[EventEnvelope],
+) -> Result<(), GhostraceError> {
+    let Some(boundary) = boundary else {
+        return Ok(());
+    };
+    for event in events {
+        if event.source != boundary.identity.source
+            || event.collector_instance() != boundary.identity.collector_instance()
+        {
+            return Err(GhostraceError::CursorBoundaryMismatch { event_source: event.source });
+        }
+    }
+    Ok(())
+}
+
+fn validate_boundary_identity(
+    identity: &CursorIdentity,
+    boundary: &ReplayBoundary,
+) -> Result<(), GhostraceError> {
+    if boundary.identity != *identity {
+        return Err(GhostraceError::CursorBoundaryMismatch { event_source: identity.source });
+    }
+    Ok(())
+}
+
+fn validate_boundary_transition(
+    event: &EventEnvelope,
+    current: Option<&CursorState>,
+    candidate: Option<&ReplayBoundary>,
+) -> Result<(), GhostraceError> {
+    let Some(current) = current else {
+        return Ok(());
+    };
+    match (current.boundary.as_ref(), candidate) {
+        (Some(stored), Some(candidate)) if stored == candidate => Ok(()),
+        (None, None) => Ok(()),
+        (None, Some(_)) if current.last_event_id.is_none() => Ok(()),
+        _ => Err(GhostraceError::CursorBoundaryMismatch { event_source: event.source }),
+    }
+}
+
 fn insert_events(
     transaction: &Transaction<'_>,
     events: &[EventEnvelope],
     provider: &dyn KeyProvider,
     faults: &FaultPlan,
+    boundary: Option<&ReplayBoundary>,
 ) -> Result<Vec<u64>, GhostraceError> {
     let mut sequences = Vec::with_capacity(events.len());
     for event in events {
+        let token = event.source_cursor.as_ref().map(|cursor| CursorToken::new(cursor.clone()));
+        let current = if token.is_some() || boundary.is_some() {
+            load_cursor_state_transaction(transaction, event.source, event.collector_instance())?
+        } else {
+            None
+        };
+        validate_boundary_transition(event, current.as_ref(), boundary)?;
         let existing_by_id = transaction
             .query_row(EVENT_SELECT_BY_ID, params![event.event_id.to_string()], row_to_stored)
             .optional()?;
@@ -741,12 +870,6 @@ fn insert_events(
             }
         }
 
-        let token = event.source_cursor.as_ref().map(|cursor| CursorToken::new(cursor.clone()));
-        let current = if token.is_some() {
-            load_cursor_state_transaction(transaction, event.source, event.collector_instance())?
-        } else {
-            None
-        };
         if let Some(token) = token.as_ref() {
             if let Some(raw) = transaction
                 .query_row(
@@ -810,14 +933,16 @@ fn insert_events(
             transaction.execute(
                 "INSERT INTO cursors(
                     source, collector_instance, source_cursor, updated_at, epoch, state,
-                    cursor_kind, policy_profile_id, policy_profile_version, last_event_id
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6, ?7, ?8, ?9)
+                    cursor_kind, policy_profile_id, policy_profile_version, last_event_id,
+                    boundary_json
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6, ?7, ?8, ?9, ?10)
                  ON CONFLICT(source, collector_instance) DO UPDATE SET
                     source_cursor=excluded.source_cursor, updated_at=excluded.updated_at,
                     epoch=excluded.epoch, state='active', cursor_kind=excluded.cursor_kind,
                     policy_profile_id=excluded.policy_profile_id,
                     policy_profile_version=excluded.policy_profile_version,
-                    last_event_id=excluded.last_event_id",
+                    last_event_id=excluded.last_event_id,
+                    boundary_json=excluded.boundary_json",
                 params![
                     event.source.to_string(),
                     event.collector_instance(),
@@ -828,6 +953,7 @@ fn insert_events(
                     event.policy_profile_id.as_str(),
                     event.policy_profile_version,
                     event.event_id.to_string(),
+                    boundary.map(serde_json::to_string).transpose()?,
                 ],
             )?;
             faults.hit(FaultPoint::CursorAfterUpdate)?;
@@ -937,7 +1063,7 @@ fn load_cursor_state_transaction(
     let row = transaction
         .query_row(
             "SELECT source_cursor, epoch, state, cursor_kind, policy_profile_id,
-                    policy_profile_version, last_event_id
+                    policy_profile_version, last_event_id, boundary_json
              FROM cursors WHERE source = ?1 AND collector_instance = ?2",
             params![source.to_string(), collector_instance],
             |row| {
@@ -949,34 +1075,43 @@ fn load_cursor_state_transaction(
                     row.get::<_, Option<String>>(4)?,
                     row.get::<_, Option<i64>>(5)?,
                     row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
                 ))
             },
         )
         .optional()?;
-    row.map(|(raw, epoch, status, kind, policy_id, policy_version, last_event_id)| {
-        let _stored_kind = CursorKind::parse(&kind)?;
-        let cursor = SourceCursor::try_from(raw)?;
-        let epoch = u64::try_from(epoch)
-            .map_err(|_| GhostraceError::MigrationLedger("cursor epoch is negative".to_owned()))?;
-        let policy_profile_version = policy_version
-            .map(|version| {
-                u32::try_from(version).map_err(|_| {
-                    GhostraceError::MigrationLedger(
-                        "cursor policy version is out of range".to_owned(),
-                    )
+    row.map(
+        |(raw, epoch, status, kind, policy_id, policy_version, last_event_id, boundary_json)| {
+            let _stored_kind = CursorKind::parse(&kind)?;
+            let cursor = SourceCursor::try_from(raw)?;
+            let epoch = u64::try_from(epoch).map_err(|_| {
+                GhostraceError::MigrationLedger("cursor epoch is negative".to_owned())
+            })?;
+            let policy_profile_version = policy_version
+                .map(|version| {
+                    u32::try_from(version).map_err(|_| {
+                        GhostraceError::MigrationLedger(
+                            "cursor policy version is out of range".to_owned(),
+                        )
+                    })
                 })
+                .transpose()?;
+            let boundary = parse_boundary_json(boundary_json)?;
+            Ok(CursorState {
+                identity: boundary
+                    .as_ref()
+                    .map(|boundary| boundary.identity.clone())
+                    .unwrap_or(CursorIdentity::new(source, collector_instance.to_owned())?),
+                token: CursorToken::new(cursor),
+                status: CursorStatus::parse(&status)?,
+                epoch,
+                policy_profile_id: policy_id,
+                policy_profile_version,
+                last_event_id,
+                boundary,
             })
-            .transpose()?;
-        Ok(CursorState {
-            identity: CursorIdentity::new(source, collector_instance.to_owned())?,
-            token: CursorToken::new(cursor),
-            status: CursorStatus::parse(&status)?,
-            epoch,
-            policy_profile_id: policy_id,
-            policy_profile_version,
-            last_event_id,
-        })
-    })
+        },
+    )
     .transpose()
 }
 
@@ -987,7 +1122,7 @@ fn read_cursor_state(
     let row = connection
         .query_row(
             "SELECT source_cursor, epoch, state, cursor_kind, policy_profile_id,
-                    policy_profile_version, last_event_id
+                    policy_profile_version, last_event_id, boundary_json
              FROM cursors WHERE source = ?1 AND collector_instance = ?2",
             params![identity.source.to_string(), identity.collector_instance()],
             |row| {
@@ -999,35 +1134,50 @@ fn read_cursor_state(
                     row.get::<_, Option<String>>(4)?,
                     row.get::<_, Option<i64>>(5)?,
                     row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
                 ))
             },
         )
         .optional()?;
-    row.map(|(raw, epoch, status, kind, policy_id, policy_version, last_event_id)| {
-        let _stored_kind = CursorKind::parse(&kind)?;
-        let cursor = SourceCursor::try_from(raw)?;
-        let epoch = u64::try_from(epoch)
-            .map_err(|_| GhostraceError::MigrationLedger("cursor epoch is negative".to_owned()))?;
-        let policy_profile_version = policy_version
-            .map(|version| {
-                u32::try_from(version).map_err(|_| {
-                    GhostraceError::MigrationLedger(
-                        "cursor policy version is out of range".to_owned(),
-                    )
+    row.map(
+        |(raw, epoch, status, kind, policy_id, policy_version, last_event_id, boundary_json)| {
+            let _stored_kind = CursorKind::parse(&kind)?;
+            let cursor = SourceCursor::try_from(raw)?;
+            let epoch = u64::try_from(epoch).map_err(|_| {
+                GhostraceError::MigrationLedger("cursor epoch is negative".to_owned())
+            })?;
+            let policy_profile_version = policy_version
+                .map(|version| {
+                    u32::try_from(version).map_err(|_| {
+                        GhostraceError::MigrationLedger(
+                            "cursor policy version is out of range".to_owned(),
+                        )
+                    })
                 })
+                .transpose()?;
+            let boundary = parse_boundary_json(boundary_json)?;
+            Ok(CursorState {
+                identity: identity.clone(),
+                token: CursorToken::new(cursor),
+                status: CursorStatus::parse(&status)?,
+                epoch,
+                policy_profile_id: policy_id,
+                policy_profile_version,
+                last_event_id,
+                boundary,
             })
-            .transpose()?;
-        Ok(CursorState {
-            identity: identity.clone(),
-            token: CursorToken::new(cursor),
-            status: CursorStatus::parse(&status)?,
-            epoch,
-            policy_profile_id: policy_id,
-            policy_profile_version,
-            last_event_id,
+        },
+    )
+    .transpose()
+    .map(|state| {
+        state.filter(|state| {
+            state.boundary.as_ref().is_none_or(|boundary| boundary.identity == *identity)
         })
     })
-    .transpose()
+}
+
+fn parse_boundary_json(value: Option<String>) -> Result<Option<ReplayBoundary>, GhostraceError> {
+    value.map(|value| serde_json::from_str(&value).map_err(GhostraceError::from)).transpose()
 }
 
 #[derive(Debug)]
@@ -1199,7 +1349,7 @@ fn parse_kind(value: &str) -> Result<crate::model::EventKind, GhostraceError> {
         .map_err(|_| GhostraceError::InvalidEvent("stored event kind is invalid".to_owned()))
 }
 
-fn migration_specs() -> [MigrationSpec; 4] {
+fn migration_specs() -> [MigrationSpec; 5] {
     [
         MigrationSpec {
             id: "0000_migration_ledger",
@@ -1219,6 +1369,12 @@ fn migration_specs() -> [MigrationSpec; 4] {
             version: 3,
             schema_version: 3,
             sql: MIGRATION_CURSOR_CONTRACT,
+        },
+        MigrationSpec {
+            id: "0004_replay_boundary",
+            version: 4,
+            schema_version: 4,
+            sql: MIGRATION_REPLAY_BOUNDARY,
         },
     ]
 }
@@ -1275,7 +1431,7 @@ fn run_migrations(connection: &mut Connection, faults: &FaultPlan) -> Result<(),
 
 fn initialize_migration_ledger(
     connection: &mut Connection,
-    specs: &[MigrationSpec; 4],
+    specs: &[MigrationSpec; 5],
     faults: &FaultPlan,
 ) -> Result<(), GhostraceError> {
     let ledger_exists = table_exists(connection, "migration_records")?;
@@ -1399,7 +1555,7 @@ fn insert_applied_migration(
 
 fn validate_applied_prefix(
     records: &[AppliedMigration],
-    specs: &[MigrationSpec; 4],
+    specs: &[MigrationSpec; 5],
 ) -> Result<usize, GhostraceError> {
     for (index, record) in records.iter().enumerate() {
         let Some(spec) = specs.get(index) else {
@@ -1440,7 +1596,7 @@ fn validate_applied_prefix(
 
 fn validate_final_schema(
     connection: &Connection,
-    specs: &[MigrationSpec; 4],
+    specs: &[MigrationSpec; 5],
 ) -> Result<(), GhostraceError> {
     let records = load_applied_migrations(connection)?;
     if records.len() != specs.len() {

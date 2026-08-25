@@ -193,7 +193,7 @@ fn return_fault_matrix_rolls_back_or_leaves_a_retryable_commit() {
                 Journal::open_fixture_with_fault_plan(&path, provider.clone(), plan(schedule));
             assert!(matches!(result, Err(GhostraceError::InjectedFault { .. })), "{}", case.name);
             let recovered = Journal::open_fixture(&path, provider.clone()).expect("reopen");
-            assert_eq!(recovered.schema_version().expect("schema"), 3);
+            assert_eq!(recovered.schema_version().expect("schema"), 4);
             assert_recovered(&recovered, &event, &provider);
             continue;
         }
