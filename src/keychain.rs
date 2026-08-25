@@ -6,12 +6,16 @@
 //! to a bounded operation/status message so service names and key material do
 //! not reach diagnostics.
 
-use std::fmt;
+use std::{
+    fmt,
+    path::{Path, PathBuf},
+};
 
 use security_framework::{
     access_control::{ProtectionMode, SecAccessControl},
     base::Error as SecurityError,
     item::{CloudSync, ItemClass, ItemSearchOptions, Limit, SearchResult},
+    os::macos::keychain::SecKeychain,
     passwords::{set_generic_password_options, AccessControlOptions, PasswordOptions},
 };
 
@@ -25,6 +29,9 @@ pub struct MacOsKeychainProvider {
     service: String,
     account: String,
     access_group: Option<String>,
+    /// An explicit legacy keychain is only used by the device lifecycle
+    /// harness. The normal provider path remains the protected data keychain.
+    keychain_path: Option<PathBuf>,
 }
 
 impl fmt::Debug for MacOsKeychainProvider {
@@ -34,6 +41,7 @@ impl fmt::Debug for MacOsKeychainProvider {
             .field("service", &"<redacted>")
             .field("account", &"<redacted>")
             .field("access_group", &self.access_group.as_ref().map(|_| "<redacted>"))
+            .field("keychain_path", &self.keychain_path.as_ref().map(|_| "<redacted>"))
             .finish()
     }
 }
@@ -44,6 +52,7 @@ impl MacOsKeychainProvider {
             service: JOURNAL_KEYCHAIN_SERVICE.to_owned(),
             account: JOURNAL_KEYCHAIN_ACCOUNT.to_owned(),
             access_group: None,
+            keychain_path: None,
         }
     }
 
@@ -60,7 +69,31 @@ impl MacOsKeychainProvider {
         if let Some(group) = access_group.as_deref() {
             validate_identity("access group", group)?;
         }
-        Ok(Self { service, account, access_group })
+        Ok(Self { service, account, access_group, keychain_path: None })
+    }
+
+    /// Construct a provider backed by an explicitly opened legacy keychain.
+    ///
+    /// This is intentionally separate from [`Self::with_identity`]. It exists
+    /// for an isolated macOS device harness that must lock and unlock a
+    /// temporary keychain without changing the user's login keychain. Normal
+    /// production callers should use [`Self::new`] or [`Self::with_identity`]
+    /// so the data-protection keychain and `WhenUnlockedThisDeviceOnly`
+    /// controls remain in force.
+    pub fn with_identity_in_keychain(
+        service: impl Into<String>,
+        account: impl Into<String>,
+        access_group: Option<impl Into<String>>,
+        keychain_path: impl AsRef<Path>,
+    ) -> Result<Self, CryptoError> {
+        let mut provider = Self::with_identity(service, account, access_group)?;
+        let path = keychain_path.as_ref();
+        if !path.is_absolute() {
+            return Err(CryptoError::KeyProvider("keychain path must be absolute".to_owned()));
+        }
+        SecKeychain::open(path).map_err(|error| map_security_error("open keychain", error))?;
+        provider.keychain_path = Some(path.to_owned());
+        Ok(provider)
     }
 
     pub fn service(&self) -> &str {
@@ -79,6 +112,20 @@ impl MacOsKeychainProvider {
         }
         if !self.search_items()?.is_empty() {
             return Err(CryptoError::KeyProvider("keychain item already exists".to_owned()));
+        }
+
+        if let Some(path) = self.keychain_path.as_deref() {
+            let keychain = self.open_explicit_keychain(path)?;
+            keychain
+                .add_generic_password(&self.service, &self.account, &key)
+                .map_err(|error| map_security_error("provision keychain item", error))?;
+            return match self.key() {
+                Ok(_) => Ok(()),
+                Err(error) => {
+                    let _ = self.delete();
+                    Err(error)
+                }
+            };
         }
 
         let mut options = PasswordOptions::new_generic_password(&self.service, &self.account);
@@ -108,6 +155,14 @@ impl MacOsKeychainProvider {
     /// Delete the exact non-synchronizable item. This is intended for explicit
     /// key-destruction workflows and test cleanup, not implicit recovery.
     pub fn delete(&self) -> Result<(), CryptoError> {
+        if let Some(path) = self.keychain_path.as_deref() {
+            let keychain = self.open_explicit_keychain(path)?;
+            let (_, item) = keychain
+                .find_generic_password(&self.service, &self.account)
+                .map_err(|error| map_security_error("delete keychain item", error))?;
+            item.delete();
+            return Ok(());
+        }
         let items = self.search_items()?;
         if items.is_empty() {
             return Err(CryptoError::KeyProvider("keychain item is missing".to_owned()));
@@ -126,6 +181,14 @@ impl MacOsKeychainProvider {
     }
 
     fn search_items(&self) -> Result<Vec<Vec<u8>>, CryptoError> {
+        if let Some(path) = self.keychain_path.as_deref() {
+            let keychain = self.open_explicit_keychain(path)?;
+            return match keychain.find_generic_password(&self.service, &self.account) {
+                Ok((password, _item)) => Ok(vec![password.as_ref().to_vec()]),
+                Err(error) if error.code() == -25300 => Ok(Vec::new()),
+                Err(error) => Err(map_security_error("read keychain item", error)),
+            };
+        }
         let mut search = ItemSearchOptions::new();
         search
             .class(ItemClass::generic_password())
@@ -147,6 +210,10 @@ impl MacOsKeychainProvider {
                 _ => None,
             })
             .collect())
+    }
+
+    fn open_explicit_keychain(&self, path: &Path) -> Result<SecKeychain, CryptoError> {
+        SecKeychain::open(path).map_err(|error| map_security_error("open keychain", error))
     }
 }
 

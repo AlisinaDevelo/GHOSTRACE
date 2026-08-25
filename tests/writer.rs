@@ -1,9 +1,9 @@
 use std::{fs, path::Path, time::Duration};
 
 use ghostrace::{
-    read_fixture, DeterministicKeyProvider, DiagnosticRecord, EventEnvelope, EventSource,
-    GhostraceError, IngestionOrigin, Journal, PolicyProfile, QueueFullPolicy, SourceCursor, Writer,
-    WriterConfig, WriterOutcome, WriterSubmission,
+    read_fixture, CryptoError, DeterministicKeyProvider, DiagnosticRecord, EventEnvelope,
+    EventSource, GhostraceError, IngestionOrigin, Journal, KeyProvider, PolicyProfile,
+    QueueFullPolicy, SourceCursor, Writer, WriterConfig, WriterOutcome, WriterSubmission,
 };
 use rusqlite::Connection;
 use tempfile::tempdir;
@@ -16,6 +16,14 @@ fn fixture() -> (IngestionOrigin, Vec<EventEnvelope>, PolicyProfile) {
         read_fixture(path).expect("fixture events"),
         PolicyProfile::fixture_default(),
     )
+}
+
+struct LockedKeyProvider;
+
+impl KeyProvider for LockedKeyProvider {
+    fn key(&self) -> Result<[u8; 32], CryptoError> {
+        Err(CryptoError::KeyProvider("keychain is locked".to_owned()))
+    }
 }
 
 fn unique_event(event: &EventEnvelope, id: u128) -> EventEnvelope {
@@ -69,6 +77,82 @@ fn defaults_are_bounded_and_source_policy_is_explicit() {
     ] {
         assert!(matches!(invalid.validate(), Err(GhostraceError::InvalidWriterConfig(_))));
     }
+}
+
+#[test]
+fn key_unavailable_can_emit_a_bounded_gap_without_plaintext_or_silent_loss() {
+    let (origin, events, policy) = fixture();
+    let event = events.first().expect("fixture event").clone();
+    let journal = Journal::in_memory(LockedKeyProvider).expect("journal");
+    let writer = Writer::new(
+        journal.clone(),
+        WriterConfig {
+            key_unavailable_policy: ghostrace::KeyUnavailablePolicy::EmitGap,
+            ..WriterConfig::default()
+        },
+    )
+    .expect("writer");
+
+    let outcome = writer
+        .submit(origin, vec![event], policy, Vec::new())
+        .expect("key-unavailable policy should produce an explicit outcome");
+    assert!(matches!(
+        outcome,
+        WriterOutcome::Gap(ghostrace::WriterGap {
+            reason: ghostrace::WriterGapReason::KeyUnavailable,
+            event_count: 1,
+            ..
+        })
+    ));
+    assert!(journal.events().expect("events").is_empty());
+    assert_eq!(writer.outstanding(), (0, 0));
+}
+
+#[test]
+fn key_unavailable_rejects_by_default_without_plaintext_or_silent_loss() {
+    let (origin, events, policy) = fixture();
+    let event = events.first().expect("fixture event").clone();
+    let journal = Journal::in_memory(LockedKeyProvider).expect("journal");
+    let writer = Writer::new(journal.clone(), WriterConfig::default()).expect("writer");
+
+    let error = writer
+        .submit(origin, vec![event], policy, Vec::new())
+        .expect_err("the safe default must reject unavailable keys");
+    assert!(matches!(error, GhostraceError::Crypto(CryptoError::KeyProvider(_))));
+    assert!(journal.events().expect("events").is_empty());
+    assert_eq!(writer.outstanding(), (0, 0));
+}
+
+#[test]
+fn key_unavailable_gap_is_bounded_to_the_admitted_batch() {
+    let (origin, events, policy) = fixture();
+    let first = events.first().expect("fixture event");
+    let batch = vec![unique_event(first, 0x7001), unique_event(first, 0x7002)];
+    let journal = Journal::in_memory(LockedKeyProvider).expect("journal");
+    let writer = Writer::new(
+        journal.clone(),
+        WriterConfig {
+            max_batch_items: 2,
+            max_memory_bytes: 32 * 1024,
+            key_unavailable_policy: ghostrace::KeyUnavailablePolicy::EmitGap,
+            ..WriterConfig::default()
+        },
+    )
+    .expect("writer");
+
+    let outcome = writer
+        .submit(origin, batch, policy, Vec::new())
+        .expect("key-unavailable policy should produce an explicit outcome");
+    assert!(matches!(
+        outcome,
+        WriterOutcome::Gap(ghostrace::WriterGap {
+            reason: ghostrace::WriterGapReason::KeyUnavailable,
+            event_count: 2,
+            ..
+        })
+    ));
+    assert!(journal.events().expect("events").is_empty());
+    assert_eq!(writer.outstanding(), (0, 0));
 }
 
 #[test]

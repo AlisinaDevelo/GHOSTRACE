@@ -1,0 +1,98 @@
+{
+  "$id": "https://github.com/AlisinaDevelo/GHOSTRACE/schemas/key-availability-matrix-v1.json",
+  "title": "GHOSTRACE macOS key availability lifecycle matrix",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contract_id",
+    "generated_at",
+    "source_commit",
+    "device",
+    "probe",
+    "transitions",
+    "privacy"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "contract_id": { "const": "ghostrace-key-availability-matrix-v1" },
+    "generated_at": { "type": "string", "minLength": 1 },
+    "source_commit": { "type": "string", "minLength": 7 },
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "os", "os_build", "architecture", "toolchain"],
+      "properties": {
+        "model": { "type": "string", "minLength": 1 },
+        "os": { "type": "string", "minLength": 1 },
+        "os_build": { "type": "string", "minLength": 1 },
+        "architecture": { "enum": ["arm64", "x86_64"] },
+        "toolchain": { "type": "string", "minLength": 1 }
+      }
+    },
+    "probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "status", "exit_code", "log", "log_sha256"],
+      "properties": {
+        "command": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["pass", "blocked", "fail"] },
+        "exit_code": { "type": "integer", "minimum": 0 },
+        "log": { "type": "string", "minLength": 1 },
+        "log_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "transitions": {
+      "type": "array",
+      "minItems": 7,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "status",
+          "keychain_availability",
+          "prompt_behavior",
+          "buffer_behavior",
+          "evidence",
+          "limitation"
+        ],
+        "properties": {
+          "name": {
+            "enum": [
+              "login/unlocked",
+              "lock",
+              "sleep",
+              "wake",
+              "fast-user-switch",
+              "logout",
+              "launchd-restart"
+            ]
+          },
+          "status": { "enum": ["observed", "no-go"] },
+          "keychain_availability": {
+            "enum": ["available", "unavailable", "not-exercised"]
+          },
+          "prompt_behavior": {
+            "enum": ["not-requested", "prompt-not-observed", "interactive-required"]
+          },
+          "buffer_behavior": {
+            "enum": ["commit", "emit-gap", "reject", "not-exercised"]
+          },
+          "evidence": { "type": "string", "minLength": 1 },
+          "limitation": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fallback_key", "plaintext_queue", "silent_loss"],
+      "properties": {
+        "fallback_key": { "const": false },
+        "plaintext_queue": { "const": false },
+        "silent_loss": { "const": false }
+      }
+    }
+  }
+}
