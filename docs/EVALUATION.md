@@ -54,6 +54,15 @@ matrix proves policy-denied, source-disabled, source-gap, no-event,
 unknown-history, retention-deletion, and explicit opt-out states; marker scans
 remain bounded and path-free.
 
+## Evidence-claim grammar (task 0080)
+
+Claim grammar version `1` maps all twelve normalized event kinds to descriptors
+with required facts, preserved evidence labels, prohibited implication classes,
+and explicit gap behavior. Rendering tests cover both bounded English locales,
+event-ID citations, unknown and contextual evidence, gap-limited statements,
+and a rename event that refuses to invent old-to-new identity. The renderer
+rejects forbidden implication vocabulary as a final fail-closed check.
+
 ## Future live-source gates
 
 The selected-root FSEvents API is a bounded first slice, not a release-ready ambient

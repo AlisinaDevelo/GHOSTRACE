@@ -6,6 +6,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::{
+    claims::{render_claim, ClaimLocale, ClaimTemplateId, GapBehavior, CLAIM_GRAMMAR_VERSION},
     error::GhostraceError,
     journal::Journal,
     model::{EventEnvelope, EventKind, Evidence},
@@ -18,6 +19,11 @@ pub struct ExplanationStatement {
     pub parent_event_id: Option<Uuid>,
     pub evidence: Evidence,
     pub citations: Vec<Uuid>,
+    pub grammar_version: u32,
+    pub template: ClaimTemplateId,
+    pub locale: ClaimLocale,
+    pub gap_behavior: GapBehavior,
+    pub gap_limited: bool,
     pub statement: String,
 }
 
@@ -87,14 +93,23 @@ pub fn explain(journal: &Journal, target: Uuid) -> Result<Explanation, Ghostrace
     warnings.extend(analyze_temporal_observations(&temporal_observations).warnings);
     let statements = reverse_chain
         .iter()
-        .map(|event| ExplanationStatement {
-            event_id: event.event_id,
-            parent_event_id: event.parent_event_id,
-            evidence: event.evidence,
-            citations: vec![event.event_id],
-            statement: event.payload.summary(),
+        .map(|event| {
+            let claim = render_claim(event, ClaimLocale::En, !gap_events.is_empty())?;
+            debug_assert_eq!(claim.grammar_version, CLAIM_GRAMMAR_VERSION);
+            Ok(ExplanationStatement {
+                event_id: event.event_id,
+                parent_event_id: event.parent_event_id,
+                evidence: claim.evidence,
+                citations: claim.citations,
+                grammar_version: claim.grammar_version,
+                template: claim.template,
+                locale: claim.locale,
+                gap_behavior: claim.gap_behavior,
+                gap_limited: claim.gap_limited,
+                statement: claim.text,
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, GhostraceError>>()?;
     Ok(Explanation {
         target_event_id: target,
         chain_event_ids,

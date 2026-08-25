@@ -454,6 +454,15 @@ complete causality. Every claim must identify the event IDs and evidence levels 
 uses. Every uncovered interval, coalesced source result, denied observation, or
 restart discontinuity is visible as a gap or limitation.
 
+Claim grammar version `1` is the only renderer for explanation statements. Each
+event kind selects a template descriptor declaring required facts, the rule for
+preserving the event's evidence label, prohibited implications, and gap behavior.
+The renderer supports only bounded `en` and `en-GB` locales, includes the cited
+event ID in structured and textual output, and refuses template text containing
+intent, completeness, process-attribution, unsupported causality, or old-to-new
+rename implications. A gap either appears as an explicit status or limits the
+interpretation of an otherwise observed fact.
+
 ## Extension rules
 
 A new source or output is acceptable only when it:

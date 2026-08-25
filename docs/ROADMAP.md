@@ -124,6 +124,13 @@ gap intervals, retention deletion detection across page tokens, no-event versus
 unknown-history statuses, and explicit coverage opt-out are golden- and
 integration-tested.
 
+Task 0080 adds claim grammar version `1`. Every normalized event kind maps to a
+bounded template that declares required facts, preserves the event evidence
+label, records prohibited implications and gap behavior, and renders only the
+`en`/`en-GB` locale set. Tests keep cited event IDs stable and refuse intent,
+completeness, process attribution, unsupported causality, and unsupported
+old-to-new rename identity.
+
 ### Explicit developer and application context
 
 M4 adds only integrations the person deliberately enables. The shell wrapper cannot

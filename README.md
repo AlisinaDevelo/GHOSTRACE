@@ -107,6 +107,7 @@ encryption or key-management claim.
 | Reproducible filesystem benchmark corpus | Available as an offline synthetic workload contract; native results require the named macOS device and retain observed gaps/failures |
 | Event-storm backpressure and loss accounting | Available as a bounded synthetic stress contract; queue pressure exposes pending limits, an emergency status slot, auditable gaps, and recovery-required state |
 | Snapshot-consistent query pagination | Available as a bounded library API; encrypted page tokens bind policy scope, filters, the versioned ordering contract, schema, and an ingest snapshot boundary; every page carries gap-aware coverage unless explicitly opted out |
+| Evidence-claim grammar | Available as a versioned bounded renderer; templates preserve evidence labels and cited event IDs, expose gap limits, and refuse intent, completeness, process-attribution, causality, and unsupported rename claims |
 | Shell, Git, frontmost-app, or browser collectors | Not shipped |
 | macOS Keychain-backed production encryption | Not shipped |
 | Signed/notarized release artifacts | Not shipped |
@@ -123,6 +124,15 @@ process-local monotonic sequence are retained as distinct timing evidence; none
 is a causal proof. Equal timestamps, source clock rollback, delayed delivery,
 sleep-sized ingest gaps, and missing source time are surfaced as temporal
 ambiguity, with ingest sequence used only as the explicit fallback.
+
+### Evidence-claim grammar
+
+Claim grammar version `1` maps each event kind to a typed template with required
+facts, an evidence-label rule, prohibited implications, and gap behavior. Claims
+are rendered in bounded `en` or `en-GB` locales and cite the event ID in both the
+structured citation list and the text. Rename events explicitly leave old-to-new
+identity unknown; no template asserts intent, completeness, process attribution,
+or causality.
 
 ## Architecture
 
