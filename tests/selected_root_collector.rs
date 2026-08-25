@@ -339,6 +339,43 @@ fn incomplete_history_emits_a_gap_and_never_reports_live() {
 
 #[cfg(target_os = "macos")]
 #[test]
+fn history_timeout_emits_a_gap_before_native_flush_can_claim_live() {
+    let directory = tempdir().expect("tempdir");
+    let root_path = directory.path().join("selected-root");
+    fs::create_dir(&root_path).expect("selected root");
+    let root = SelectedRoot::new("root-main", &root_path).expect("selected root");
+    let journal =
+        Journal::in_memory(DeterministicKeyProvider::from_seed("collector-history-timeout"))
+            .expect("journal");
+    let mut replay_config = config();
+    replay_config.options.since_when = 1;
+    replay_config.history_timeout = Duration::from_millis(1);
+    let mut collector =
+        FseventsCollector::new(confirmation(&policy()), policy(), [root], journal, replay_config)
+            .expect("collector");
+    collector.start().expect("start replay collector");
+    assert_eq!(collector.status().coverage_state, CollectorCoverageState::Replaying);
+    std::thread::sleep(Duration::from_millis(10));
+    collector.run_current_run_loop_for(Duration::ZERO).expect("drive timed-out replay");
+    let status = collector.status();
+    assert_eq!(status.coverage_state, CollectorCoverageState::HistoryUnavailable);
+    assert!(status.recovery_required);
+    let events = collector.journal().events().expect("journal events");
+    assert!(!events.iter().any(|stored| stored.event.kind == EventKind::FilesystemChanged));
+    assert!(events.iter().any(|stored| {
+        stored.event.kind == EventKind::Gap
+            && matches!(
+                &stored.event.payload,
+                EventPayload::Gap(payload)
+                    if payload.reason_code.as_str() == "fsevents_history_timeout"
+                        && payload.remediation == Some(GapRemediation::ReinitializeStream)
+            )
+    }));
+    collector.stop().expect("stop timed-out replay");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
 fn revocation_stops_capture_before_pending_events_can_commit() {
     let directory = tempdir().expect("tempdir");
     let root_path = directory.path().join("selected-root");
