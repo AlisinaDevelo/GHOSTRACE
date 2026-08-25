@@ -2,8 +2,8 @@ use std::{fs, path::Path, time::Duration};
 
 use ghostrace::{
     read_fixture, DeterministicKeyProvider, DiagnosticRecord, EventEnvelope, EventSource,
-    GhostraceError, IngestionOrigin, Journal, PolicyProfile, QueueFullPolicy, Writer, WriterConfig,
-    WriterOutcome, WriterSubmission,
+    GhostraceError, IngestionOrigin, Journal, PolicyProfile, QueueFullPolicy, SourceCursor, Writer,
+    WriterConfig, WriterOutcome, WriterSubmission,
 };
 use rusqlite::Connection;
 use tempfile::tempdir;
@@ -21,6 +21,9 @@ fn fixture() -> (IngestionOrigin, Vec<EventEnvelope>, PolicyProfile) {
 fn unique_event(event: &EventEnvelope, id: u128) -> EventEnvelope {
     let mut event = event.clone();
     event.event_id = Uuid::from_u128(id);
+    let position = id.saturating_sub(0x6000);
+    event.source_cursor =
+        Some(SourceCursor::try_from(format!("seq-0-{position}")).expect("typed cursor"));
     event
 }
 

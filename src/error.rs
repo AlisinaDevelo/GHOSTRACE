@@ -165,6 +165,30 @@ pub enum GhostraceError {
 
     #[error("invalid writer diagnostic: {0}")]
     InvalidWriterDiagnostic(String),
+
+    #[error("cursor regressed for source {event_source}")]
+    CursorRegression { event_source: crate::model::EventSource },
+
+    #[error("cursor skipped an unmarked range for source {event_source}")]
+    CursorSkipped { event_source: crate::model::EventSource },
+
+    #[error("cursor ordering is unknown for source {event_source}; an explicit reset or wrap is required")]
+    CursorOrderingUnknown { event_source: crate::model::EventSource },
+
+    #[error("cursor conflict refused for source {event_source}")]
+    CursorConflict { event_source: crate::model::EventSource },
+
+    #[error("cursor policy changed without a reset for source {event_source}")]
+    CursorPolicyMismatch { event_source: crate::model::EventSource },
+
+    #[error("cursor is invalidated for source {event_source}")]
+    CursorInvalidated { event_source: crate::model::EventSource },
+
+    #[error("cursor control requires an existing state for source {event_source}")]
+    CursorStateMissing { event_source: crate::model::EventSource },
+
+    #[error("cursor reset or wrap requires an explicitly typed ordered token")]
+    CursorControlInvalid,
 }
 
 /// Errors from payload encryption and authenticated decryption.

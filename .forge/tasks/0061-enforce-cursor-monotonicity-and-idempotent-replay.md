@@ -1,7 +1,7 @@
 ---
 id: 0061
 title: Enforce cursor monotonicity and idempotent replay
-status: backlog
+status: done
 agent: concurrency-specialist
 model: human
 release: M1
@@ -19,12 +19,14 @@ platform: any
 Prevent duplicate, regressed, skipped, or cross-source cursors from corrupting recovery and coverage claims.
 
 ## Acceptance criteria
-- [ ] Cursor types define source identity, comparison, reset, wrap, and invalidation semantics.
-- [ ] Duplicate deliveries are idempotent while divergent events at the same cursor fail closed.
-- [ ] Property tests cover reordering, replay, crash, source replacement, and policy-version changes.
+- [x] Cursor types define source identity, comparison, reset, wrap, and invalidation semantics.
+- [x] Duplicate deliveries are idempotent while divergent events at the same cursor fail closed.
+- [x] Property tests cover reordering, replay, crash, source replacement, and policy-version changes.
 
 ## Context
 Cursor state is part of the evidence boundary even when it is not encrypted payload data.
 
 ## Notes
-Planned in the 2026–2031 GHOSTRACE program. Completion requires the acceptance evidence above; issue closure alone is not evidence.
+Implemented in `src/cursor.rs`, `src/journal.rs`, and migration `0003_cursor_contract.sql`.
+Completion requires the retained device pipe and protected-main reproduction in
+`docs/evidence/0061-cursor-contract.md`; issue closure alone is not evidence.
