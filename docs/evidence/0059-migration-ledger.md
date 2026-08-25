@@ -1,6 +1,6 @@
 # Task 0059 evidence: checksummed migrations and unsafe-downgrade refusal
 
-Status: review pending the protected-main rerun.
+Status: complete for the verified fixture migration contract.
 
 Task 0059 makes the SQLite schema boundary deterministic. The fixture journal now
 has an ordered embedded catalog, a tamper-evident migration ledger, transactional
@@ -78,5 +78,34 @@ fixture. This is a local smoke measurement, not a production capacity claim.
 `cargo-audit` and `cargo-deny` remain unavailable on this device and are not
 substituted with hosted results. Intel macOS, the macOS 15 floor, signed and
 notarized distribution, and live collectors remain explicit no-go or unverified
-scope. The task remains `review` until this same pipe is rerun against the
-protected merge.
+scope. The task remained `review` until the protected-main rerun below; that gate
+is now recorded.
+
+## Protected-main rerun
+
+The exact source reproduction was rerun from protected `main` after PR #201
+merged. The clean detached worktree used the same MacBook, OS, architecture,
+toolchain, locked inputs, offline setting, and one-job limit.
+
+| Artifact | Value |
+| --- | --- |
+| Protected-main merge | `88dd03564deb995c037666bb17d90dbd877a2151` |
+| Merged-main full pipe | `/private/tmp/ghostrace-0059-merged-pipe.rnKa8N`; SHA-256 `ad7f74cff52f02ab690603c0dbaa7b9d60f1233336d3d48c0830eb7339eb7a96` |
+| Merged-main focused migration log | `/private/tmp/ghostrace-0059-migration-measurements-merged.x02x2W`; SHA-256 `a72861aa8a9dac37b2c0ff072ee4d1981d316ce11aa3274a95dff4d6f2f7c338` |
+| Merged-main MVP artifacts | `/private/tmp/ghostrace-0059-mvp-merged.uxQLNX` |
+| Merged-main device | MacBook Pro 17,1; Apple M1; 8 GB; arm64; macOS 26.6.2 (25G83) |
+| Merged-main toolchain | Rust/Cargo 1.88.0; `aarch64-apple-darwin`; LLVM 20.1.5 |
+
+The merged full pipe ended with `MERGED_PIPE_PASS` and repeated the source
+format/check/Clippy, debug/release, docs, roadmap/Python, reproducibility,
+fixture/identity, deterministic MVP, ShellCheck, actionlint, and sandboxed
+network-denial checks. The merged focused suite passed all seven migration tests;
+its resource sample was 0.52 s real, 59,719,680-byte maximum resident set, and
+43,140,480-byte peak memory footprint. Merged MVP digests matched the source run:
+schema `722f8585…`, demo `8e4e78c4…`, export `fd47b9b1…`, and capture-refusal
+stderr `9c30a339…`.
+
+Decision: complete for the fixture migration ledger, upgrade, refusal, crash
+recovery, and backup-restore contract on the verified device. Unavailable audit
+tools, Intel/macOS 15, signing/notarization, and live collectors remain explicit
+no-go or unverified scope and are not represented as CI passes.

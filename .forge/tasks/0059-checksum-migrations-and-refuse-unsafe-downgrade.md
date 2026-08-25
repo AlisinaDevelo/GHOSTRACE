@@ -1,7 +1,7 @@
 ---
 id: 0059
 title: Checksum migrations and refuse unsafe downgrade
-status: review
+status: done
 agent: database-expert
 model: human
 release: M1
@@ -19,18 +19,18 @@ platform: any
 Make database evolution deterministic, tamper-evident, crash-safe, and explicit about backward incompatibility.
 
 ## Acceptance criteria
-- [ ] Applied migrations record stable identifiers, checksums, schema versions, and tool versions.
-- [ ] Modified, missing, reordered, partially applied, or future migrations refuse normal startup.
-- [ ] Upgrade, crash-at-each-step, backup restore, and unsupported downgrade fixtures run in CI.
+- [x] Applied migrations record stable identifiers, checksums, schema versions, and tool versions.
+- [x] Modified, missing, reordered, partially applied, or future migrations refuse normal startup.
+- [x] Upgrade, crash-at-each-step, backup restore, and unsupported downgrade fixtures run in CI.
 
 ## Context
 A privacy-sensitive local journal must not guess how to open an unknown or partially migrated schema.
 
 ## Notes
-Implementation is under review in the 0059 pull request. The journal now records
-ordered migration identifiers, SHA-256 SQL checksums, schema versions, tool
-versions, and transactional application timestamps. It upgrades the legacy v1
-fixture schema and refuses modified, missing, reordered, future, partial, and
-unsupported-downgrade state. Device crash, restore, and refusal evidence is being
-retained in `docs/evidence/0059-migration-ledger.md`; the task remains `review`
-until the merged-main rerun is appended.
+Implemented in PR #201 and merged to protected `main` at
+`88dd03564deb995c037666bb17d90dbd877a2151`. The journal records ordered
+migration identifiers, SHA-256 SQL checksums, schema versions, tool versions, and
+transactional application timestamps. It upgrades the legacy v1 fixture schema and
+refuses modified, missing, reordered, future, partial, and unsupported-downgrade
+state. Source and merged-main device evidence is retained in
+`docs/evidence/0059-migration-ledger.md`.
