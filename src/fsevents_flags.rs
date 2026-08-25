@@ -287,6 +287,30 @@ impl NormalizedFseventsEvent {
             FseventsEvidenceStatus::Contradictory { .. } => "contradictory",
         }
     }
+
+    /// Return the stable gap reason for a coverage-changing callback.
+    ///
+    /// The combined dropped case is intentionally distinct from each
+    /// individual source flag; callers can still retain the raw flag set for
+    /// the complete source evidence.
+    pub fn gap_reason_code(&self) -> Option<&'static str> {
+        match self.status {
+            FseventsEvidenceStatus::RescanRequired { reason } => Some(match reason {
+                FseventsRescanReason::EventIdsWrapped => "fsevents_event_ids_wrapped",
+                FseventsRescanReason::BothDropped => "fsevents_both_dropped",
+                FseventsRescanReason::KernelDropped => "fsevents_kernel_dropped",
+                FseventsRescanReason::UserDropped => "fsevents_user_dropped",
+                FseventsRescanReason::MustScanSubDirs => "fsevents_must_scan_sub_dirs",
+            }),
+            FseventsEvidenceStatus::Boundary { reason: FseventsBoundaryReason::RootChanged } => {
+                Some("fsevents_root_changed")
+            }
+            FseventsEvidenceStatus::Observed
+            | FseventsEvidenceStatus::Boundary { .. }
+            | FseventsEvidenceStatus::Unsupported { .. }
+            | FseventsEvidenceStatus::Contradictory { .. } => None,
+        }
+    }
 }
 
 /// Normalize one callback event ID and raw Core Services flag word.

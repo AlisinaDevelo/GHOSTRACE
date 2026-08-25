@@ -638,6 +638,15 @@ pub struct CollectorLifecyclePayload {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[serde(rename_all = "snake_case")]
+pub enum GapRemediation {
+    RescanSelectedRoots,
+    ReconcileSelectedRoot,
+    ReinitializeStream,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GapPayload {
     pub source: EventSource,
     pub reason_code: ReasonCode,
@@ -646,6 +655,16 @@ pub struct GapPayload {
     pub from_cursor: Option<SourceCursor>,
     #[serde(default)]
     pub to_cursor: Option<SourceCursor>,
+    /// Digest of the affected volume; the raw identity and display name are
+    /// never retained in an event payload.
+    #[serde(default)]
+    pub volume_digest: Option<SnapshotDigest>,
+    /// Opaque selected-root IDs affected by the coverage boundary.
+    #[serde(default)]
+    pub root_ids: Vec<RootId>,
+    /// A bounded action for the next recovery stage. Legacy gaps may omit it.
+    #[serde(default)]
+    pub remediation: Option<GapRemediation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -822,6 +841,18 @@ impl EventPayload {
                 validate_optional_cursor(
                     "to_cursor",
                     payload.to_cursor.as_ref().map(SourceCursor::as_str),
+                )?;
+                if payload.root_ids.len() > 64 {
+                    return Err(GhostraceError::InvalidEvent(
+                        "gap root scope exceeds the bounded limit".to_owned(),
+                    ));
+                }
+                for root_id in &payload.root_ids {
+                    validate_identifier("gap_root_id", root_id.as_str())?;
+                }
+                validate_optional_digest(
+                    "gap_volume_digest",
+                    payload.volume_digest.as_ref().map(SnapshotDigest::as_str),
                 )?;
             }
             Self::PolicyBlockedSummary(payload) => {

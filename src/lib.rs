@@ -56,7 +56,7 @@ pub use fixture::{ingest_fixture, read_fixture, FixtureIngestReport};
 pub use fsevents::{
     CallbackHealth, FseventsError, FseventsEvent, FseventsOptions, FseventsStream, StreamState,
     DEFAULT_LATENCY, EVENT_ID_SINCE_NOW, FLAG_FILE_EVENTS, FLAG_FULL_HISTORY, FLAG_NO_DEFER,
-    FLAG_USE_CF_TYPES, FLAG_USE_EXTENDED_DATA, FLAG_WITH_DOC_ID,
+    FLAG_USE_CF_TYPES, FLAG_USE_EXTENDED_DATA, FLAG_WATCH_ROOT, FLAG_WITH_DOC_ID,
 };
 pub use fsevents_collector::{
     CollectedFilesystemEvent, CollectorState, CollectorStatus, ContainedFile, FseventsCollector,
@@ -90,7 +90,7 @@ pub use model::{
     BrowserBookmarkChangedPayload, BrowserName, BrowserNavigationPayload, BrowserUrl,
     CollectorInstanceId, CollectorLifecyclePayload, Confidence, EntryKind, EventEnvelope, EventId,
     EventKind, EventPayload, EventSource, Evidence, FileOperation, FilesystemChangedPayload,
-    FixtureOrigin, FolderId, FrontmostAppChangedPayload, GapPayload, GitObjectId,
+    FixtureOrigin, FolderId, FrontmostAppChangedPayload, GapPayload, GapRemediation, GitObjectId,
     GitSnapshotPayload, ImportOrigin, IngestionOrigin, IngestionOriginKind, InstanceLabel,
     LiveOrigin, OpaqueIdentifier, PathClass, PathDigest, PolicyBlockedSummaryPayload,
     PolicyProfileId, ProvenanceVersion, ReasonCode, RepairOrigin, RepositoryId, RootId,

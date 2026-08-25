@@ -127,6 +127,15 @@ Gaps carry enough bounded status to explain the limitation without retaining the
 blocked sensitive value. Explanations and exports must include relevant gaps rather
 than treating them as empty space.
 
+FSEvents coverage gaps use stable reason codes for `UserDropped`, `KernelDropped`,
+`EventIdsWrapped`, `RootChanged`, and `MustScanSubDirs` (with an explicit combined
+dropped code when both drop flags occur). Selected-root gaps retain only the
+filesystem source, a volume fingerprint, opaque root IDs, cursor bounds when the
+source position is comparable, and one of `rescan_selected_roots`,
+`reconcile_selected_root`, or `reinitialize_stream`. A source-loss gap sets the
+collector's `recovery_required` status; ordinary filesystem delivery is not
+resumed automatically and no continuous-coverage claim is made.
+
 ## Causal links
 
 A causal link is an explanation edge between observations, not a legal or scientific

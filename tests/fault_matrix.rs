@@ -116,6 +116,9 @@ fn gap_payload(id: u128) -> ghostrace::GapPayload {
         dropped_count: id as u64,
         from_cursor: None,
         to_cursor: None,
+        volume_digest: None,
+        root_ids: Vec::new(),
+        remediation: None,
     }
 }
 

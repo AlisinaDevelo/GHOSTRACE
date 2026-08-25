@@ -139,9 +139,14 @@ The collector now persists one replay boundary per source and volume whenever a
 source cursor advances. The boundary records selected-root and exclusion digests
 plus `since_when`, latency, file-event mode, and stream identity. A changed
 setting fails closed until an explicit reset or wrap establishes a new epoch.
+Selected-root streams request `WatchRoot`; dropped, wrapped, subtree-scan, and
+root-change callbacks become first-class gaps with stable reason codes, bounded
+volume/root digests, cursor ranges when knowable, and a remediation action. A
+source-loss gap sets `recovery_required`, so the collector does not resume
+ordinary filesystem events until a later reconciliation stage clears that gate.
 Gap events are committed with their cursor advancement in the same transaction;
-durable restart recovery, first-class source-loss reasons, and the ambient CLI
-remain later gates (tasks 0015–0017 and their children).
+durable restart recovery and the ambient CLI remain later gates (tasks 0015–0017
+and their children).
 
 ## Policy-document boundary
 

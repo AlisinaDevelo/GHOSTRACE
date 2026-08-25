@@ -12,7 +12,7 @@ use ghostrace::{
 use tempfile::tempdir;
 
 #[cfg(target_os = "macos")]
-use ghostrace::{CollectorState, EventKind, EventPayload, Evidence};
+use ghostrace::{CollectorState, EventKind, EventPayload, Evidence, GapRemediation};
 
 #[cfg(not(target_os = "macos"))]
 use ghostrace::FseventsError;
@@ -169,6 +169,64 @@ fn selected_root_collector_captures_controlled_file_lifecycle_without_content() 
     assert!(events.iter().any(|event| {
         matches!(event.event.payload, EventPayload::FilesystemChanged(_))
             && event.event.evidence != Evidence::Unknown
+    }));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn root_replacement_emits_a_bounded_gap_before_any_resume_claim() {
+    let directory = tempdir().expect("tempdir");
+    let root_path = directory.path().join("selected-root");
+    let moved_path = directory.path().join("selected-root-moved");
+    fs::create_dir(&root_path).expect("selected root");
+    let root = SelectedRoot::new("root-main", &root_path).expect("selected root");
+    let journal = Journal::in_memory(DeterministicKeyProvider::from_seed("collector-root-gap"))
+        .expect("journal");
+    let mut collector =
+        FseventsCollector::new(confirmation(&policy()), policy(), [root], journal, config())
+            .expect("collector");
+    collector.start().expect("start");
+
+    fs::rename(&root_path, &moved_path).expect("replace selected root");
+    let mut observed_gap = false;
+    for _ in 0..80 {
+        collector
+            .run_current_run_loop_for(std::time::Duration::from_millis(50))
+            .expect("drive root replacement");
+        observed_gap = collector.journal().events().expect("events").iter().any(|stored| {
+            matches!(
+                &stored.event.payload,
+                EventPayload::Gap(payload)
+                    if payload.reason_code.as_str() == "fsevents_root_changed"
+                        && payload.root_ids.iter().any(|root| root.as_str() == "root-main")
+                        && payload.volume_digest.is_some()
+                        && payload.remediation == Some(GapRemediation::ReconcileSelectedRoot)
+                        && payload.from_cursor.is_none()
+                        && payload.to_cursor.is_none()
+            )
+        });
+        if observed_gap {
+            break;
+        }
+    }
+
+    fs::create_dir(&root_path).expect("replacement path");
+    fs::write(root_path.join("must-wait-for-reconciliation.txt"), b"not admitted")
+        .expect("replacement event");
+    for _ in 0..20 {
+        collector
+            .run_current_run_loop_for(std::time::Duration::from_millis(50))
+            .expect("drive after root replacement");
+    }
+
+    collector.stop().expect("stop");
+    assert!(observed_gap, "WatchRoot must make RootChanged a durable gap");
+    assert!(collector.status().recovery_required);
+    let events = collector.journal().events().expect("events");
+    assert!(!events.iter().any(|stored| stored.event.kind == EventKind::FilesystemChanged));
+    assert!(events.iter().any(|stored| {
+        stored.event.kind == EventKind::Gap
+            && !serde_json::to_string(&stored.event).expect("json").contains("selected-root")
     }));
 }
 
