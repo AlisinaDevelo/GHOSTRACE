@@ -96,9 +96,9 @@ pub use policy::{
 };
 pub use wal::{CheckpointMode, WalCheckpointReport, WalPolicy};
 pub use writer::{
-    QueueFullPolicy, WriteAck, WriteTicket, Writer, WriterConfig, WriterGap, WriterGapReason,
-    WriterOutcome, WriterSubmission, DEFAULT_MAX_BATCH_ITEMS, DEFAULT_MAX_MEMORY_BYTES,
-    DEFAULT_MAX_RETRIES, DEFAULT_MAX_WAIT_MS, DEFAULT_QUEUE_ITEMS,
+    KeyUnavailablePolicy, QueueFullPolicy, WriteAck, WriteTicket, Writer, WriterConfig, WriterGap,
+    WriterGapReason, WriterOutcome, WriterSubmission, DEFAULT_MAX_BATCH_ITEMS,
+    DEFAULT_MAX_MEMORY_BYTES, DEFAULT_MAX_RETRIES, DEFAULT_MAX_WAIT_MS, DEFAULT_QUEUE_ITEMS,
 };
 
 pub const EVENT_SCHEMA_JSON: &str = include_str!("../schemas/event-envelope-v1.json");

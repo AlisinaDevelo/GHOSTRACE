@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "contract_id": "ghostrace-key-availability-matrix-v1",
+  "generated_at": "2026-08-25T00:00:00+00:00",
+  "source_commit": "WORKTREE-0056",
+  "device": {
+    "model": "pending device run",
+    "os": "macOS pending device run",
+    "os_build": "pending",
+    "architecture": "arm64",
+    "toolchain": "rustc 1.88.0"
+  },
+  "probe": {
+    "command": "pending device run",
+    "status": "pass",
+    "exit_code": 0,
+    "log": "/private/tmp/ghostrace-0056-keychain-lifecycle.log",
+    "log_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "transitions": [
+    {
+      "name": "login/unlocked",
+      "status": "observed",
+      "keychain_availability": "available",
+      "prompt_behavior": "not-requested",
+      "buffer_behavior": "commit",
+      "evidence": "Pending source-device probe replacement.",
+      "limitation": "Placeholder until the source-device receipt is retained."
+    },
+    {
+      "name": "lock",
+      "status": "observed",
+      "keychain_availability": "unavailable",
+      "prompt_behavior": "not-requested",
+      "buffer_behavior": "emit-gap",
+      "evidence": "Pending source-device probe replacement.",
+      "limitation": "Placeholder until the source-device receipt is retained."
+    },
+    {
+      "name": "sleep",
+      "status": "no-go",
+      "keychain_availability": "not-exercised",
+      "prompt_behavior": "interactive-required",
+      "buffer_behavior": "not-exercised",
+      "evidence": "Explicit no-go; screen sleep is not automated.",
+      "limitation": "Requires an authorized interactive sleep run."
+    },
+    {
+      "name": "wake",
+      "status": "no-go",
+      "keychain_availability": "not-exercised",
+      "prompt_behavior": "interactive-required",
+      "buffer_behavior": "not-exercised",
+      "evidence": "Explicit no-go; wake requires a preceding interactive sleep run.",
+      "limitation": "Requires an authorized interactive wake run."
+    },
+    {
+      "name": "fast-user-switch",
+      "status": "no-go",
+      "keychain_availability": "not-exercised",
+      "prompt_behavior": "interactive-required",
+      "buffer_behavior": "not-exercised",
+      "evidence": "Explicit no-go; no second authorized user session is available.",
+      "limitation": "Requires a second authorized test account."
+    },
+    {
+      "name": "logout",
+      "status": "no-go",
+      "keychain_availability": "not-exercised",
+      "prompt_behavior": "interactive-required",
+      "buffer_behavior": "not-exercised",
+      "evidence": "Explicit no-go; logout would terminate the harness.",
+      "limitation": "Requires an authorized interactive logout run."
+    },
+    {
+      "name": "launchd-restart",
+      "status": "no-go",
+      "keychain_availability": "not-exercised",
+      "prompt_behavior": "interactive-required",
+      "buffer_behavior": "not-exercised",
+      "evidence": "Explicit no-go; no GHOSTRACE launchd helper is enabled.",
+      "limitation": "Requires a later helper lifecycle gate."
+    }
+  ],
+  "privacy": {
+    "fallback_key": false,
+    "plaintext_queue": false,
+    "silent_loss": false
+  }
+}

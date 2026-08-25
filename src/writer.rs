@@ -21,7 +21,7 @@ use rusqlite::ErrorCode;
 use uuid::Uuid;
 
 use crate::{
-    error::GhostraceError,
+    error::{CryptoError, GhostraceError},
     journal::{DiagnosticRecord, Journal},
     model::{EventEnvelope, EventSource, IngestionOrigin},
     policy::PolicyProfile,
@@ -49,6 +49,21 @@ pub enum QueueFullPolicy {
     EmitGap,
 }
 
+/// What a collector observes when encryption cannot obtain the journal key.
+/// Reject is the safe default; EmitGap is explicit opt-in for sources that can
+/// account for the unavailable interval without retaining plaintext.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum KeyUnavailablePolicy {
+    Reject,
+    EmitGap,
+}
+
+impl Default for KeyUnavailablePolicy {
+    fn default() -> Self {
+        Self::Reject
+    }
+}
+
 impl Default for QueueFullPolicy {
     fn default() -> Self {
         Self::Block
@@ -66,6 +81,7 @@ pub struct WriterConfig {
     pub max_retries: u8,
     pub default_queue_full_policy: QueueFullPolicy,
     pub source_queue_full_policies: BTreeMap<EventSource, QueueFullPolicy>,
+    pub key_unavailable_policy: KeyUnavailablePolicy,
 }
 
 impl Default for WriterConfig {
@@ -78,6 +94,7 @@ impl Default for WriterConfig {
             max_retries: DEFAULT_MAX_RETRIES,
             default_queue_full_policy: QueueFullPolicy::default(),
             source_queue_full_policies: BTreeMap::new(),
+            key_unavailable_policy: KeyUnavailablePolicy::default(),
         }
     }
 }
@@ -147,6 +164,7 @@ pub struct WriteAck {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WriterGapReason {
     QueueFull,
+    KeyUnavailable,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -338,8 +356,23 @@ impl Writer {
         policy: PolicyProfile,
         diagnostics: Vec<DiagnosticRecord>,
     ) -> Result<WriterOutcome, GhostraceError> {
+        let source = validate_batch(&events, &self.config)?;
+        let event_count = events.len();
         match self.enqueue(origin, events, policy, diagnostics)? {
-            WriterSubmission::Queued(ticket) => Ok(WriterOutcome::Committed(ticket.wait()?)),
+            WriterSubmission::Queued(ticket) => match ticket.wait() {
+                Ok(ack) => Ok(WriterOutcome::Committed(ack)),
+                Err(error)
+                    if self.config.key_unavailable_policy == KeyUnavailablePolicy::EmitGap
+                        && is_key_unavailable(&error) =>
+                {
+                    Ok(WriterOutcome::Gap(WriterGap {
+                        source,
+                        event_count,
+                        reason: WriterGapReason::KeyUnavailable,
+                    }))
+                }
+                Err(error) => Err(error),
+            },
             WriterSubmission::Gap(gap) => Ok(WriterOutcome::Gap(gap)),
         }
     }
@@ -539,6 +572,10 @@ fn retryable(error: &GhostraceError) -> bool {
         GhostraceError::Database(rusqlite::Error::SqliteFailure(sqlite_error, _))
             if matches!(sqlite_error.code, ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked)
     )
+}
+
+fn is_key_unavailable(error: &GhostraceError) -> bool {
+    matches!(error, GhostraceError::Crypto(CryptoError::KeyProvider(_)))
 }
 
 fn validate_batch(
