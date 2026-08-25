@@ -1,8 +1,9 @@
 # Task 0012 evidence: fixture ingest, explain, and JSONL export CLI
 
-Status: complete on protected `main` at
-`30172a2a51ddaadea8dcdf7cc6d0d2d8361d6ec0` (implementation PR #235). This receipt
-proves a restartable fixture-only CLI path without enabling live collectors.
+Status: complete on protected `main`; implementation merge `30172a2a51ddaadea8dcdf7cc6d0d2d8361d6ec0`
+(PR #235) and final evidence readback `4cd1d7eef52ac03b31cc785064ad074108b357a6`
+(PR #236). This receipt proves a restartable fixture-only CLI path without enabling
+live collectors.
 
 ## Contract and implementation
 
@@ -41,6 +42,8 @@ macOS 26.6.2 build 25G83, Darwin 25.6.0, Rust/Cargo 1.88.0,
 | --- | --- |
 | Protected-main focused durable CLI test | Pass: 1 test; `/tmp/ghostrace-0012-postmerge-cli.log`; SHA-256 `9bfd619c71925b2174c4fc9bbd96413b16f253ed091f430d5b21307f07e71969` |
 | Protected-main reproducibility/device pipe | Pass: pinned inputs, schema, demo, durable init/ingest/reopen/explain/export, capture refusal, 40 Python tests, locked Clippy, and all Rust targets; `/tmp/ghostrace-0012-postmerge-repro.log`; SHA-256 `bf7f84602865cd671b8a50bc6c97c2b852b665d6d01d786bdf0dbd27c83f6af0` |
+| Final protected-main focused readback at `4cd1d7e` | Pass: 1 test; `/tmp/ghostrace-0012-final-main-cli.log`; SHA-256 `059c0648a03c2be2601dcdc6a6dfb36d97719b01bf71800cbc8381cc4c3d7d33` |
+| Final protected-main reproducibility readback at `4cd1d7e` | Pass: same complete local pipe; `/tmp/ghostrace-0012-final-main-repro.log`; SHA-256 `77e6c4911890f89fdedbbf39cc5756559fca34b33019b3782c97ad7457cd17a7` |
 | Implementation commit before merge | `ae5924013bd61f63fbd99e9e929fe2e71aa7934d` on PR #235; local full pipe passed before push |
 | Hosted merge gates | PR #235 passed roadmap, audit, dependency review, deny, fixture network-denial, rustfmt, Clippy, and Linux/macOS/MSRV test lanes before merge |
 
