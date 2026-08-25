@@ -86,7 +86,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0080 | Define a bounded evidence-claim grammar | M3 | done | explain-export | implementation-engineer | 0019 | 0017, 0018, 0046 |
 | 0081 | Version the cross-source correlation rule registry | M3 | done | explain-export | implementation-engineer | 0019 | 0079, 0080 |
 | 0082 | Build explanation determinism and counterexample tests | M3 | done | explain-export | implementation-engineer | 0019 | 0080, 0081 |
-| 0083 | Create the export schema and manifest registry | M3 | backlog | explain-export | api-designer | 0020 | 0018, 0019, 0046 |
+| 0083 | Create the export schema and manifest registry | M3 | done | explain-export | implementation-engineer | 0020 | 0018, 0019, 0046 |
 | 0084 | Stream exports through an atomic bounded writer | M3 | backlog | explain-export | implementation-engineer | 0020 | 0083 |
 | 0085 | Add export redaction preview and policy receipts | M3 | backlog | explain-export | privacy-engineer | 0020 | 0007, 0083 |
 | 0086 | Implement retention planning and dry-run | M3 | backlog | explain-export | database-expert | 0021 | 0009, 0018, 0020 |
