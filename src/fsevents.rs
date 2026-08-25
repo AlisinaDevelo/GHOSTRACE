@@ -15,13 +15,13 @@
 use std::{
     marker::PhantomData,
     path::PathBuf,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Mutex,
-    },
+    sync::atomic::{AtomicU64, Ordering},
     thread::{self, ThreadId},
     time::Duration,
 };
+
+#[cfg(target_os = "macos")]
+use std::sync::Mutex;
 
 use thiserror::Error;
 
@@ -179,9 +179,11 @@ pub struct CallbackHealth {
     pub panics: u64,
 }
 
+#[cfg(target_os = "macos")]
 type EventCallback = Box<dyn FnMut(&[FseventsEvent]) + Send + 'static>;
 
 struct CallbackState {
+    #[cfg(target_os = "macos")]
     callback: Mutex<EventCallback>,
     delivered_batches: AtomicU64,
     delivered_events: AtomicU64,
@@ -190,6 +192,7 @@ struct CallbackState {
 }
 
 impl CallbackState {
+    #[cfg(target_os = "macos")]
     fn new<F>(callback: F) -> Self
     where
         F: FnMut(&[FseventsEvent]) + Send + 'static,
@@ -271,7 +274,9 @@ impl CallbackState {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NativeError {
+    #[cfg(any(target_os = "macos", test))]
     Schedule,
+    #[cfg(any(target_os = "macos", test))]
     Start,
     #[cfg(not(target_os = "macos"))]
     Unsupported,
@@ -288,7 +293,9 @@ trait NativeLifecycle {
 
 fn map_native_error(error: NativeError) -> FseventsError {
     match error {
+        #[cfg(any(target_os = "macos", test))]
         NativeError::Schedule => FseventsError::NativeCreateFailed,
+        #[cfg(any(target_os = "macos", test))]
         NativeError::Start => FseventsError::NativeStartFailed,
         #[cfg(not(target_os = "macos"))]
         NativeError::Unsupported => FseventsError::UnsupportedPlatform,
@@ -304,6 +311,7 @@ struct LifecycleController<N: NativeLifecycle> {
 }
 
 impl<N: NativeLifecycle> LifecycleController<N> {
+    #[cfg(any(target_os = "macos", test))]
     fn new(native: N) -> Self {
         Self { native: Some(native), state: StreamState::Created }
     }
@@ -708,7 +716,7 @@ impl FseventsStream {
         #[cfg(not(target_os = "macos"))]
         {
             let _ = (paths, options, callback);
-            return Err(FseventsError::UnsupportedPlatform);
+            Err(FseventsError::UnsupportedPlatform)
         }
 
         #[cfg(target_os = "macos")]
