@@ -47,6 +47,18 @@ The default service/account are `com.alisinadevelo.ghostrace.journal` and
 entitlement. An unsigned command-line helper or a locked login session has no fallback:
 missing, inaccessible, duplicated, or malformed items produce redacted refusal errors.
 
+### Key lifecycle and recovery
+
+Encrypted payloads carry only a version, algorithm, nonce, and key-generation number;
+key bytes are never serialized, placed in a checkpoint, included in a receipt, or
+written to diagnostics. Rotation is staged and resumable: the previous generation is
+retained until every replacement decrypts and verifies, and only an explicit commit
+retires it. A lost key, compromise response, or user reset requires a confirmation whose
+scope is either one generation or all locally retained generations. The resulting
+receipt states exactly which generations were destroyed and that ciphertext under
+those generations is unrecoverable. There is no cloud recovery secret or plaintext
+queue fallback.
+
 ## Consent and scope
 
 When live capture is eventually enabled, consent must state the source, selected

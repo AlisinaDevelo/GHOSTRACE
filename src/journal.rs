@@ -1553,15 +1553,14 @@ fn read_user_version(connection: &Connection) -> Result<u32, GhostraceError> {
     })
 }
 
-#[cfg(debug_assertions)]
 fn maybe_crash_after_migration_sql(migration_id: &str) {
+    // This hook is inert unless the migration integration test explicitly sets
+    // the environment variable. Keeping it profile-independent lets the same
+    // crash-recovery assertion run in both debug and release device lanes.
     if std::env::var("GHOSTRACE_TEST_MIGRATION_CRASH").ok().as_deref() == Some(migration_id) {
         std::process::abort();
     }
 }
-
-#[cfg(not(debug_assertions))]
-fn maybe_crash_after_migration_sql(_migration_id: &str) {}
 
 fn configure_connection(
     connection: &Connection,

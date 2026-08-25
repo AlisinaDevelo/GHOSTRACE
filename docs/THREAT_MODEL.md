@@ -91,9 +91,10 @@ plaintext chosen by the user.
 - A user may intentionally export sensitive data to an insecure destination.
 - A compromised dependency, toolchain, or build host can violate the local-only
   contract. CI checks reduce this risk; they do not prove source intent.
-- The current fault matrix models one deterministic fixture key generation; key
-  rotation, loss, and Keychain-unavailable recovery remain unimplemented and
-  cannot be inferred from the matrix.
+- The fault matrix still exercises one deterministic fixture key generation. The
+  separate key-lifecycle boundary now models versioned envelopes, resumable
+  rotation, and explicit loss/reset receipts; it does not claim that a live
+  collector or signed Keychain helper is enabled.
 - A malicious path, fixture, or source can consume resources unless every adapter
   honors bounds.
 

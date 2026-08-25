@@ -16,6 +16,7 @@ pub mod fixture;
 pub mod fsevents;
 pub mod fsevents_flags;
 pub mod journal;
+pub mod key_lifecycle;
 #[cfg(target_os = "macos")]
 pub mod keychain;
 pub mod model;
@@ -25,7 +26,10 @@ pub mod wal;
 pub mod writer;
 
 pub use consent::{ConsentReceipt, ConsentState, ConsentStateMachine, ConsentTransitionKind};
-pub use crypto::{decrypt_payload, encrypt_payload, DeterministicKeyProvider, KeyProvider};
+pub use crypto::{
+    decrypt_payload, encrypt_payload, CiphertextEnvelope, DeterministicKeyProvider, KeyAlgorithm,
+    KeyMetadata, KeyProvider, CIPHERTEXT_ENVELOPE_VERSION, MAX_CIPHERTEXT_BYTES,
+};
 pub use cursor::{
     CursorIdentity, CursorKind, CursorOrder, CursorState, CursorStatus, CursorToken,
     CursorTransition, CURSOR_CONTRACT_VERSION,
@@ -63,6 +67,11 @@ pub use fsevents_flags::{
     FSEVENTS_NORMALIZED_SCHEMA_VERSION,
 };
 pub use journal::{AppliedMigration, BackupReceipt, DiagnosticRecord, Journal, StoredEvent};
+pub use key_lifecycle::{
+    DestructionConfirmation, DestructionReason, DestructionScope, KeyDestructionReceipt,
+    KeyLifecycleError, KeyRing, KeyRotation, RotationCheckpoint, RotationPhase,
+    KEY_LIFECYCLE_SCHEMA_VERSION, MAX_KEY_GENERATIONS,
+};
 #[cfg(target_os = "macos")]
 pub use keychain::{MacOsKeychainProvider, JOURNAL_KEYCHAIN_ACCOUNT, JOURNAL_KEYCHAIN_SERVICE};
 pub use model::{
@@ -97,6 +106,7 @@ pub const POLICY_DOCUMENT_SCHEMA_JSON: &str = include_str!("../schemas/policy-do
 pub const EXCLUSION_POLICY_SCHEMA_JSON: &str = include_str!("../schemas/exclusion-policy-v1.json");
 pub const FSEVENTS_NORMALIZED_SCHEMA_JSON: &str =
     include_str!("../schemas/fsevents-normalized-v1.json");
+pub const KEY_LIFECYCLE_SCHEMA_JSON: &str = include_str!("../schemas/key-lifecycle-v1.json");
 
 pub fn capture() -> Result<(), GhostraceError> {
     Err(GhostraceError::LiveCaptureDisabled)

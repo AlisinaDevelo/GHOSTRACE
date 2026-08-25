@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/AlisinaDevelo/GHOSTRACE/schemas/key-lifecycle-v1.json",
+  "title": "GHOSTRACE key lifecycle v1",
+  "oneOf": [
+    { "$ref": "#/$defs/key_metadata" },
+    { "$ref": "#/$defs/ciphertext_envelope" },
+    { "$ref": "#/$defs/rotation_checkpoint" },
+    { "$ref": "#/$defs/destruction_confirmation" },
+    { "$ref": "#/$defs/destruction_receipt" }
+  ],
+  "$defs": {
+    "algorithm": { "const": "x_cha_cha20_poly1305" },
+    "key_metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "algorithm", "key_generation"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "algorithm": { "$ref": "#/$defs/algorithm" },
+        "key_generation": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
+      }
+    },
+    "ciphertext_envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "algorithm", "key_generation", "nonce", "ciphertext"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "algorithm": { "$ref": "#/$defs/algorithm" },
+        "key_generation": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "nonce": {
+          "type": "array",
+          "minItems": 24,
+          "maxItems": 24,
+          "items": { "type": "integer", "minimum": 0, "maximum": 255 }
+        },
+        "ciphertext": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16777216,
+          "items": { "type": "integer", "minimum": 0, "maximum": 255 }
+        }
+      }
+    },
+    "rotation_phase": { "enum": ["prepared", "reencrypting", "committed"] },
+    "rotation_checkpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "from_generation",
+        "to_generation",
+        "total_records",
+        "verified_records",
+        "phase"
+      ],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "from_generation": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "to_generation": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "total_records": { "type": "integer", "minimum": 0, "maximum": 18446744073709551615 },
+        "verified_records": { "type": "integer", "minimum": 0, "maximum": 18446744073709551615 },
+        "phase": { "$ref": "#/$defs/rotation_phase" }
+      }
+    },
+    "destruction_reason": { "enum": ["lost_key", "user_reset", "compromise"] },
+    "destruction_scope": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "generation"],
+          "properties": {
+            "kind": { "const": "generation" },
+            "generation": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "all" } }
+        }
+      ]
+    },
+    "destruction_confirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "scope", "reason", "confirmed"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "scope": { "$ref": "#/$defs/destruction_scope" },
+        "reason": { "$ref": "#/$defs/destruction_reason" },
+        "confirmed": { "type": "boolean" }
+      }
+    },
+    "destruction_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "scope",
+        "reason",
+        "destroyed_generations",
+        "data_unrecoverable",
+        "explanation"
+      ],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "scope": { "$ref": "#/$defs/destruction_scope" },
+        "reason": { "$ref": "#/$defs/destruction_reason" },
+        "destroyed_generations": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 64,
+          "items": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
+        },
+        "data_unrecoverable": { "type": "boolean" },
+        "explanation": { "type": "string", "minLength": 1, "maxLength": 512 }
+      }
+    }
+  }
+}

@@ -90,8 +90,9 @@ failure paths.
 
 Task 0062 retains the bounded schedule fixture and the device receipt in
 `docs/evidence/0062-storage-fault-matrix.md`. It verifies the current fixture
-journal's single deterministic key generation; key rotation and Keychain
-availability remain separate, explicitly unverified gates.
+journal's single deterministic key generation. Task 0055 separately verifies the
+key-free envelope, resumable rotation, and explicit destruction receipts; it does not
+claim a live collector or signed-Keychain availability.
 
 Task 0063 retains its stream lifecycle receipt in
 `docs/evidence/0063-fsevents-stream-lifecycle.md`. That receipt must link the
