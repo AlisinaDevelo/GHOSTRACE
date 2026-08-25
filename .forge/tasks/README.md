@@ -84,7 +84,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0078 | Model clock skew and deterministic total ordering | M3 | done | explain-export | architect | 0018 | 0010, 0012 |
 | 0079 | Make query windows gap-aware | M3 | done | explain-export | implementation-engineer | 0018 | 0071, 0077, 0078 |
 | 0080 | Define a bounded evidence-claim grammar | M3 | done | explain-export | implementation-engineer | 0019 | 0017, 0018, 0046 |
-| 0081 | Version the cross-source correlation rule registry | M3 | backlog | explain-export | architect | 0019 | 0079, 0080 |
+| 0081 | Version the cross-source correlation rule registry | M3 | done | explain-export | implementation-engineer | 0019 | 0079, 0080 |
 | 0082 | Build explanation determinism and counterexample tests | M3 | backlog | explain-export | test-engineer | 0019 | 0080, 0081 |
 | 0083 | Create the export schema and manifest registry | M3 | backlog | explain-export | api-designer | 0020 | 0018, 0019, 0046 |
 | 0084 | Stream exports through an atomic bounded writer | M3 | backlog | explain-export | implementation-engineer | 0020 | 0083 |
