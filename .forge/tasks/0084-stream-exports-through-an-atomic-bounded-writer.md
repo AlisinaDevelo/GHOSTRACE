@@ -1,13 +1,13 @@
 ---
 id: 0084
 title: Stream exports through an atomic bounded writer
-status: backlog
+status: done
 agent: implementation-engineer
 model: human
 release: M3
 parent: 0020
 depends_on: [0083]
-change: null
+change: pr-291
 workstream: explain-export
 type: feature
 priority: p0
@@ -19,12 +19,12 @@ platform: any
 Export arbitrarily large authorized journals without loading all plaintext into memory or leaving a partial destination presented as complete.
 
 ## Acceptance criteria
-- [ ] Records stream in stable order with bounded buffers and incremental manifest digests.
-- [ ] Temporary creation, permissions, fsync, rename, cancellation, disk-full, and existing-destination behavior are fault-tested.
-- [ ] Partial output is either removed or unmistakably marked incomplete and never carries a valid final manifest.
+- [x] Records stream in stable order with bounded buffers and incremental manifest digests.
+- [x] Temporary creation, permissions, fsync, rename, cancellation, disk-full, and existing-destination behavior are fault-tested.
+- [x] Partial output is either removed or unmistakably marked incomplete and never carries a valid final manifest.
 
 ## Context
 The fixture path is bounded, but a live journal requires streaming and crash-safe plaintext handling.
 
 ## Notes
-Planned in the 2026–2031 GHOSTRACE program. Completion requires the acceptance evidence above; issue closure alone is not evidence.
+Implemented in PR #291 and reproduced on protected `main`; retained proof is [docs/evidence/0084-stream-exports.md](../../docs/evidence/0084-stream-exports.md). Completion requires the acceptance evidence above; issue closure alone is not evidence.
