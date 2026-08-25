@@ -11,7 +11,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0005 | Add privacy regression and network-surface checks | M0 | done | privacy | maintainer | — | 0003, 0004, 0043, 0044 |
 | 0006 | Define the versioned canonical event envelope | M0 | done | foundation | maintainer | — | 0003 |
 | 0007 | Implement the consent and capture-policy engine | M1 | done | privacy | maintainer | — | 0004, 0006, 0051, 0052, 0053 |
-| 0008 | Implement Keychain-backed DEK and AEAD envelopes | M1 | review | storage | maintainer | — | 0003, 0004, 0054, 0055, 0056 |
+| 0008 | Implement Keychain-backed DEK and AEAD envelopes | M1 | done | storage | maintainer | — | 0003, 0004, 0054, 0055, 0056 |
 | 0009 | Create SQLite WAL schema and migration runner | M1 | backlog | storage | maintainer | — | 0006, 0008, 0057, 0058, 0059 |
 | 0010 | Build bounded ingest writer with atomic cursor commit | M1 | backlog | storage | maintainer | — | 0006, 0007, 0008, 0009, 0049, 0060, 0061 |
 | 0011 | Build fixture replay and crash-injection harness | M1 | backlog | storage | maintainer | — | 0006, 0010, 0062 |
