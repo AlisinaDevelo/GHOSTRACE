@@ -6,7 +6,7 @@ are planning boundaries, not promises. A milestone closes only when its acceptan
 evidence is current; issue closure, code volume, or a green narrow test is not a
 substitute.
 
-GHOSTRACE remains a local macOS causal event journal with explicit consent,
+GHOSTRACE remains a local macOS event provenance journal with explicit consent,
 minimized metadata, evidence-linked explanations, and first-class gaps. The program
 does not authorize employee monitoring, content capture, silent upload, remote
 control, legal chain-of-custody claims, or causal conclusions unsupported by the

@@ -1,9 +1,10 @@
 # Research context
 
-GHOSTRACE sits between operating-system observation, local journaling, and causal
-explanation. Its differentiator is not a new claim about what macOS can observe. It
-is the discipline of recording bounded, user-authorized observations with source
-limits, policy context, evidence levels, and first-class gaps.
+GHOSTRACE sits between operating-system observation, local journaling, and
+evidence-linked change explanation. Its differentiator is not a new claim about what
+macOS can observe. It is the discipline of recording bounded, user-authorized
+observations with source limits, policy context, evidence levels, and first-class
+gaps.
 
 The project name also has a research namespace caveat. VUSec uses GhostRace for
 speculative race-condition research; GHOSTRACE is unrelated. See the
