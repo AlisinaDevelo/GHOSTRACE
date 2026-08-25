@@ -82,11 +82,15 @@ flags, cursor state, and gaps must remain visible.
 
 The collector records start/stop lifecycle events, hashes reported paths, and routes
 accepted metadata through the bounded writer. Callback overflow is a first-class gap;
-blocked observations are summarized without retaining blocked paths. The startup
-canonicalization is not the complete path policy: symlink replacement, hard-link
-aliasing, validation-to-use races, exclusion matching, volume identity, and cursor
-recovery remain separate release gates. No FSEvents cursor is persisted by this first
-slice, so the ambient CLI remains refused.
+blocked observations are summarized without retaining blocked paths. The metadata
+adapter never opens a reported path. Consumers that must open an existing item use
+`SelectedRoot::open_contained`, which walks from a root descriptor with `O_NOFOLLOW`,
+keeps each directory descriptor as the authority for the next component, rejects
+different-device descendants and regular files with hard-link aliases, and returns
+an explicit refusal when a component is replaced. Symlink and hard-link callbacks
+remain source facts and are not opened. Exclusion matching, volume/cursor recovery,
+and release-scale persistence remain separate gates; no FSEvents cursor is persisted
+by this first slice, so the ambient CLI remains refused.
 
 The shipped lifecycle adapter is the native stream fence beneath the collector. It requires a
 single owner thread and that thread's current Core Foundation run loop; it does not
@@ -95,8 +99,9 @@ stop, restart, invalidation, and release are explicit operations. A callback is
 never allowed to unwind through the C ABI, and a native stream is released only
 after invalidation. The separate selected-root consent preview now makes canonical
 opaque roots, exclusions, retained fields, and FSEvents coverage limits explicit
-before a grant; race-resistant symlink containment, exclusions, cursor recovery, and
-release-scale persistence remain no-go gates for ambient capture. Path digests use a
+before a grant; descriptor-backed no-follow symlink and hard-link containment is now
+explicit for later opens, while exclusions, cursor recovery, and release-scale
+persistence remain no-go gates for ambient capture. Path digests use a
 versioned scope containing the opaque root ID and filesystem identity, and are stable only
 within that root's OS canonicalization and digest scope—not as cross-volume identifiers.
 

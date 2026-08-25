@@ -34,8 +34,9 @@ remainder, and records a status of observed, rescan-required, boundary,
 unsupported, or contradictory. Unknown bits and loss boundaries lower completeness;
 they are never silently treated as ordinary file changes. The normalized evidence
 record is path-free. The selected-root collector performs startup canonicalization,
-lexical containment, policy authorization, and path hashing before persistence; the
-race-resistant path policy, exclusions, and cursor/recovery gates remain later work.
+lexical containment, policy authorization, and path hashing before persistence. A
+descriptor-backed no-follow walk is available for later opens; exclusions and
+cursor/recovery remain separate gates.
 
 The published JSON Schema describes the canonical normalized serialization emitted
 by Rust, so nullable/defaulted fields are present even when their value is `null` or

@@ -120,9 +120,17 @@ overflow becomes a first-class gap, and blocked observations become a bounded su
 The public status exposes running/stopped/revoked state, callback health, accepted and
 dropped counts, and coverage-loss counters without retaining paths.
 
+When a later consumer must open an existing item, `SelectedRoot::open_contained`
+performs a descriptor walk from the selected root. Each component is opened with
+`O_NOFOLLOW`; parent descriptors, not a revalidated pathname, authorize the next
+lookup. A replaced root, symlink component, different-device descendant, or regular
+file with a hard-link alias becomes an explicit refusal. The returned
+`ContainedFile` exposes descriptor metadata and identity stability but does not
+implement content reads, keeping source facts path-free and content-free.
+
 The collector deliberately does not persist an FSEvents cursor yet. Volume identity,
-reset/wrap recovery, storm backpressure, exclusion precedence, symlink/hard-link race
-defense, and the ambient CLI remain later gates (tasks 0014–0017 and their children).
+reset/wrap recovery, storm backpressure, exclusion precedence, and the ambient CLI
+remain later gates (tasks 0014–0017 and their children).
 
 ## Policy-document boundary
 
