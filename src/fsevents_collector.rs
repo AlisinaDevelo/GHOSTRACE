@@ -18,10 +18,8 @@ use std::{
     fs::{File, Metadata},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
-
-#[cfg(target_os = "macos")]
-use std::time::Duration;
 
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
@@ -45,7 +43,8 @@ use crate::{
     cursor::{CursorIdentity, CursorToken, ReplayBoundary},
     error::GhostraceError,
     fsevents::{
-        CallbackHealth, FseventsError, FseventsEvent, FseventsOptions, FseventsStream, StreamState,
+        CallbackHealth, FseventsError, FseventsEvent, FseventsOptions, FseventsStream,
+        StartupCursorDecision, StartupCursorError, StreamState,
     },
     fsevents_flags::{FseventsEventFlag, FseventsEvidenceStatus, NormalizedFseventsEvent},
     journal::{DiagnosticRecord, Journal},
@@ -64,6 +63,9 @@ use crate::{
 pub const MAX_SELECTED_ROOTS: usize = 64;
 /// Upper bound on copied callback events waiting for the owner thread.
 pub const MAX_PENDING_EVENTS: usize = 4 * 1024;
+/// A historical stream must announce `HistoryDone` within this bounded window
+/// or it becomes an explicit unavailable-history gap.
+pub const DEFAULT_HISTORY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A canonical path bound to one opaque policy root identifier.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -273,6 +275,7 @@ pub struct FseventsCollectorConfig {
     pub consent_at: DateTime<Utc>,
     pub actor: String,
     pub reason: String,
+    pub history_timeout: Duration,
 }
 
 /// Lifecycle state exposed by the selected-root adapter.
@@ -284,6 +287,18 @@ pub enum CollectorState {
     Stopped,
     Revoked,
     Failed,
+}
+
+/// Coverage readiness is separate from native lifecycle state. `Running` only
+/// means the native stream is active; callers may claim live delivery only
+/// after `Replaying` transitions to `Live` on the HistoryDone sentinel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CollectorCoverageState {
+    NotStarted,
+    Replaying,
+    Live,
+    HistoryUnavailable,
 }
 
 /// A path-free, normalized filesystem event returned after durable admission.
@@ -304,6 +319,7 @@ pub struct CollectedFilesystemEvent {
 #[derive(Clone, Debug)]
 pub struct CollectorStatus {
     pub state: CollectorState,
+    pub coverage_state: CollectorCoverageState,
     pub stream_state: StreamState,
     pub consent_state: ConsentState,
     pub accepted_events: u64,
@@ -351,6 +367,12 @@ pub enum FseventsCollectorError {
     #[error("collector cannot {action} in its current state")]
     InvalidState { action: &'static str },
 
+    #[error("startup history timeout must be finite, nonzero, and no greater than one hour")]
+    InvalidHistoryTimeout,
+
+    #[error(transparent)]
+    StartupCursor(#[from] StartupCursorError),
+
     #[error("the lifecycle event could not be durably admitted")]
     LifecycleAdmissionGap,
 
@@ -393,8 +415,12 @@ pub struct FseventsCollector {
     journal: Journal,
     origin: IngestionOrigin,
     replay_boundary: ReplayBoundary,
+    startup_decision: StartupCursorDecision,
+    history_timeout: Duration,
+    history_started_at: Option<Instant>,
     instance_label: InstanceLabel,
     state: CollectorState,
+    coverage_state: CollectorCoverageState,
     accepted_events: u64,
     blocked_events: u64,
     dropped_events: u64,
@@ -418,6 +444,10 @@ impl FseventsCollector {
     where
         I: IntoIterator<Item = SelectedRoot>,
     {
+        if config.history_timeout.is_zero() || config.history_timeout > Duration::from_secs(3600) {
+            return Err(FseventsCollectorError::InvalidHistoryTimeout);
+        }
+        let startup_decision = config.options.startup_decision(None)?;
         let policy = PolicyProfile::from_document(&document)?;
         if !policy.is_source_enabled(EventSource::Filesystem)
             || !policy.is_source_enabled(EventSource::Lifecycle)
@@ -493,8 +523,12 @@ impl FseventsCollector {
             journal,
             origin,
             replay_boundary,
+            startup_decision,
+            history_timeout: config.history_timeout,
+            history_started_at: None,
             instance_label,
             state: CollectorState::Created,
+            coverage_state: CollectorCoverageState::NotStarted,
             accepted_events: 0,
             blocked_events: 0,
             dropped_events: 0,
@@ -509,6 +543,7 @@ impl FseventsCollector {
     pub fn status(&self) -> CollectorStatus {
         CollectorStatus {
             state: self.state,
+            coverage_state: self.coverage_state,
             stream_state: self.stream.state(),
             consent_state: self.consent.state(),
             accepted_events: self.accepted_events,
@@ -539,6 +574,11 @@ impl FseventsCollector {
         {
             return Err(FseventsCollectorError::InvalidState { action: "start" });
         }
+        if self.recovery_required {
+            return Err(FseventsCollectorError::InvalidState {
+                action: "start before source reconciliation",
+            });
+        }
         if self.state == CollectorState::Created {
             self.stream.schedule_on_current_run_loop()?;
         }
@@ -549,6 +589,12 @@ impl FseventsCollector {
             self.state = CollectorState::Failed;
             return Err(error.into());
         }
+        self.coverage_state = match self.startup_decision {
+            StartupCursorDecision::SinceNow => CollectorCoverageState::Live,
+            StartupCursorDecision::Replay { .. } => CollectorCoverageState::Replaying,
+        };
+        self.history_started_at =
+            (self.coverage_state == CollectorCoverageState::Replaying).then(Instant::now);
         self.state = CollectorState::Running;
         Ok(())
     }
@@ -559,7 +605,16 @@ impl FseventsCollector {
         if self.state != CollectorState::Running {
             return Err(FseventsCollectorError::InvalidState { action: "stop" });
         }
-        self.stream.flush()?;
+        // An explicit stop during historical replay is an interruption, not
+        // proof that the source reached its HistoryDone sentinel. Record the
+        // bounded loss before stopping the native stream; otherwise a final
+        // synchronous flush could make an incomplete replay look live.
+        let interrupted_history = self.coverage_state == CollectorCoverageState::Replaying;
+        if interrupted_history {
+            self.finish_partial_history()?;
+        } else {
+            self.stream.flush()?;
+        }
         self.stream.stop()?;
         self.set_accepting(false);
         let _ = self.drain_pending()?;
@@ -586,6 +641,10 @@ impl FseventsCollector {
             self.pending.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).events.clear();
             self.submit_lifecycle(EventKind::CollectorStopped)?;
         }
+        if self.coverage_state == CollectorCoverageState::Replaying {
+            self.coverage_state = CollectorCoverageState::HistoryUnavailable;
+            self.history_started_at = None;
+        }
         self.state = CollectorState::Revoked;
         Ok(())
     }
@@ -601,7 +660,9 @@ impl FseventsCollector {
             return Err(FseventsCollectorError::InvalidState { action: "drive the run loop" });
         }
         self.stream.run_current_run_loop_for(duration)?;
-        self.drain_pending()
+        let committed = self.drain_pending()?;
+        self.check_history_timeout()?;
+        Ok(committed)
     }
 
     /// Flush currently delivered callbacks without waiting for another run-loop
@@ -612,7 +673,9 @@ impl FseventsCollector {
             return Err(FseventsCollectorError::InvalidState { action: "flush" });
         }
         self.stream.flush()?;
-        self.drain_pending()
+        let committed = self.drain_pending()?;
+        self.check_history_timeout()?;
+        Ok(committed)
     }
 
     fn drain_pending(&mut self) -> Result<Vec<CollectedFilesystemEvent>, FseventsCollectorError> {
@@ -646,6 +709,10 @@ impl FseventsCollector {
             }
             let normalized = event.normalize_flags();
             self.record_status(&normalized.status);
+            if normalized.is_history_done() {
+                self.handle_history_done();
+                continue;
+            }
             if let Some(reason_code) = normalized.gap_reason_code() {
                 let (source_cursor, from_cursor, to_cursor, dropped_count) =
                     self.coverage_gap_cursors(&event, &normalized);
@@ -656,6 +723,19 @@ impl FseventsCollector {
                     from_cursor,
                     to_cursor,
                     remediation: Some(remediation_for(&normalized)),
+                    root_ids: self.affected_root_ids(&event.path, &normalized),
+                    requires_reconciliation: true,
+                })?;
+                continue;
+            }
+            if self.is_partial_history_failure(&normalized) {
+                self.submit_gap(GapSubmission {
+                    dropped_count: 0,
+                    reason_code: "fsevents_history_partial",
+                    source_cursor: None,
+                    from_cursor: None,
+                    to_cursor: None,
+                    remediation: Some(GapRemediation::ReinitializeStream),
                     root_ids: self.affected_root_ids(&event.path, &normalized),
                     requires_reconciliation: true,
                 })?;
@@ -774,6 +854,67 @@ impl FseventsCollector {
         Ok(committed)
     }
 
+    fn handle_history_done(&mut self) {
+        if self.coverage_state == CollectorCoverageState::Replaying {
+            self.coverage_state = CollectorCoverageState::Live;
+            self.history_started_at = None;
+        }
+    }
+
+    fn is_partial_history_failure(&self, normalized: &NormalizedFseventsEvent) -> bool {
+        if self.coverage_state != CollectorCoverageState::Replaying {
+            return false;
+        }
+        matches!(
+            normalized.status,
+            FseventsEvidenceStatus::Unsupported { .. }
+                | FseventsEvidenceStatus::Contradictory { .. }
+                | FseventsEvidenceStatus::Boundary {
+                    reason: crate::fsevents_flags::FseventsBoundaryReason::Mount
+                        | crate::fsevents_flags::FseventsBoundaryReason::Unmount
+                }
+        )
+    }
+
+    fn check_history_timeout(&mut self) -> Result<(), FseventsCollectorError> {
+        let Some(started_at) = self.history_started_at else {
+            return Ok(());
+        };
+        if self.coverage_state != CollectorCoverageState::Replaying
+            || started_at.elapsed() < self.history_timeout
+        {
+            return Ok(());
+        }
+        self.submit_gap(GapSubmission {
+            dropped_count: 0,
+            reason_code: "fsevents_history_timeout",
+            source_cursor: None,
+            from_cursor: None,
+            to_cursor: None,
+            remediation: Some(GapRemediation::ReinitializeStream),
+            root_ids: self.all_root_ids(),
+            requires_reconciliation: true,
+        })?;
+        Ok(())
+    }
+
+    fn finish_partial_history(&mut self) -> Result<(), FseventsCollectorError> {
+        if self.coverage_state != CollectorCoverageState::Replaying {
+            return Ok(());
+        }
+        self.submit_gap(GapSubmission {
+            dropped_count: 0,
+            reason_code: "fsevents_history_incomplete",
+            source_cursor: None,
+            from_cursor: None,
+            to_cursor: None,
+            remediation: Some(GapRemediation::ReinitializeStream),
+            root_ids: self.all_root_ids(),
+            requires_reconciliation: true,
+        })?;
+        Ok(())
+    }
+
     fn submit_lifecycle(&mut self, kind: EventKind) -> Result<(), FseventsCollectorError> {
         let payload = EventPayload::CollectorStarted(CollectorLifecyclePayload {
             collector: EventSource::Filesystem,
@@ -849,6 +990,8 @@ impl FseventsCollector {
             WriterOutcome::Committed(_) => {
                 if requires_reconciliation {
                     self.recovery_required = true;
+                    self.coverage_state = CollectorCoverageState::HistoryUnavailable;
+                    self.history_started_at = None;
                 }
                 Ok(())
             }
@@ -857,6 +1000,8 @@ impl FseventsCollector {
                     self.dropped_events.saturating_add(writer_gap.event_count as u64);
                 if requires_reconciliation {
                     self.recovery_required = true;
+                    self.coverage_state = CollectorCoverageState::HistoryUnavailable;
+                    self.history_started_at = None;
                 }
                 Ok(())
             }

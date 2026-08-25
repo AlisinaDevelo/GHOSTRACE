@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/AlisinaDevelo/GHOSTRACE/schemas/fsevents-startup-v1.json",
+  "title": "GHOSTRACE FSEvents startup cursor contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "cursor", "decision"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "cursor": { "$ref": "#/$defs/cursor" },
+    "decision": { "$ref": "#/$defs/decision" }
+  },
+  "$defs": {
+    "cursor": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "since_now" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "event_id"],
+          "properties": {
+            "kind": { "const": "event_id" },
+            "event_id": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551614
+            }
+          }
+        }
+      ]
+    },
+    "decision": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": { "mode": { "const": "since_now" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "event_id"],
+          "properties": {
+            "mode": { "const": "replay" },
+            "event_id": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551614
+            }
+          }
+        }
+      ]
+    }
+  }
+}

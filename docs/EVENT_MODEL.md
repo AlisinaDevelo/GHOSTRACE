@@ -134,7 +134,14 @@ filesystem source, a volume fingerprint, opaque root IDs, cursor bounds when the
 source position is comparable, and one of `rescan_selected_roots`,
 `reconcile_selected_root`, or `reinitialize_stream`. A source-loss gap sets the
 collector's `recovery_required` status; ordinary filesystem delivery is not
-resumed automatically and no continuous-coverage claim is made.
+resumed automatically and no continuous-coverage claim is made. Startup replay
+adds `fsevents_history_partial`, `fsevents_history_timeout`, and
+`fsevents_history_incomplete`; each is a durable `Gap` with
+`reinitialize_stream`. A collector in `Replaying` is not live until the source's
+`HistoryDone` boundary is consumed. That boundary is control evidence only and
+must never be exported as a filesystem observation. Invalid startup positions
+(zero, stale, future, wrapped, and corrupted) are refused before stream creation
+so a missing interval cannot be disguised as a `SinceNow` start.
 
 ## Causal links
 

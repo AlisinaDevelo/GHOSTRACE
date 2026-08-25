@@ -54,14 +54,16 @@ pub use export::{
 pub use fault::{FaultAction, FaultPlan, FaultPoint, FaultSchedule};
 pub use fixture::{ingest_fixture, read_fixture, FixtureIngestReport};
 pub use fsevents::{
-    CallbackHealth, FseventsError, FseventsEvent, FseventsOptions, FseventsStream, StreamState,
-    DEFAULT_LATENCY, EVENT_ID_SINCE_NOW, FLAG_FILE_EVENTS, FLAG_FULL_HISTORY, FLAG_NO_DEFER,
-    FLAG_USE_CF_TYPES, FLAG_USE_EXTENDED_DATA, FLAG_WATCH_ROOT, FLAG_WITH_DOC_ID,
+    CallbackHealth, FseventsError, FseventsEvent, FseventsOptions, FseventsStream,
+    HistoryCursorRange, StartupCursor, StartupCursorDecision, StartupCursorError,
+    StartupCursorRejection, StreamState, DEFAULT_LATENCY, EVENT_ID_SINCE_NOW, FLAG_FILE_EVENTS,
+    FLAG_FULL_HISTORY, FLAG_NO_DEFER, FLAG_USE_CF_TYPES, FLAG_USE_EXTENDED_DATA, FLAG_WATCH_ROOT,
+    FLAG_WITH_DOC_ID,
 };
 pub use fsevents_collector::{
-    CollectedFilesystemEvent, CollectorState, CollectorStatus, ContainedFile, FseventsCollector,
-    FseventsCollectorConfig, FseventsCollectorError, SelectedRoot, MAX_PENDING_EVENTS,
-    MAX_SELECTED_ROOTS,
+    CollectedFilesystemEvent, CollectorCoverageState, CollectorState, CollectorStatus,
+    ContainedFile, FseventsCollector, FseventsCollectorConfig, FseventsCollectorError,
+    SelectedRoot, DEFAULT_HISTORY_TIMEOUT, MAX_PENDING_EVENTS, MAX_SELECTED_ROOTS,
 };
 pub use fsevents_flags::{
     normalize_fsevents_event, FseventsBoundaryReason, FseventsCompleteness,
@@ -121,6 +123,7 @@ pub const POLICY_DOCUMENT_SCHEMA_JSON: &str = include_str!("../schemas/policy-do
 pub const EXCLUSION_POLICY_SCHEMA_JSON: &str = include_str!("../schemas/exclusion-policy-v1.json");
 pub const FSEVENTS_NORMALIZED_SCHEMA_JSON: &str =
     include_str!("../schemas/fsevents-normalized-v1.json");
+pub const FSEVENTS_STARTUP_SCHEMA_JSON: &str = include_str!("../schemas/fsevents-startup-v1.json");
 pub const KEY_LIFECYCLE_SCHEMA_JSON: &str = include_str!("../schemas/key-lifecycle-v1.json");
 
 pub fn capture() -> Result<(), GhostraceError> {
