@@ -69,3 +69,26 @@ Linux stable/MSRV runs passed in the linked CI workflow. The locked-session
 Keychain lifecycle test remains ignored because it requires explicit device
 Keychain authorization; it is not replaced by CI. No path, display name,
 account data, credential, or capture key is retained in this evidence.
+
+## Live GitHub reconciliation
+
+After the evidence receipt was merged and issue #77 was updated, independent
+authenticated reads of `AlisinaDevelo/GHOSTRACE` reported exactly 160 issues
+(113 open, 47 closed), 12 milestones (`M0` through `M11`), and 31 managed
+labels (45 labels total). Issue #77 is closed with reason `completed` and has
+`status:done`; it has no `status:backlog` label.
+
+The versioned task tree digest is
+`711589cbeeca219b3af72702e2ab94244b919fddad5cb3f12941cda0971587e9`.
+The inspected local Forge parity receipt has no operations and SHA-256
+`c8500168ea0d4ac4c6a79ca76e7392603bd67919eb92dc48a9c1bd25f1e7be86`.
+The authenticated metadata planner was run twice after the issue update. Both
+plans returned zero operations, zero blockers, the same plan digest
+`885b2639de853f32ea0a20202deb81907e4c3ecf96bffff1eb5803d91486f8d0`, and
+byte-identical JSON receipts with SHA-256
+`0ae0c3718c972bedaf324576ce59861c438c5685c6a0bd3a3c38940715534264`. No
+metadata apply was needed. The raw independent live-read receipts are also
+hash-pinned: issue list `b5f2dfefbcc3d7716a3c0d2328626dbae51ab336909bee38ba66b9b12139a659`,
+labeled issue list `aaa270cc1afd70e1ed04dcb7fc84a27096e1b19ee78ce90d964930df4af1cc17`,
+label list `509495234aea420ddc5c6c27e9c6696ee7797f1ddb3bb6be8bc278920cba1e85`,
+and milestone list `b972db09e86a4da38ce904fd559c2d83f51cde2a41b40c66cdf1659f6f9a62dd`.
