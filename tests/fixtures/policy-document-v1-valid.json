@@ -4,5 +4,6 @@
   "version": 1,
   "enabled_sources": ["filesystem", "fixture"],
   "selected_roots": ["root-a"],
+  "excluded_roots": ["private-root"],
   "allow_private_context": false
 }

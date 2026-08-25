@@ -20,6 +20,7 @@ pub struct PolicyDocument {
     pub version: u32,
     pub enabled_sources: BTreeSet<EventSource>,
     pub selected_roots: BTreeSet<String>,
+    pub excluded_roots: BTreeSet<String>,
     pub allow_private_context: bool,
 }
 
@@ -31,6 +32,8 @@ struct UncheckedPolicyDocument {
     version: u32,
     enabled_sources: Vec<EventSource>,
     selected_roots: Vec<String>,
+    #[serde(default)]
+    excluded_roots: Vec<String>,
     allow_private_context: bool,
 }
 
@@ -53,12 +56,14 @@ impl TryFrom<UncheckedPolicyDocument> for PolicyDocument {
         }
         let enabled_sources = unique_sources(raw.enabled_sources)?;
         let selected_roots = unique_roots(raw.selected_roots)?;
+        let excluded_roots = unique_roots(raw.excluded_roots)?;
         let document = Self {
             schema_version: raw.schema_version,
             id: raw.id,
             version: raw.version,
             enabled_sources,
             selected_roots,
+            excluded_roots,
             allow_private_context: raw.allow_private_context,
         };
         document.validate()?;
@@ -85,20 +90,39 @@ impl PolicyDocument {
             version,
             enabled_sources: unique_sources(enabled_sources.into_iter().collect())?,
             selected_roots: unique_roots(selected_roots.into_iter().map(Into::into).collect())?,
+            excluded_roots: BTreeSet::new(),
             allow_private_context,
         };
         document.validate()?;
         Ok(document)
     }
 
+    /// Add explicit root exclusions while preserving the original constructor
+    /// shape used by the v1 fixture API.
+    pub fn with_excluded_roots<Roots, Root>(
+        mut self,
+        excluded_roots: Roots,
+    ) -> Result<Self, GhostraceError>
+    where
+        Roots: IntoIterator<Item = Root>,
+        Root: Into<String>,
+    {
+        self.excluded_roots = unique_roots(excluded_roots.into_iter().map(Into::into).collect())?;
+        self.validate()?;
+        Ok(self)
+    }
+
     pub fn from_profile(profile: &PolicyProfile) -> Result<Self, GhostraceError> {
-        Self::new(
+        let mut document = Self::new(
             profile.id.clone(),
             profile.version,
             profile.enabled_sources.iter().copied(),
             profile.selected_roots.iter().cloned(),
             profile.allow_private_context,
-        )
+        )?;
+        document.excluded_roots = profile.excluded_roots.clone();
+        document.validate()?;
+        Ok(document)
     }
 
     pub fn from_json(input: &str) -> Result<Self, GhostraceError> {
@@ -118,6 +142,7 @@ impl PolicyDocument {
         let canonical = serde_json::to_vec(&(
             &self.enabled_sources,
             &self.selected_roots,
+            &self.excluded_roots,
             self.allow_private_context,
         ))?;
         let digest = Sha256::digest(canonical);
@@ -136,6 +161,7 @@ impl PolicyDocument {
             version: self.version,
             enabled_sources: self.enabled_sources.clone(),
             selected_roots: self.selected_roots.clone(),
+            excluded_roots: self.excluded_roots.clone(),
             allow_private_context: self.allow_private_context,
         })
     }
@@ -156,6 +182,14 @@ impl PolicyDocument {
                 .any(|root| validate_identifier("selected_root", root).is_err())
         {
             return Err(GhostraceError::PolicyMigration("selected root set is invalid".to_owned()));
+        }
+        if self.excluded_roots.len() > 256
+            || self
+                .excluded_roots
+                .iter()
+                .any(|root| validate_identifier("excluded_root", root).is_err())
+        {
+            return Err(GhostraceError::PolicyMigration("excluded root set is invalid".to_owned()));
         }
         Ok(())
     }
@@ -184,6 +218,9 @@ impl PolicyDocument {
         }
         if self.selected_roots != previous.selected_roots {
             changed.push(PolicyChange::SelectedRoots);
+        }
+        if self.excluded_roots != previous.excluded_roots {
+            changed.push(PolicyChange::ExcludedRoots);
         }
         if self.allow_private_context != previous.allow_private_context {
             changed.push(PolicyChange::PrivateContext);
@@ -233,6 +270,7 @@ fn unique_roots(values: Vec<String>) -> Result<BTreeSet<String>, GhostraceError>
 pub enum PolicyChange {
     EnabledSources,
     SelectedRoots,
+    ExcludedRoots,
     PrivateContext,
 }
 
@@ -313,6 +351,7 @@ pub enum PolicyReason {
     PolicyAllowed,
     SourceNotEnabled,
     RootNotSelected,
+    RootExcluded,
     PrivateContext,
     EmptyProfileId,
     PolicyProfileMismatch,
@@ -332,6 +371,7 @@ impl PolicyReason {
             Self::PolicyAllowed => "policy_allowed",
             Self::SourceNotEnabled => "source_not_enabled",
             Self::RootNotSelected => "root_not_selected",
+            Self::RootExcluded => "root_excluded",
             Self::PrivateContext => "private_context",
             Self::EmptyProfileId => "empty_profile_id",
             Self::PolicyProfileMismatch => "policy_profile_mismatch",
@@ -356,6 +396,7 @@ impl PolicyReason {
             Self::InternalFailure => PolicyDiagnostic::InternalFailure,
             Self::SourceNotEnabled
             | Self::RootNotSelected
+            | Self::RootExcluded
             | Self::PrivateContext
             | Self::PolicyProfileMismatch
             | Self::FixtureOnly
@@ -482,6 +523,8 @@ pub struct PolicyProfile {
     pub version: u32,
     pub enabled_sources: BTreeSet<EventSource>,
     pub selected_roots: BTreeSet<String>,
+    #[serde(default)]
+    pub excluded_roots: BTreeSet<String>,
     pub allow_private_context: bool,
 }
 
@@ -504,6 +547,7 @@ impl PolicyProfile {
             version: 1,
             enabled_sources: BTreeSet::new(),
             selected_roots: BTreeSet::new(),
+            excluded_roots: BTreeSet::new(),
             allow_private_context: false,
         }
     }
@@ -533,6 +577,10 @@ impl PolicyProfile {
 
     pub fn select_root(&mut self, root_id: impl Into<String>) {
         self.selected_roots.insert(root_id.into());
+    }
+
+    pub fn exclude_root(&mut self, root_id: impl Into<String>) {
+        self.excluded_roots.insert(root_id.into());
     }
 
     pub fn allow_private_context(&mut self) {
@@ -566,6 +614,13 @@ impl PolicyProfile {
                     reason: PolicyReason::RootNotSelected,
                 };
             }
+            if self.excluded_roots.contains(root_id) {
+                return PolicyDecision::Denied {
+                    source,
+                    root_id: safe_root,
+                    reason: PolicyReason::RootExcluded,
+                };
+            }
         }
         if private_context && !self.allow_private_context {
             return PolicyDecision::Denied {
@@ -590,7 +645,12 @@ impl PolicyProfile {
             && self
                 .selected_roots
                 .iter()
-                .all(|root| validate_identifier("selected_root", root).is_ok());
+                .all(|root| validate_identifier("selected_root", root).is_ok())
+            && self.excluded_roots.len() <= 256
+            && self
+                .excluded_roots
+                .iter()
+                .all(|root| validate_identifier("excluded_root", root).is_ok());
         if !profile_valid {
             return PolicyDecisionRecord {
                 outcome: PolicyOutcome::Refuse,
@@ -631,6 +691,11 @@ impl PolicyProfile {
                 .selected_roots
                 .iter()
                 .any(|root| validate_identifier("selected_root", root).is_err())
+            || self.excluded_roots.len() > 256
+            || self
+                .excluded_roots
+                .iter()
+                .any(|root| validate_identifier("excluded_root", root).is_err())
         {
             return Err(GhostraceError::PolicyDenied {
                 reason: PolicyReason::InvalidProfile.code().to_owned(),

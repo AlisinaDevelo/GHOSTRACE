@@ -67,10 +67,15 @@ Capture policy is stored as a strict `policy-document-v1` document with an immut
 identity and a monotonically increasing policy version. The JSON document has no
 extension fields: unknown schema versions, unknown fields, duplicate entries, and
 invalid identifiers are rejected before a candidate reaches a journal or policy
-history. A version upgrade that preserves enabled sources, selected roots, and
-private-context behavior is automatically interpretable. Any semantic change must
-be explicitly reconfirmed; a failed migration leaves the previously accepted
-document active and retains no candidate observation.
+history. It contains selected roots and a separate bounded exclusion set; an
+exclusion always wins over a selected-root grant. A version upgrade that preserves
+enabled sources, selected roots, exclusions, and private-context behavior is
+automatically interpretable. Any semantic change, including an exclusion change,
+must be explicitly reconfirmed; a failed migration leaves the previously accepted
+document active and retains no candidate observation. The scope digest covers both
+root sets so consent receipts cannot silently outlive a scope change. The optional
+v1 exclusion field defaults to empty only for backwards-compatible documents;
+present values are still validated for uniqueness, size, and identifier shape.
 
 Consent is a separate append-only state machine over that document. Each grant, scope
 change, suspension, revocation, or deletion-intent transition emits a bounded receipt
@@ -84,7 +89,10 @@ deny, redact, summarize, and refuse; its diagnostics distinguish policy denial,
 malformed input, unsupported scope, and internal failure. The record reports only
 source, policy identity/version, root presence, private-context state, and a stable
 reason code. Rejected roots and observations never enter the record or its debug
-representation.
+representation. The deterministic property corpus covers the policy precedence
+matrix, explicit redaction/summarization, migration reason codes, consent replay,
+and rejection of silent reactivation before this gate is connected to a live
+collector.
 
 ## Bounded durable writer contract
 

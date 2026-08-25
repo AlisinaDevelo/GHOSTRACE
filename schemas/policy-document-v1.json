@@ -27,6 +27,12 @@
       "uniqueItems": true,
       "items": { "$ref": "#/$defs/opaque_identifier" }
     },
+    "excluded_roots": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/opaque_identifier" }
+    },
     "allow_private_context": { "type": "boolean" }
   },
   "$defs": {

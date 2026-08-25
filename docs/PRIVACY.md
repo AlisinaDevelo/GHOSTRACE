@@ -74,6 +74,13 @@ they do not contain the root string or rejected observation. Malformed input,
 unsupported scope, and internal failure remain distinguishable without echoing the
 input that caused the refusal.
 
+The policy document carries selected roots and an independent bounded exclusion set.
+An excluded root always loses to a selected-root grant and produces the stable
+`root_excluded` reason. Both sets are included in the scope digest and are treated as
+semantic migration changes, so a changed exclusion requires reconfirmation. The
+document parser accepts the omission of this optional v1 field for backwards
+compatibility, while duplicate, malformed, or oversized values remain fail-closed.
+
 ## Local storage and export
 
 The intended journal is local to the user account. Filesystem permissions, SQLite
@@ -120,6 +127,13 @@ Privacy changes require tests that:
 - run the fixture path without network access;
 - show gaps and denials in explanations;
 - check that logs never contain keys, payloads, or user paths.
+
+The consent/policy state-machine corpus is deterministic and dependency-free. It
+exercises 512 policy matrices and 256 consent command sequences, including
+exclusion precedence, redaction, versioned migration, receipt replay, contiguous
+sequence numbers, monotonic timestamps, failed-command immutability, and rejection
+of forged non-grant reactivation. The fixed generator makes failures reproducible on
+the target device without downloading a test framework.
 
 See [EVALUATION.md](EVALUATION.md) for the evidence expected before a live source is
 enabled.
