@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "registry_version": 1,
+  "rules": [
+    {
+      "id": "cross_source_temporal_adjacency",
+      "version": 1,
+      "fixtures": [
+        {"id": "positive_cross_source_observations", "class": "positive"},
+        {"id": "negative_same_source_observations", "class": "negative"},
+        {"id": "ambiguous_unknown_evidence", "class": "ambiguous"},
+        {"id": "adversarial_policy_scope", "class": "adversarial"},
+        {"id": "clock_skew_rollback", "class": "clock_skew"}
+      ]
+    }
+  ],
+  "privacy": {
+    "synthetic_only": true,
+    "user_data_included": false,
+    "network_required": false
+  }
+}

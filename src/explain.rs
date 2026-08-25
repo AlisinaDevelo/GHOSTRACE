@@ -7,6 +7,10 @@ use uuid::Uuid;
 
 use crate::{
     claims::{render_claim, ClaimLocale, ClaimTemplateId, GapBehavior, CLAIM_GRAMMAR_VERSION},
+    correlation::{
+        explanation_identity, CORRELATION_RULE_REGISTRY_VERSION,
+        CROSS_SOURCE_TEMPORAL_ADJACENCY_VERSION,
+    },
     error::GhostraceError,
     journal::Journal,
     model::{EventEnvelope, EventKind, Evidence},
@@ -38,6 +42,9 @@ pub struct CoverageSummary {
 pub struct Explanation {
     pub target_event_id: Uuid,
     pub chain_event_ids: Vec<Uuid>,
+    pub correlation_rule_registry_version: u32,
+    pub correlation_rule_version: u32,
+    pub explanation_identity: String,
     pub statements: Vec<ExplanationStatement>,
     pub coverage: CoverageSummary,
 }
@@ -65,6 +72,10 @@ pub fn explain(journal: &Journal, target: Uuid) -> Result<Explanation, Ghostrace
     }
     reverse_chain.reverse();
     let chain_event_ids = reverse_chain.iter().map(|event| event.event_id).collect::<Vec<_>>();
+    let policy_profile_id =
+        reverse_chain.first().map(|event| event.policy_profile_id.as_str()).unwrap_or("unknown");
+    let policy_profile_version =
+        reverse_chain.first().map(|event| event.policy_profile_version).unwrap_or(0);
     let gap_events =
         reverse_chain.iter().filter(|event| event.kind == EventKind::Gap).collect::<Vec<_>>();
     let mut warnings = gap_events
@@ -113,6 +124,13 @@ pub fn explain(journal: &Journal, target: Uuid) -> Result<Explanation, Ghostrace
     Ok(Explanation {
         target_event_id: target,
         chain_event_ids,
+        correlation_rule_registry_version: CORRELATION_RULE_REGISTRY_VERSION,
+        correlation_rule_version: CROSS_SOURCE_TEMPORAL_ADJACENCY_VERSION,
+        explanation_identity: explanation_identity(
+            &reverse_chain,
+            policy_profile_id,
+            policy_profile_version,
+        ),
         statements,
         coverage: CoverageSummary {
             chain_event_count: reverse_chain.len(),

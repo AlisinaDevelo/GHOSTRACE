@@ -62,6 +62,14 @@
       "seed": "ghostrace-fixture-seed-v1",
       "sha256": "685851dab390cc418653c99de144493f9e6bffdb78d46e69d6f74fca4732efe7",
       "bytes": 1206
+    },
+    {
+      "path": "fixtures/correlation-rules-v1.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "f1a22b29ed81f1a272ac3d3e272e8e22f5df1a1aaf440e0c75fa65caf3f2f855",
+      "bytes": 633
     }
   ],
   "privacy": {

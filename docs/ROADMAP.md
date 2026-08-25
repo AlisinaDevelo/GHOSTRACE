@@ -131,6 +131,14 @@ label, records prohibited implications and gap behavior, and renders only the
 completeness, process attribution, unsupported causality, and unsupported
 old-to-new rename identity.
 
+Task 0081 adds correlation registry version `1` with an inspectable
+`cross_source_temporal_adjacency` rule. The rule is policy-scoped and bounded to
+authorized event metadata, a 60-second window, and 256 inputs. Positive output
+is inferred only for distinct direct/contextual sources; gaps, denied scope,
+unknown evidence, equal timestamps, and clock rollback abstain. Positive,
+negative, ambiguous, adversarial, and clock-skew fixtures are manifest-bound,
+and rule versions participate in explanation identities and export manifests.
+
 ### Explicit developer and application context
 
 M4 adds only integrations the person deliberately enables. The shell wrapper cannot

@@ -63,6 +63,20 @@ event-ID citations, unknown and contextual evidence, gap-limited statements,
 and a rename event that refuses to invent old-to-new identity. The renderer
 rejects forbidden implication vocabulary as a final fail-closed check.
 
+## Cross-source correlation rule registry (task 0081)
+
+`fixtures/correlation-rules-v1.json` binds registry version `1` and the
+`cross_source_temporal_adjacency` rule to positive, negative, ambiguous,
+adversarial, and clock-skew fixture classes. The descriptor is inspectable: it
+names every input field, the 60-second/256-event bounds, exclusions, evidence
+output, and rule version. `CorrelationQuery` binds policy identity, version,
+scope digest, source set, time window, and input bound; evaluation authorizes
+each event before inspecting bounded metadata. A policy mismatch, denied source,
+gap/status marker, unknown evidence, equal time, or clock rollback produces an
+unknown result. Explanation identities and export manifests carry the registry
+and rule versions, so changing a rule version changes identity while replaying
+the same historical events remains deterministic.
+
 ## Future live-source gates
 
 The selected-root FSEvents API is a bounded first slice, not a release-ready ambient
