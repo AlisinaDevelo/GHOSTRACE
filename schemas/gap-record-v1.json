@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/AlisinaDevelo/GHOSTRACE/schemas/gap-record-v1.json",
+  "title": "GHOSTRACE export gap record v1",
+  "x-ghostrace": { "schema_id": "ghostrace.gap-record", "schema_version": 1, "compatibility": "strict", "unknown_fields": "reject" },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["record_type", "schema_id", "schema_version", "event_id", "source", "reason_code", "dropped_count"],
+  "properties": {
+    "record_type": { "const": "gap" },
+    "schema_id": { "const": "ghostrace.gap-record" },
+    "schema_version": { "const": 1 },
+    "event_id": { "type": "string", "format": "uuid" },
+    "source": { "enum": ["filesystem", "frontmost_app", "shell", "git", "browser", "lifecycle", "fixture"] },
+    "reason_code": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,127}$" },
+    "dropped_count": { "type": "integer", "minimum": 0 }
+  }
+}

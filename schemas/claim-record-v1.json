@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/AlisinaDevelo/GHOSTRACE/schemas/claim-record-v1.json",
+  "title": "GHOSTRACE evidence-linked claim record v1",
+  "x-ghostrace": { "schema_id": "ghostrace.claim-record", "schema_version": 1, "compatibility": "strict", "unknown_fields": "reject" },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["record_type", "schema_id", "schema_version", "event_id", "parent_event_id", "evidence", "citations", "grammar_version", "template", "locale", "gap_behavior", "gap_limited", "statement"],
+  "properties": {
+    "record_type": { "const": "claim" },
+    "schema_id": { "const": "ghostrace.claim-record" },
+    "schema_version": { "const": 1 },
+    "event_id": { "type": "string", "format": "uuid" },
+    "parent_event_id": { "oneOf": [{ "type": "string", "format": "uuid" }, { "type": "null" }] },
+    "evidence": { "enum": ["direct", "contextual", "inferred", "unknown"] },
+    "citations": { "type": "array", "items": { "type": "string", "format": "uuid" }, "uniqueItems": true },
+    "grammar_version": { "const": 1 },
+    "template": { "type": "string", "pattern": "^[a-z][a-z0-9_]+$" },
+    "locale": { "enum": ["en", "en_gb"] },
+    "gap_behavior": { "enum": ["explicit_status", "limit_interpretation"] },
+    "gap_limited": { "type": "boolean" },
+    "statement": { "type": "string", "minLength": 1, "maxLength": 4096 }
+  }
+}

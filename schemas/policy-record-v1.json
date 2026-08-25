@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/AlisinaDevelo/GHOSTRACE/schemas/policy-record-v1.json",
+  "title": "GHOSTRACE export policy profile record v1",
+  "x-ghostrace": { "schema_id": "ghostrace.policy-record", "schema_version": 1, "compatibility": "strict", "unknown_fields": "reject" },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["record_type", "schema_id", "schema_version", "id", "version"],
+  "properties": {
+    "record_type": { "const": "policy" },
+    "schema_id": { "const": "ghostrace.policy-record" },
+    "schema_version": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*[a-z0-9]$" },
+    "version": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
+  }
+}

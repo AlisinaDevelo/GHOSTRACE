@@ -13,6 +13,7 @@ pub mod error;
 pub mod exclusion;
 pub mod explain;
 pub mod export;
+pub mod export_schema;
 pub mod fault;
 pub mod fixture;
 pub mod fsevents;
@@ -67,6 +68,12 @@ pub use exclusion::{
 pub use explain::{explain, CoverageSummary, Explanation, ExplanationStatement};
 pub use export::{
     export_fixture, export_journal, ExportManifest, ExportPolicyProfile, EXPORT_VERSION,
+};
+pub use export_schema::{
+    validate_export, validate_registry, ExportQueryScope, ExportValidation, SchemaDescriptor,
+    SchemaRegistry, EXPORT_CLAIM_SCHEMA_ID, EXPORT_EVENT_SCHEMA_ID, EXPORT_GAP_SCHEMA_ID,
+    EXPORT_MANIFEST_SCHEMA_ID, EXPORT_POLICY_SCHEMA_ID, EXPORT_REGISTRY_VERSION,
+    EXPORT_SCHEMA_REGISTRY_JSON, EXPORT_SOURCE_COVERAGE_SCHEMA_ID,
 };
 pub use fault::{FaultAction, FaultPlan, FaultPoint, FaultSchedule};
 pub use fixture::{ingest_fixture, read_fixture, FixtureIngestReport};

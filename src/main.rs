@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use ghostrace::{
     capture, explain, export_fixture, export_journal, fixture::ingest_fixture, journal::Journal,
-    policy::PolicyProfile, DeterministicKeyProvider, GhostraceError, EVENT_SCHEMA_JSON,
+    policy::PolicyProfile, validate_export, DeterministicKeyProvider, GhostraceError,
+    EVENT_SCHEMA_JSON,
 };
 use uuid::Uuid;
 
@@ -55,6 +56,11 @@ enum Command {
         #[arg(long, default_value_t = false)]
         force: bool,
     },
+    /// Validate a JSONL export before consuming its records.
+    Validate {
+        #[arg(long)]
+        export: PathBuf,
+    },
     /// Print the checked-in event envelope JSON Schema.
     Schema,
     /// Live capture is intentionally unavailable in this vertical slice.
@@ -104,6 +110,11 @@ fn run(cli: Cli) -> Result<(), GhostraceError> {
                 _ => unreachable!("clap enforces exactly one export input"),
             };
             println!("exported {} event(s)", manifest.coverage.event_count);
+            Ok(())
+        }
+        Command::Validate { export } => {
+            let validated = validate_export(export)?;
+            println!("validated {} event(s)", validated.event_count);
             Ok(())
         }
         Command::Schema => {

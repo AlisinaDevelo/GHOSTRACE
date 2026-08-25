@@ -1,0 +1,65 @@
+{
+  "registry_version": 1,
+  "schemas": [
+    {
+      "schema_id": "ghostrace.export-manifest",
+      "version": 1,
+      "compatibility": "strict",
+      "strict_unknown_fields": true,
+      "record_type": "manifest",
+      "format": "json",
+      "schema_path": "schemas/export-manifest-v1.json",
+      "golden_path": "fixtures/export-manifest-v1.golden.json"
+    },
+    {
+      "schema_id": "ghostrace.event-envelope",
+      "version": 1,
+      "compatibility": "strict",
+      "strict_unknown_fields": true,
+      "record_type": "event",
+      "format": "json",
+      "schema_path": "schemas/event-envelope-v1.json",
+      "golden_path": "fixtures/event-envelope-v1.golden.json"
+    },
+    {
+      "schema_id": "ghostrace.gap-record",
+      "version": 1,
+      "compatibility": "strict",
+      "strict_unknown_fields": true,
+      "record_type": "gap",
+      "format": "json",
+      "schema_path": "schemas/gap-record-v1.json",
+      "golden_path": "fixtures/gap-record-v1.golden.json"
+    },
+    {
+      "schema_id": "ghostrace.claim-record",
+      "version": 1,
+      "compatibility": "strict",
+      "strict_unknown_fields": true,
+      "record_type": "claim",
+      "format": "json",
+      "schema_path": "schemas/claim-record-v1.json",
+      "golden_path": "fixtures/claim-record-v1.golden.json"
+    },
+    {
+      "schema_id": "ghostrace.policy-record",
+      "version": 1,
+      "compatibility": "strict",
+      "strict_unknown_fields": true,
+      "record_type": "policy",
+      "format": "json",
+      "schema_path": "schemas/policy-record-v1.json",
+      "golden_path": "fixtures/policy-record-v1.golden.json"
+    },
+    {
+      "schema_id": "ghostrace.source-coverage",
+      "version": 1,
+      "compatibility": "strict",
+      "strict_unknown_fields": true,
+      "record_type": "source_coverage",
+      "format": "json",
+      "schema_path": "schemas/source-coverage-v1.json",
+      "golden_path": "fixtures/source-coverage-v1.golden.json"
+    }
+  ]
+}

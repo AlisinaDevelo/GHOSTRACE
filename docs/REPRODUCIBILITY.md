@@ -84,6 +84,16 @@ The checker rejects a missing fixture, byte drift, digest drift, changed generat
 version or seed, unsafe path, schema drift, or a privacy declaration that permits
 user data or network access.
 
+The export contract registry is checked in at
+[`schemas/export-registry-v1.json`](../schemas/export-registry-v1.json). Its six
+golden examples are included in the same fixture manifest. The focused registry
+test compiles each JSON Schema, validates its golden, rejects an injected unknown
+field, and validates the export body digest without network access:
+
+```sh
+cargo +1.88.0 test --locked --test export_schema
+```
+
 The explanation counterexample fixture is included in the same manifest. Run its
 focused deterministic matrix with the pinned toolchain:
 
@@ -128,6 +138,10 @@ Clippy and Rust tests. Temporary outputs are created outside the repository and
 removed on exit. The durable journal path is created below a mode-0700 temporary
 directory; the CLI refuses broader parent directories rather than weakening the
 path boundary.
+
+The export step is complete only after `validate_export` confirms the manifest
+before consuming body records; a green build alone is not sufficient evidence of
+schema or digest integrity.
 
 This procedure is local acceptance evidence. Hosted GitHub Actions may confirm
 the same pinned commands, but they are not substituted for the clean-machine

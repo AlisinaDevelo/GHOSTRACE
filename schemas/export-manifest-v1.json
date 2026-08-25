@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/AlisinaDevelo/GHOSTRACE/schemas/export-manifest-v1.json",
+  "title": "GHOSTRACE export manifest v1",
+  "x-ghostrace": { "schema_id": "ghostrace.export-manifest", "schema_version": 1, "compatibility": "strict", "unknown_fields": "reject" },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["record_type", "schema_id", "schema_version", "registry_version", "export_version", "tool_version", "event_schema_version", "ordering_contract_version", "correlation_rule_registry_version", "correlation_rule_version", "schema_versions", "record_counts", "byte_counts", "record_digests", "query_scope", "policy_profiles", "coverage", "collector_status", "gaps"],
+  "properties": {
+    "record_type": { "const": "manifest" },
+    "schema_id": { "const": "ghostrace.export-manifest" },
+    "schema_version": { "const": 1 },
+    "registry_version": { "const": 1 },
+    "export_version": { "type": "integer", "minimum": 1 },
+    "tool_version": { "type": "string", "minLength": 1 },
+    "event_schema_version": { "const": 1 },
+    "ordering_contract_version": { "type": "integer", "minimum": 1 },
+    "correlation_rule_registry_version": { "type": "integer", "minimum": 1 },
+    "correlation_rule_version": { "type": "integer", "minimum": 1 },
+    "schema_versions": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 1 }, "minProperties": 6 },
+    "record_counts": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 }, "required": ["event", "gap", "claim", "policy", "source_coverage"], "maxProperties": 5 },
+    "byte_counts": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 }, "required": ["event", "gap", "claim", "policy", "source_coverage"], "maxProperties": 5 },
+    "record_digests": { "type": "object", "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "required": ["event", "gap", "claim", "policy", "source_coverage"], "maxProperties": 5 },
+    "query_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "source", "observed_from", "observed_until", "include_coverage"],
+      "properties": {
+        "kind": { "const": "all_committed" },
+        "source": { "oneOf": [{ "enum": ["filesystem", "frontmost_app", "shell", "git", "browser", "lifecycle", "fixture"] }, { "type": "null" }] },
+        "observed_from": { "oneOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }] },
+        "observed_until": { "oneOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }] },
+        "include_coverage": { "const": true }
+      }
+    },
+    "policy_profiles": { "type": "array", "items": { "$ref": "#/$defs/policy_profile" } },
+    "coverage": { "$ref": "#/$defs/coverage" },
+    "collector_status": { "enum": ["running", "stopped", "unknown"] },
+    "gaps": { "type": "array", "items": { "$ref": "#/$defs/export_gap" } }
+  },
+  "$defs": {
+    "policy_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": { "id": { "type": "string", "minLength": 1 }, "version": { "type": "integer", "minimum": 1 } }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_count", "gap_count", "warning"],
+      "properties": { "event_count": { "type": "integer", "minimum": 0 }, "gap_count": { "type": "integer", "minimum": 0 }, "warning": { "oneOf": [{ "type": "string" }, { "type": "null" }] } }
+    },
+    "export_gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_id", "source", "reason_code", "dropped_count"],
+      "properties": {
+        "event_id": { "type": "string", "format": "uuid" },
+        "source": { "enum": ["filesystem", "frontmost_app", "shell", "git", "browser", "lifecycle", "fixture"] },
+        "reason_code": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,127}$" },
+        "dropped_count": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

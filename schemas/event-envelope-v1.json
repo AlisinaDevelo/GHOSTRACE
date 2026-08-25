@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://ghostrace.local/schema/event-envelope-v1.json",
   "title": "GHOSTRACE event envelope v1",
+  "x-ghostrace": { "schema_id": "ghostrace.event-envelope", "schema_version": 1, "compatibility": "strict", "unknown_fields": "reject" },
   "type": "object",
   "additionalProperties": false,
   "required": [

@@ -62,6 +62,7 @@ cargo +1.88.0 run --quiet -- export --fixture fixtures/causal-chain.jsonl --outp
 cargo +1.88.0 run --quiet -- export --fixture fixtures/causal-chain.jsonl --output "$WORK_DIR/export-b.jsonl"
 cmp -s "$WORK_DIR/export-a.jsonl" "$WORK_DIR/export-b.jsonl"
 cargo +1.88.0 run --quiet -- export --journal "$journal" --output "$WORK_DIR/export-journal.jsonl"
+cargo +1.88.0 run --quiet -- validate --export "$WORK_DIR/export-journal.jsonl" | grep -F "validated 8 event(s)" >/dev/null
 python3 - "$WORK_DIR/export-journal.jsonl" <<'PY'
 import json
 import sys

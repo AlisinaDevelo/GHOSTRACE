@@ -90,6 +90,26 @@ observation; the first must downgrade to unknown and the second must remove the
 corresponding statement from the explanation chain. These tests are offline and
 synthetic; they do not claim native collector coverage.
 
+## Export schema registry (task 0083)
+
+[`schemas/export-registry-v1.json`](../schemas/export-registry-v1.json) is the
+single registry for the six machine-readable export contracts: manifest, event,
+gap, claim, policy, and source coverage. Every descriptor declares a stable ID,
+version `1`, the `strict` compatibility class, rejection of unknown fields, and
+a repository-relative golden example. The export manifest carries all registry
+versions, the deterministic `all_committed` query scope, policy identities,
+coverage gaps, tool version, and body-only record counts, byte lengths, and
+SHA-256 digest. Body-only accounting avoids a self-referential manifest hash.
+
+`validate_export` parses and validates the manifest before reading body records.
+It rejects unknown fields, mixed or undeclared schema IDs/versions, duplicate
+records or regressions in the shared stable order, count/byte/digest drift,
+unsupported query scope, and event schema mismatches. `tests/export_schema.rs` validates every schema and
+golden with the JSON Schema implementation, injects unknown fields into every
+contract, checks deterministic export accounting, and exercises mixed-version and
+digest-negative cases. The registry and golden files are synthetic, offline, and
+manifest-bound.
+
 ## Future live-source gates
 
 The selected-root FSEvents API is a bounded first slice, not a release-ready ambient
