@@ -181,6 +181,23 @@ fn selected_root_collector_captures_controlled_file_lifecycle_without_content() 
         matches!(event.event.payload, EventPayload::FilesystemChanged(_))
             && event.event.evidence != Evidence::Unknown
     }));
+    let rename = events
+        .iter()
+        .find(|event| {
+            matches!(
+                &event.event.payload,
+                EventPayload::FilesystemChanged(payload)
+                    if payload.operation == ghostrace::FileOperation::Renamed
+            )
+        })
+        .expect("durable rename event");
+    assert_eq!(rename.event.evidence, Evidence::Contextual);
+    assert!(matches!(
+        &rename.event.payload,
+        EventPayload::FilesystemChanged(payload)
+            if payload.rename_pairing == Some(ghostrace::RenamePairing::Unknown)
+    ));
+    assert!(rename.event.payload.summary().contains("rename pairing unknown"));
 }
 
 #[cfg(target_os = "macos")]

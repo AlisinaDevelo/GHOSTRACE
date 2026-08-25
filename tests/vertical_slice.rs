@@ -7,11 +7,12 @@ use ghostrace::{
     BrowserName, BrowserNavigationPayload, ConsentState, ConsentStateMachine,
     ConsentTransitionKind, DeterministicKeyProvider, EntryKind, EventEnvelope, EventKind,
     EventPayload, EventSource, Evidence, ExportPolicyProfile, FileOperation,
-    FilesystemChangedPayload, FolderId, FrontmostAppChangedPayload, GitObjectId, IngestionOrigin,
-    Journal, PathClass, PathDigest, PolicyChange, PolicyDecision, PolicyDiagnostic, PolicyDocument,
-    PolicyHistory, PolicyMigrationOutcome, PolicyOutcome, PolicyProfile, PolicyReason, ReasonCode,
-    RepositoryId, RootId, SanitizedUrl, SessionId, ShellFinishedPayload, ShellKind, ShellStatus,
-    SourceCursor, SourceErrorPayload, EVENT_SCHEMA_JSON, POLICY_DOCUMENT_SCHEMA_JSON,
+    FilesystemChangedPayload, FilesystemObservation, FolderId, FrontmostAppChangedPayload,
+    GitObjectId, IngestionOrigin, Journal, PathClass, PathDigest, PolicyChange, PolicyDecision,
+    PolicyDiagnostic, PolicyDocument, PolicyHistory, PolicyMigrationOutcome, PolicyOutcome,
+    PolicyProfile, PolicyReason, ReasonCode, RepositoryId, RootId, SanitizedUrl, SessionId,
+    ShellFinishedPayload, ShellKind, ShellStatus, SourceCursor, SourceErrorPayload,
+    EVENT_SCHEMA_JSON, POLICY_DOCUMENT_SCHEMA_JSON,
 };
 use serde_json::json;
 use tempfile::tempdir;
@@ -99,6 +100,8 @@ fn filesystem_event(id: u128, parent_event_id: Option<Uuid>) -> EventEnvelope {
                 "sha256:abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd",
             )),
             size_bytes: Some(42),
+            observation: None,
+            rename_pairing: None,
         }),
         Some(cursor(&format!("cursor-{id}"))),
         "fixture-default-v1",
@@ -107,6 +110,25 @@ fn filesystem_event(id: u128, parent_event_id: Option<Uuid>) -> EventEnvelope {
         parent_event_id,
     )
     .expect("valid event")
+}
+
+#[test]
+fn rename_summary_states_unknown_pairing_without_a_path() {
+    let payload = FilesystemChangedPayload {
+        root_id: root("root-a"),
+        path_class: PathClass::AbsoluteRedacted,
+        operation: FileOperation::Renamed,
+        entry_kind: EntryKind::File,
+        path_digest: Some(digest(
+            "sha256:abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+        )),
+        size_bytes: None,
+        observation: Some(FilesystemObservation::RepeatedModification),
+        rename_pairing: Some(ghostrace::RenamePairing::Unknown),
+    };
+    let summary = EventPayload::FilesystemChanged(payload).summary();
+    assert!(summary.contains("rename pairing unknown"));
+    assert!(!summary.contains("/Users/"));
 }
 
 fn filesystem_test_policy() -> PolicyProfile {
