@@ -4,8 +4,8 @@ use std::sync::{
 };
 
 use ghostrace::{
-    read_fixture, CiphertextEnvelope, CryptoError, DeterministicKeyProvider, FaultPlan,
-    FaultPoint, GhostraceError, IngestionOrigin, Journal, KeyProvider, PolicyProfile,
+    read_fixture, CiphertextEnvelope, CryptoError, DeterministicKeyProvider, FaultPlan, FaultPoint,
+    GhostraceError, IngestionOrigin, Journal, KeyProvider, PolicyProfile,
     CIPHERTEXT_ENVELOPE_VERSION,
 };
 
@@ -72,7 +72,9 @@ fn encryption_runs_before_the_event_insert_boundary_and_payload_is_ciphertext() 
         .ingest(&IngestionOrigin::fixture(), &event, &PolicyProfile::fixture_default())
         .expect_err("fault must stop before insertion");
 
-    assert!(matches!(error, GhostraceError::InjectedFault { point } if point == "event_before_insert"));
+    assert!(
+        matches!(error, GhostraceError::InjectedFault { point } if point == "event_before_insert")
+    );
     assert_eq!(accesses.load(Ordering::SeqCst), 1, "key access precedes insert boundary");
     assert_eq!(plan.fired().len(), 1);
     assert!(journal.events().expect("events after rollback").is_empty());
