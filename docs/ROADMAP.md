@@ -102,6 +102,14 @@ deletion-residue limits, authenticated journal state, repair checkpoints, and an
 optional Parquet profile. Explanations may abstain; they may not fill a gap with a
 plausible story.
 
+Task 0077 supplies the first query contract: encrypted page tokens bind the
+policy scope, complete filter shape, event/storage schema, deterministic
+`observed_at`/ingest/event-ID ordering, and a logical ingest upper bound. New
+events are excluded from an active snapshot; deletion after page one is visible
+as absence rather than a fabricated row. Forged, expired, cross-profile,
+changed-filter, and schema-changed tokens fail closed. Retention residue,
+deletion audit, and gap-aware windows remain separate M3 work.
+
 ### Explicit developer and application context
 
 M4 adds only integrations the person deliberately enables. The shell wrapper cannot

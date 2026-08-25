@@ -129,6 +129,30 @@ cargo +1.88.0 test --locked --lib \
 This is a bounded stress measurement on the named device, not a claim of
 cross-machine throughput or process causality.
 
+## Snapshot-consistent query pagination (task 0077)
+
+`Journal::query_page` is evaluated as a logical snapshot API rather than an
+offset convenience. The first read transaction captures an ingest-sequence
+upper bound; each page is ordered by `(observed_at, ingest_seq, event_id)` and
+the encrypted page token binds that boundary, ordering key, complete filter
+shape, policy ID/version, policy scope digest, event schema, storage schema, and
+expiry. The page size is bounded to 1–256 rows.
+
+The integration matrix in `tests/query_pagination.rs` proves:
+
+- a write after page one is excluded from all later pages and every original
+  event appears at most once;
+- a row removed by a simulated retention/delete operation is absent rather than
+  resurrected, while remaining rows preserve the stable ordering contract;
+- forged, cross-profile, and changed-page-parameter tokens fail closed without
+  revealing token contents;
+- a future storage schema marker invalidates an active token; and
+- the unit expiry case rejects a token past its 15-minute lifetime.
+
+This contract deliberately does not turn deletion into a tombstone and does not
+claim that the logical snapshot survives a destructive retention policy. A
+future retention task must add its own residue and recovery evidence.
+
 ## Test layers
 
 1. **Unit tests:** model validation, URL sanitization, policy decisions, evidence
