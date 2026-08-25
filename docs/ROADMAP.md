@@ -104,11 +104,18 @@ plausible story.
 
 Task 0077 supplies the first query contract: encrypted page tokens bind the
 policy scope, complete filter shape, event/storage schema, deterministic
-`observed_at`/ingest/event-ID ordering, and a logical ingest upper bound. New
+`observed_at`/ingest/event-ID ordering (ordering contract version 1), and a logical
+ingest upper bound. New
 events are excluded from an active snapshot; deletion after page one is visible
 as absence rather than a fabricated row. Forged, expired, cross-profile,
 changed-filter, and schema-changed tokens fail closed. Retention residue,
 deletion audit, and gap-aware windows remain separate M3 work.
+
+Task 0078 adds the shared ordering key to database and export paths and keeps
+source observation, local receipt, durable ingest, and optional monotonic timing
+evidence distinct. Clock rollback, leap-boundary adjustment, sleep-sized gaps,
+delayed batches, equal timestamps, and missing source time are fixture-backed;
+explanations label any ingest-sequence fallback as temporal ambiguity.
 
 ### Explicit developer and application context
 

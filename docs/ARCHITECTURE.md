@@ -305,16 +305,23 @@ reset.
 `Journal::query_page` executes inside the existing bounded read-snapshot
 transaction. The first page captures the current maximum ingest sequence as an
 upper bound; later pages use that bound from an authenticated token, so events
-ingested after page one cannot appear mid-result. Rows are ordered by
-`observed_at`, then `ingest_seq`, then canonical `event_id`, which gives equal
-timestamps a deterministic tie-breaker without treating display order as
-causality.
+ingested after page one cannot appear mid-result. Ordering contract version `1`
+uses known source `observed_at`, then durable `ingest_seq`, then canonical
+`event_id`. Export uses the same key. Equal timestamps therefore have a
+deterministic tie-breaker without treating display order as causality; an absent
+source timestamp is explicit adapter input and falls back to ingest sequence.
+
+Source observation time, local `ingested_at`, and optional process-local
+monotonic sequence are separate timing facts. Clock rollback, leap-boundary
+adjustments, sleep-sized gaps, delayed batches, equal timestamps, and missing
+source time are reported as temporal ambiguity in analysis and explanations.
 
 `QueryRequest` binds the policy profile ID/version and its scope digest, optional
 source/kind/time filters, and page size. The page token is an encrypted local
 capability, not a caller-editable offset: it also carries the query digest,
-event/storage schema versions, issue/expiry time, snapshot upper bound, and last
-ordering key. Forged, expired, cross-profile, changed-filter, and schema-changed
+event/storage schema versions, ordering-contract version, issue/expiry time,
+snapshot upper bound, and last ordering key. Forged, expired, cross-profile,
+changed-filter, and schema-changed
 tokens fail with bounded refusal classes without echoing token contents. A
 retention or deletion operation may remove a row after the snapshot; pagination
 does not resurrect it or fabricate a continuity claim. New writes remain outside

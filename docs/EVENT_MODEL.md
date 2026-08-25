@@ -203,6 +203,10 @@ or a time ordering alone when the source cannot establish the relationship.
 - JSONL records are self-describing by schema version and event ID.
 - Replaying the same valid fixture with the same policy produces stable normalized
   records and explanation output.
+- Temporal ordering is contract version 1: source observation time, durable ingest
+  sequence, and event ID are distinct, deterministic display keys. Local receipt
+  time and optional monotonic sequence remain timing evidence, not causal claims;
+  missing source time is explicit and uses ingest sequence as a labeled fallback.
 - Export must preserve evidence labels, provenance, and gaps.
 - Unknown schema versions, malformed UUIDs, invalid timestamps, and prohibited
   payload fields fail closed.

@@ -30,6 +30,19 @@ The M0 developer headstart should prove:
   key generation, visible gaps, and retry/idempotence;
 - bounded seed replay and minimized schedules remain checked-in regression inputs.
 
+## Temporal ordering contract (task 0078)
+
+`fixtures/temporal-ordering-v1.json` is the adapter-boundary fixture for source
+clock rollback, the 2016/2017 leap-boundary adjustment, sleep-sized delivery
+gaps, equal source timestamps, delayed batches, and missing source time. The
+ordering contract is version `1` and is shared by `Journal::query_page`,
+`Journal::ordered_events`, and JSONL export: source observation time, durable
+ingest sequence, and event ID form a total order, while missing source time
+falls back explicitly to ingest sequence. `analyze_temporal_observations`
+labels rollback, delayed delivery, equal-time tie-breaking, monotonic evidence
+regression, and missing source time as ambiguity; it never upgrades them to
+causality.
+
 ## Future live-source gates
 
 The selected-root FSEvents API is a bounded first slice, not a release-ready ambient

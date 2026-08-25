@@ -1,8 +1,9 @@
 //! Snapshot-consistent, privacy-bounded journal pagination.
 //!
 //! Page tokens are encrypted with the journal key.  They bind the complete
-//! request, policy scope, event/storage schema versions, an ingest upper bound,
-//! and the last `(observed_at, ingest_seq, event_id)` ordering key.  A token is
+//! request, policy scope, event/storage schema versions, the ordering-contract
+//! version, an ingest upper bound, and the last `(observed_at, ingest_seq,
+//! event_id)` ordering key.  A token is
 //! therefore a capability for one query shape and one logical snapshot, not a
 //! caller-editable offset.
 
@@ -18,6 +19,7 @@ use crate::{
     error::GhostraceError,
     journal::StoredEvent,
     model::{EventKind, EventSource, PolicyProfileId, SnapshotDigest, EVENT_SCHEMA_VERSION},
+    ordering::ORDERING_CONTRACT_VERSION,
     policy::PolicyProfile,
 };
 
@@ -92,6 +94,7 @@ pub struct QueryPage {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct QueryTokenPayload {
     pub contract_version: u32,
+    pub ordering_contract_version: u32,
     pub event_schema_version: u32,
     pub storage_schema_version: u32,
     pub policy_profile_id: PolicyProfileId,
@@ -166,6 +169,7 @@ pub(crate) fn make_token(
         now.checked_add(QUERY_TOKEN_TTL_SECONDS).ok_or(GhostraceError::QueryTokenInvalid)?;
     let payload = QueryTokenPayload {
         contract_version: QUERY_CONTRACT_VERSION,
+        ordering_contract_version: ORDERING_CONTRACT_VERSION,
         event_schema_version: EVENT_SCHEMA_VERSION,
         storage_schema_version,
         policy_profile_id: request.policy_profile_id.clone(),
@@ -185,7 +189,8 @@ pub(crate) fn validate_token_request(
     request: &QueryRequest,
     storage_schema_version: u32,
 ) -> Result<(), GhostraceError> {
-    if payload.event_schema_version != EVENT_SCHEMA_VERSION
+    if payload.ordering_contract_version != ORDERING_CONTRACT_VERSION
+        || payload.event_schema_version != EVENT_SCHEMA_VERSION
         || payload.storage_schema_version != storage_schema_version
     {
         return Err(GhostraceError::QuerySchemaChanged);
@@ -206,6 +211,7 @@ pub(crate) fn validate_token_request(
 
 fn validate_token_shape(payload: &QueryTokenPayload) -> Result<(), GhostraceError> {
     if payload.contract_version != QUERY_CONTRACT_VERSION
+        || payload.ordering_contract_version != ORDERING_CONTRACT_VERSION
         || payload.event_schema_version != EVENT_SCHEMA_VERSION
         || payload.storage_schema_version == 0
         || payload.policy_profile_version == 0
@@ -280,6 +286,7 @@ mod tests {
         let now = 1_800_000_000;
         let payload = QueryTokenPayload {
             contract_version: QUERY_CONTRACT_VERSION,
+            ordering_contract_version: ORDERING_CONTRACT_VERSION,
             event_schema_version: EVENT_SCHEMA_VERSION,
             storage_schema_version: 4,
             policy_profile_id: request.policy_profile_id.clone(),
