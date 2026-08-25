@@ -42,6 +42,9 @@ pub enum GhostraceError {
     #[error("export destination already exists; pass --force to overwrite")]
     ExportExists(PathBuf),
 
+    #[error("export destination must differ from the source journal")]
+    ExportSourceConflict,
+
     #[error("journal directory permissions are not private (expected no group/world access)")]
     InsecurePermissions(PathBuf),
 

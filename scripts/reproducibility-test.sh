@@ -37,10 +37,40 @@ cargo +1.88.0 run --quiet -- demo --fixture fixtures/causal-chain.jsonl --event 
 cargo +1.88.0 run --quiet -- demo --fixture fixtures/causal-chain.jsonl --event "$event_id" > "$WORK_DIR/demo-b.json"
 cmp -s "$WORK_DIR/demo-a.json" "$WORK_DIR/demo-b.json"
 
+echo "reproducibility: durable fixture CLI"
+journal="$WORK_DIR/journal.sqlite3"
+cargo +1.88.0 run --quiet -- init --journal "$journal"
+cargo +1.88.0 run --quiet -- init --journal "$journal"
+cargo +1.88.0 run --quiet -- ingest --journal "$journal" --fixture fixtures/causal-chain.jsonl
+cargo +1.88.0 run --quiet -- explain --journal "$journal" --event "$event_id" > "$WORK_DIR/explain-a.json"
+cargo +1.88.0 run --quiet -- explain --journal "$journal" --event "$event_id" > "$WORK_DIR/explain-b.json"
+cmp -s "$WORK_DIR/explain-a.json" "$WORK_DIR/explain-b.json"
+python3 - "$WORK_DIR/explain-a.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    explanation = json.load(handle)
+if len(explanation["chain_event_ids"]) != 8 or explanation["coverage"]["gap_event_count"] != 1:
+    raise SystemExit("durable explanation coverage drifted")
+PY
+
 echo "reproducibility: deterministic export"
 cargo +1.88.0 run --quiet -- export --fixture fixtures/causal-chain.jsonl --output "$WORK_DIR/export-a.jsonl"
 cargo +1.88.0 run --quiet -- export --fixture fixtures/causal-chain.jsonl --output "$WORK_DIR/export-b.jsonl"
 cmp -s "$WORK_DIR/export-a.jsonl" "$WORK_DIR/export-b.jsonl"
+cargo +1.88.0 run --quiet -- export --journal "$journal" --output "$WORK_DIR/export-journal.jsonl"
+python3 - "$WORK_DIR/export-journal.jsonl" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    records = [json.loads(line) for line in handle if line.strip()]
+if records[0]["record_type"] != "manifest" or records[0]["coverage"]["event_count"] != 8:
+    raise SystemExit("durable export manifest drifted")
+if len(records) != 9:
+    raise SystemExit("durable export record count drifted")
+PY
 
 echo "reproducibility: capture refusal"
 if cargo +1.88.0 run --quiet -- capture > "$WORK_DIR/capture.stdout" 2> "$WORK_DIR/capture.stderr"; then

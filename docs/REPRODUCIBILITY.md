@@ -55,10 +55,15 @@ scripts/reproducibility-test.sh
 
 The lane validates the toolchain and fixture manifests, checks Rust formatting,
 compares the emitted schema to the checked-in schema, runs the demo twice and
-requires byte-identical explanations, exports the fixture twice and requires
-byte-identical JSONL, verifies that ambient capture refuses, validates the
-roadmap, runs all Python tests, and runs locked Clippy and Rust tests. Temporary
-outputs are created outside the repository and removed on exit.
+requires byte-identical explanations, initializes the durable fixture journal
+twice, ingests the fixture, reopens it for two byte-identical explanations, and
+checks the durable JSONL export manifest and record count. It also exports the
+in-memory fixture twice and requires byte-identical JSONL, verifies that ambient
+capture refuses, validates the roadmap, runs all Python tests, and runs locked
+Clippy and Rust tests. Temporary outputs are created outside the repository and
+removed on exit. The durable journal path is created below a mode-0700 temporary
+directory; the CLI refuses broader parent directories rather than weakening the
+path boundary.
 
 This procedure is local acceptance evidence. Hosted GitHub Actions may confirm
 the same pinned commands, but they are not substituted for the clean-machine

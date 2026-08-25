@@ -31,14 +31,24 @@ cargo +1.88.0 run -- schema
 # Select the terminal event so the explanation includes the full chain and its gap.
 EVENT_ID="00000000-0000-4000-8000-000000000008"
 
-# Show the evidence-backed explanation for that event.
-cargo +1.88.0 run -- demo \
-  --fixture fixtures/causal-chain.jsonl \
+# Initialize a private, durable fixture journal. The parent directory must be
+# private (mktemp -d creates one with mode 0700).
+JOURNAL_DIR="$(mktemp -d)"
+JOURNAL="$JOURNAL_DIR/journal.sqlite3"
+cargo +1.88.0 run -- init --journal "$JOURNAL"
+
+# Ingest the checked-in synthetic fixture into SQLite, then explain it after
+# reopening the journal in a separate process.
+cargo +1.88.0 run -- ingest \
+  --journal "$JOURNAL" \
+  --fixture fixtures/causal-chain.jsonl
+cargo +1.88.0 run -- explain \
+  --journal "$JOURNAL" \
   --event "$EVENT_ID"
 
 # Export a user-requested, local JSONL view. Existing files are protected.
 cargo +1.88.0 run -- export \
-  --fixture fixtures/causal-chain.jsonl \
+  --journal "$JOURNAL" \
   --output /tmp/ghostrace-export.jsonl
 
 # The baseline refuses ambient capture by design.
@@ -52,15 +62,22 @@ fi
 
 The demo output labels evidence as direct, contextual, inferred, or unknown, and
 surfaces gaps instead of filling them with a guess. The same fixture and event ID
-produce the same explanation.
+produce the same explanation after a process restart. `demo --fixture ...` remains
+available as an in-memory shortcut. The durable CLI path uses a deterministic
+synthetic key only for this fixture-only headstart; it is not a production
+encryption or key-management claim.
 
 ## What is shipped now
 
 | Surface | M0 status |
 | --- | --- |
 | Fixture JSONL ingestion and validation | Available for the developer headstart |
+| ghostrace init --journal <path> | Available; creates an idempotent durable fixture journal |
+| ghostrace ingest --journal ... --fixture ... | Available; persists a checked-in fixture batch |
+| ghostrace explain --journal ... --event <uuid> | Available; deterministic after reopen |
 | ghostrace demo --fixture ... --event <uuid> | Available |
-| ghostrace export --fixture ... --output ... [--force] | Available |
+| ghostrace export --journal ... --output ... [--force] | Available |
+| ghostrace export --fixture ... --output ... [--force] | Available in-memory shortcut |
 | ghostrace schema | Available |
 | ghostrace capture | Refuses by design |
 | Local journal and bounded durable writer | Scaffolded for the fixture path; live ingestion is gated |
