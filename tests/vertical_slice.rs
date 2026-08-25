@@ -12,7 +12,8 @@ use ghostrace::{
     PolicyDiagnostic, PolicyDocument, PolicyHistory, PolicyMigrationOutcome, PolicyOutcome,
     PolicyProfile, PolicyReason, ReasonCode, RepositoryId, RootId, SanitizedUrl, SessionId,
     ShellFinishedPayload, ShellKind, ShellStatus, SourceCursor, SourceErrorPayload,
-    EVENT_SCHEMA_JSON, POLICY_DOCUMENT_SCHEMA_JSON,
+    CORRELATION_RULE_REGISTRY_VERSION, CROSS_SOURCE_TEMPORAL_ADJACENCY_VERSION, EVENT_SCHEMA_JSON,
+    POLICY_DOCUMENT_SCHEMA_JSON,
 };
 use serde_json::json;
 use tempfile::tempdir;
@@ -907,6 +908,8 @@ fn export_refuses_overwrite_without_force_and_writes_manifest() {
     assert_eq!(fs::read_to_string(&output).expect("read"), "do not overwrite");
     let manifest = export_fixture(&fixture, &output, true).expect("force export");
     assert_eq!(manifest.export_version, 1);
+    assert_eq!(manifest.correlation_rule_registry_version, CORRELATION_RULE_REGISTRY_VERSION);
+    assert_eq!(manifest.correlation_rule_version, CROSS_SOURCE_TEMPORAL_ADJACENCY_VERSION);
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

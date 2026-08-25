@@ -11,6 +11,7 @@ use tempfile::NamedTempFile;
 use uuid::Uuid;
 
 use crate::{
+    correlation::{CORRELATION_RULE_REGISTRY_VERSION, CROSS_SOURCE_TEMPORAL_ADJACENCY_VERSION},
     crypto::DeterministicKeyProvider,
     error::GhostraceError,
     fixture::ingest_fixture,
@@ -44,6 +45,8 @@ pub struct ExportManifest {
     pub export_version: u32,
     pub event_schema_version: u32,
     pub ordering_contract_version: u32,
+    pub correlation_rule_registry_version: u32,
+    pub correlation_rule_version: u32,
     pub policy_profiles: Vec<ExportPolicyProfile>,
     pub coverage: ExportCoverage,
     pub collector_status: String,
@@ -197,6 +200,8 @@ fn build_manifest(events: &[StoredEvent]) -> ExportManifest {
         export_version: EXPORT_VERSION,
         event_schema_version: EVENT_SCHEMA_VERSION,
         ordering_contract_version: ORDERING_CONTRACT_VERSION,
+        correlation_rule_registry_version: CORRELATION_RULE_REGISTRY_VERSION,
+        correlation_rule_version: CROSS_SOURCE_TEMPORAL_ADJACENCY_VERSION,
         policy_profiles,
         coverage: ExportCoverage {
             event_count: events.len(),

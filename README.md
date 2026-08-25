@@ -108,6 +108,7 @@ encryption or key-management claim.
 | Event-storm backpressure and loss accounting | Available as a bounded synthetic stress contract; queue pressure exposes pending limits, an emergency status slot, auditable gaps, and recovery-required state |
 | Snapshot-consistent query pagination | Available as a bounded library API; encrypted page tokens bind policy scope, filters, the versioned ordering contract, schema, and an ingest snapshot boundary; every page carries gap-aware coverage unless explicitly opted out |
 | Evidence-claim grammar | Available as a versioned bounded renderer; templates preserve evidence labels and cited event IDs, expose gap limits, and refuse intent, completeness, process-attribution, causality, and unsupported rename claims |
+| Cross-source correlation rule registry | Available as a versioned, policy-bounded adjacency rule; unknown coverage, unsupported scope, and clock skew abstain instead of becoming positive evidence |
 | Shell, Git, frontmost-app, or browser collectors | Not shipped |
 | macOS Keychain-backed production encryption | Not shipped |
 | Signed/notarized release artifacts | Not shipped |
@@ -133,6 +134,20 @@ are rendered in bounded `en` or `en-GB` locales and cite the event ID in both th
 structured citation list and the text. Rename events explicitly leave old-to-new
 identity unknown; no template asserts intent, completeness, process attribution,
 or causality.
+
+### Cross-source correlation rules
+
+Correlation rule registry version `1` exposes the bounded
+`cross_source_temporal_adjacency` rule. Its descriptor lists the only fields it
+may inspect (opaque event ID, source, kind, observed time, evidence level, policy
+scope, and coverage markers), a 60-second window and 256-event input bound, its
+exclusions, inferred/unknown output policy, and five counterexample fixture
+classes. Evaluation authorizes each event against the query policy before the
+rule sees it. A denied scope, unknown evidence or coverage interval, same-source
+pair, equal timestamp, or clock rollback yields an explicit unknown result rather
+than a positive relationship. Rule and registry versions are included in
+explanation identities and export manifests so historical output remains
+reproducible.
 
 ## Architecture
 
@@ -221,6 +236,7 @@ docs/adr/            Immutable architecture decisions
 - [FSEvents lifecycle corpus](fixtures/fsevents-lifecycle-corpus-v1.json) — ground truth, coalescing, gaps, and guarded device rows
 - [Temporal ordering fixture](fixtures/temporal-ordering-v1.json) — clock skew, delayed delivery, tie-breaking, and missing source time
 - [Query coverage fixture](fixtures/query-gap-coverage-v1.json) — nested, adjacent, open-ended, and cross-source gap intervals
+- [Correlation rule fixture](fixtures/correlation-rules-v1.json) — positive, negative, ambiguous, adversarial, and clock-skew cases
 - [Filesystem benchmark corpus](fixtures/filesystem-benchmark-corpus-v1.json) — bounded synthetic trees and native measurement contract
 - [Reproducibility](docs/REPRODUCIBILITY.md) — pinned toolchain, fixture provenance, and clean-machine smoke
 - [Research](docs/RESEARCH.md) — landscape, differentiation, and primary sources

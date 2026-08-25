@@ -216,6 +216,12 @@ or a time ordering alone when the source cannot establish the relationship.
   behavior. The bounded `en`/`en-GB` renderer cites the event ID and refuses
   intent, completeness, process attribution, unsupported causality, and
   old-to-new rename identity.
+- Cross-source correlation uses registry version `1` and a versioned rule
+  descriptor. The current adjacency rule reads only policy-authorized event ID,
+  source, kind, observed time, evidence, and coverage metadata within a bounded
+  query. Unknown coverage, denied scope, equal time, and clock rollback remain
+  unknown evidence; the rule and registry versions are part of explanation
+  identity and export manifests.
 - Export must preserve evidence labels, provenance, and gaps.
 - Unknown schema versions, malformed UUIDs, invalid timestamps, and prohibited
   payload fields fail closed.

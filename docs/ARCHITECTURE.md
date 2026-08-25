@@ -33,6 +33,7 @@ bounded single-writer SQLite WAL journal
         │
         ├─ deterministic query
         ├─ evidence-backed explanation
+        ├─ policy-bounded correlation rules
         └─ explicit JSONL export
 ~~~
 
@@ -462,6 +463,21 @@ event ID in structured and textual output, and refuses template text containing
 intent, completeness, process-attribution, unsupported causality, or old-to-new
 rename implications. A gap either appears as an explicit status or limits the
 interpretation of an otherwise observed fact.
+
+### Cross-source correlation boundary
+
+The correlation registry is version `1` and currently contains one rule:
+`cross_source_temporal_adjacency` (rule version `1`). Its descriptor is the
+source of truth for permitted inputs, exclusions, output evidence, bounds, and
+counterexample classes. `CorrelationQuery` carries the policy profile identity,
+scope digest, selected source set, bounded time window, and maximum input count.
+The evaluator calls the policy gate before reading event metadata and never
+reads selected-root strings or payload fields outside that authorization
+boundary. It emits `inferred` only for two distinct, authorized, direct or
+contextual observations within 60 seconds. Gaps, policy denials, unknown
+evidence, equal timestamps, and source clock rollback are explicit `unknown`
+results. Registry and rule versions participate in explanation identity and
+are recorded in export manifests.
 
 ## Extension rules
 

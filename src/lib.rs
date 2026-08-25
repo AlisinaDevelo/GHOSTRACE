@@ -6,6 +6,7 @@
 
 pub mod claims;
 pub mod consent;
+pub mod correlation;
 pub mod crypto;
 pub mod cursor;
 pub mod error;
@@ -37,6 +38,15 @@ pub use claims::{
 pub use consent::{
     ConsentConfirmation, ConsentPreview, ConsentReceipt, ConsentState, ConsentStateMachine,
     ConsentTransitionKind, MAX_CONSENT_PREVIEW_ITEMS,
+};
+pub use correlation::{
+    evaluate as evaluate_correlation, explanation_identity, explanation_identity_for_rule_version,
+    rule_descriptors, CorrelationEvidenceOutput, CorrelationExclusion, CorrelationFixtureClass,
+    CorrelationIdentity, CorrelationInputField, CorrelationQuery, CorrelationReason,
+    CorrelationResult, CorrelationRuleBounds, CorrelationRuleDescriptor, CorrelationRuleId,
+    CORRELATION_RULE_REGISTRY_VERSION, CORRELATION_RULE_SCHEMA_VERSION,
+    CROSS_SOURCE_TEMPORAL_ADJACENCY_VERSION, MAX_CORRELATION_INPUT_EVENTS,
+    MAX_CORRELATION_WINDOW_SECONDS,
 };
 pub use crypto::{
     decrypt_payload, encrypt_payload, CiphertextEnvelope, DeterministicKeyProvider, KeyAlgorithm,
