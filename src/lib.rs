@@ -10,6 +10,7 @@ pub mod cursor;
 pub mod error;
 pub mod explain;
 pub mod export;
+pub mod fault;
 pub mod fixture;
 pub mod journal;
 #[cfg(target_os = "macos")]
@@ -31,6 +32,7 @@ pub use explain::{explain, CoverageSummary, Explanation, ExplanationStatement};
 pub use export::{
     export_fixture, export_journal, ExportManifest, ExportPolicyProfile, EXPORT_VERSION,
 };
+pub use fault::{FaultAction, FaultPlan, FaultPoint, FaultSchedule};
 pub use fixture::{ingest_fixture, read_fixture, FixtureIngestReport};
 pub use journal::{AppliedMigration, BackupReceipt, DiagnosticRecord, Journal, StoredEvent};
 #[cfg(target_os = "macos")]

@@ -21,6 +21,10 @@ The M0 developer headstart should prove:
 - no prohibited field appears in serialized events, diagnostics, or exports;
 - the capture command returns the documented refusal;
 - tests pass in a network-denied environment.
+- named storage fault schedules return or terminate at every journal durable
+  boundary, then reopen and assert committed rows, cursor state, stable fixture
+  key generation, visible gaps, and retry/idempotence;
+- bounded seed replay and minimized schedules remain checked-in regression inputs.
 
 ## Future live-source gates
 
@@ -61,8 +65,8 @@ number without its workload would be a misleading guarantee.
    ordered cursor reordering/replay, skipped and opaque cursors, and bounded-size behavior.
 3. **Fixture tests:** deterministic replay, explanation citations, gap propagation,
    export compatibility, and privacy regression.
-4. **Integration tests:** SQLite migrations, WAL behavior, permissions, crash
-   injection and reopen replay, cursor/policy/diagnostic atomicity, FIFO
+4. **Integration tests:** SQLite migrations, WAL behavior, permissions, named
+   fault injection and reopen replay, cursor/policy/diagnostic atomicity, FIFO
    acknowledgements, bounded queue policies, cancellation, and retry limits.
 5. **Platform tests:** selected-root FSEvents behavior and macOS permission changes.
 6. **Release checks:** locked build, advisories, license/source policy, SBOM,
@@ -74,3 +78,8 @@ Each future milestone should publish the tests and limitations supporting its ex
 claim. A benchmark or green CI run is not evidence that a source is complete. The
 report must name gaps, excluded contexts, unsupported platforms, and untested
 failure paths.
+
+Task 0062 retains the bounded schedule fixture and the device receipt in
+`docs/evidence/0062-storage-fault-matrix.md`. It verifies the current fixture
+journal's single deterministic key generation; key rotation and Keychain
+availability remain separate, explicitly unverified gates.
