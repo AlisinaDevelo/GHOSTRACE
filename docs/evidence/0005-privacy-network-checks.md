@@ -56,3 +56,18 @@ declares a network client.
 - No real journal, export, path, account name, credential, private browser content,
   or live event was used. Live macOS capture, permissions, and production deployment
   remain later gates.
+
+## Post-merge closure rerun
+
+The evidence/documentation merge itself was then checked from clean protected
+`main` at `c815bf9826092474678d69ce677b8119fd7c144e`. The merge contains only the
+ledger and evidence documentation listed in PR #211; no product source, fixture,
+workflow, or test input changed after the `4a8f249` receipt above.
+
+| Receipt | Result | SHA-256 |
+| --- | --- | --- |
+| `/private/tmp/ghostrace-0005-postmerge-release-v1.log` | Release privacy corpus: 1 passed, exit 0 | `4e535f2b9c8116dbef35538687dfd67a20f98214b0d6632fe597972d0457b0f2` |
+| `/private/tmp/ghostrace-0005-postmerge-static-v1.log` | Format, fixture/identity/release/roadmap checks, index parity, 38 Python tests, ShellCheck, actionlint, product network scan: pass, exit 0 | `80736fa3ebb6c7adf65f814ecab313ce4159685302d278d18e9de1c4c589cc04` |
+
+This exact-SHA rerun closes the documentation merge without treating hosted CI or
+the unavailable local Docker daemon as a substitute for the target-device receipt.
