@@ -8,6 +8,10 @@ refused to claim.
 
 The M0 developer headstart should prove:
 
+- the durable fixture CLI can initialize a private journal, ingest a checked-in
+  fixture, reopen it for explanation, and export a versioned JSONL stream;
+- repeating initialization is idempotent, and explanation bytes remain stable across
+  process boundaries;
 - valid causal-chain fixtures parse into the versioned event envelope;
 - malformed lines, unknown schema versions, invalid UUIDs, and invalid payloads fail
   closed without retaining the rejected value;

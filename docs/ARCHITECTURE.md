@@ -38,6 +38,30 @@ only after its transaction commits. If the source cannot prove coverage, it emit
 gap or an unknown evidence level rather than allowing the explanation layer to infer
 one.
 
+## Fixture-only CLI path
+
+The developer-facing path is deliberately restartable and offline:
+
+```text
+init --journal <private path>
+        |
+        v
+ingest --journal <path> --fixture <JSONL>
+        |
+        +--> explain --journal <path> --event <UUID>
+        |
+        +--> export --journal <path> --output <JSONL>
+```
+
+`init` is idempotent and runs the same hardened SQLite path checks as the library.
+`ingest` reopens the durable journal in a separate process, validates the fixture
+origin and deny-by-default policy, and commits the batch before reporting success.
+`explain` and `export` reopen that journal with the same synthetic fixture key and
+therefore exercise the persistence boundary rather than an in-memory shortcut.
+The key is intentionally deterministic only for the synthetic headstart; it is not
+the production Keychain design. `capture` remains an explicit refusal, and no CLI
+command enables a live collector or network path.
+
 ## FSEvents lifecycle boundary
 
 The `fsevents` module is a deliberately small native boundary, not the selected-root

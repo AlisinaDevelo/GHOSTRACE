@@ -903,6 +903,23 @@ fn export_refuses_overwrite_without_force_and_writes_manifest() {
 }
 
 #[test]
+fn export_refuses_replacing_the_source_journal() {
+    let directory = tempdir().expect("tempdir");
+    make_private(directory.path());
+    let journal_path = directory.path().join("journal.sqlite3");
+    let journal = Journal::open_fixture(
+        &journal_path,
+        DeterministicKeyProvider::from_seed("export-source-conflict"),
+    )
+    .expect("journal");
+    let event = filesystem_event(77, None);
+    journal.ingest(&IngestionOrigin::fixture(), &event, &filesystem_test_policy()).expect("ingest");
+    let error = ghostrace::export_journal(&journal, &journal_path, true)
+        .expect_err("source journal must not be replaced");
+    assert!(error.to_string().contains("source journal"));
+}
+
+#[test]
 fn capture_is_explicitly_refused() {
     let error = capture().expect_err("capture must be disabled");
     assert!(error.to_string().contains("intentionally disabled"));

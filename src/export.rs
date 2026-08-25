@@ -78,6 +78,9 @@ pub fn export_journal(
     force: bool,
 ) -> Result<ExportManifest, GhostraceError> {
     let output_path = output_path.as_ref();
+    if journal.path().is_some_and(|journal_path| journal_path == output_path) {
+        return Err(GhostraceError::ExportSourceConflict);
+    }
     let output_exists = if force {
         storage::validate_existing_artifact_for_overwrite(output_path)?
     } else {
