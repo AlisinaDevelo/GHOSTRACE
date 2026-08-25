@@ -322,7 +322,9 @@ fn policy_documents_are_strict_versioned_and_fail_closed() {
         first.selected_roots.iter().cloned(),
         false,
     )
-    .expect("duplicate candidate shape");
+    .expect("duplicate candidate shape")
+    .with_excluded_roots(first.excluded_roots.iter().cloned())
+    .expect("duplicate exclusions");
     assert!(history.apply(duplicate, false).is_err());
     assert_eq!(history.current("fixture-default-v1").expect("current policy").version, 1);
 
@@ -333,7 +335,9 @@ fn policy_documents_are_strict_versioned_and_fail_closed() {
         first.selected_roots.iter().cloned(),
         false,
     )
-    .expect("preserving upgrade");
+    .expect("preserving upgrade")
+    .with_excluded_roots(first.excluded_roots.iter().cloned())
+    .expect("preserving exclusions");
     assert!(matches!(
         history.apply(preserved, false).expect("preserving migration"),
         PolicyMigrationOutcome::PreservedChoices { from_version: 1, to_version: 2, .. }
@@ -346,7 +350,9 @@ fn policy_documents_are_strict_versioned_and_fail_closed() {
         first.selected_roots.iter().cloned(),
         true,
     )
-    .expect("changed upgrade");
+    .expect("changed upgrade")
+    .with_excluded_roots(first.excluded_roots.iter().cloned())
+    .expect("changed exclusions");
     let error = history.apply(changed.clone(), false).expect_err("reconfirmation required");
     assert!(error.to_string().contains("reconfirmation"));
     assert_eq!(history.current("fixture-default-v1").expect("unchanged policy").version, 2);
@@ -363,7 +369,9 @@ fn policy_documents_are_strict_versioned_and_fail_closed() {
         first.selected_roots.iter().cloned(),
         false,
     )
-    .expect("downgrade shape");
+    .expect("downgrade shape")
+    .with_excluded_roots(first.excluded_roots.iter().cloned())
+    .expect("downgrade exclusions");
     assert!(history.apply(downgrade, true).is_err());
     assert_eq!(history.current("fixture-default-v1").expect("latest policy").version, 3);
 }
