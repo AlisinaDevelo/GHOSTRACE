@@ -108,9 +108,13 @@ canonical-path mapping. Construction never starts the stream. `start` is the exp
 enable operation; it records a typed lifecycle event before native observation begins.
 
 Callback batches are copied into a bounded owner-thread queue. The drain step normalizes
-the flags, checks lexical containment, applies the versioned policy, hashes the path as
-`sha256:...`, and creates only a `FilesystemChanged` payload with operation, entry kind,
-root ID, path class, and digest. It never opens the reported path or reads file content.
+the flags, resolves the reported path through the operating system's canonicalization,
+checks component containment plus device/inode identity, applies the versioned policy,
+hashes canonical path bytes inside a root-scoped `sha256:...` digest domain, and creates
+only a `FilesystemChanged` payload with operation, entry kind, root ID, path class, and
+digest. It never opens the reported path or reads file content. Case and Unicode
+equivalence are whatever the selected filesystem resolves; the collector does not invent
+cross-volume equivalence.
 Accepted events and lifecycle transitions use the existing single `Writer`; queue
 overflow becomes a first-class gap, and blocked observations become a bounded summary.
 The public status exposes running/stopped/revoked state, callback health, accepted and

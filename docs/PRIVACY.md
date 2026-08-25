@@ -111,11 +111,16 @@ keeps the old version available for existing evidence and evaluates only future
 observations against a newly installed version.
 
 The selected-root collector stores only an opaque root ID, operation, entry kind, path
-class, and SHA-256 path digest. It does not call `stat`, open, read, or hash file
-contents. Lifecycle transitions, callback health, blocked counts, and callback overflow
-gaps are bounded status records; the raw callback path is never written to a payload or
-diagnostic. Startup canonicalization and lexical containment are intentionally weaker
-than the race-resistant symlink, hard-link, and exclusion gates still required before
+class, and SHA-256 path digest. It does not open, read, or hash file contents. Containment
+uses the operating system's canonical path plus device/inode identity, so parent traversal,
+lexical-prefix tricks, and different-device descendants are refused. Case and Unicode
+equivalence are not invented by the collector: composed/decomposed and case variants are
+equivalent only when the selected filesystem resolves them to the same identity. Digest
+bytes are scoped to the opaque root ID and its filesystem identity, so an exported digest
+is stable only within that documented normalization and scope boundary. Lifecycle
+transitions, callback health, blocked counts, and callback overflow gaps are bounded status
+records; the raw callback path is never written to a payload or diagnostic. The remaining
+validation-to-use race, hard-link policy, and exclusion gates are still required before
 ambient CLI capture can be enabled.
 
 ## Local storage and export
