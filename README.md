@@ -5,15 +5,35 @@
 [![MSRV: 1.88.0](https://img.shields.io/badge/MSRV-1.88.0-informational.svg)](rust-toolchain.toml)
 [![Status: controlled collector API](https://img.shields.io/badge/status-controlled--collector--API-orange.svg)](docs/ROADMAP.md)
 
-GHOSTRACE is a local macOS causal event journal. It records bounded, user-authorized
-evidence about changes—not everything a person does—and explains which observations
-support each causal link.
+GHOSTRACE is a local macOS event provenance journal. It records bounded,
+user-authorized evidence about changes—not everything a person does—and explains
+which observations support each sequence.
 
 > **Status:** M2 selected-root collector API headstart (0.0.1). The API requires an
 > explicit consent confirmation and writes only bounded filesystem metadata through the
 > existing writer; the ambient `capture` command remains intentionally disabled until
 > path-race containment, cursor recovery, and release gates are complete. This
 > repository makes no legal chain-of-custody claim.
+
+## Product boundary
+
+GHOSTRACE answers one question: **which bounded observations support the sequence of
+changes observed over time?** Its primary object is an event observation with source,
+provenance, evidence quality, and coverage limits. It is a journal and explanation
+layer; it is not a general-purpose search index or source-code analyzer.
+
+Within the surrounding project portfolio, the boundaries are deliberate:
+
+- **LOOM** retrieves exact passages and visual evidence from user-selected files. It
+  does not replace GHOSTRACE's event journal or evidence-linked change explanation.
+- **STRATA** and **CARTOGRAPH** analyze TypeScript source and Git revisions to report
+  architecture changes. They do not collect macOS events or establish runtime
+  causality.
+
+These tools may eventually exchange explicit, user-requested artifacts, but GHOSTRACE
+does not silently index their inputs, execute their analyzers, or depend on their
+databases. See [Product boundaries](docs/BOUNDARIES.md) for the comparison and the
+current limits.
 
 ## Ten-minute demo
 
@@ -106,7 +126,7 @@ ambiguity, with ingest sequence used only as the explicit fallback.
 
 ## Architecture
 
-The causal path is deliberately small:
+The evidence path is deliberately small:
 
 ~~~text
 fixture JSONL (now) ─────────┐
@@ -186,6 +206,7 @@ docs/adr/            Immutable architecture decisions
 - [Privacy](docs/PRIVACY.md) — data inventory, defaults, consent, and export rules
 - [Threat model](docs/THREAT_MODEL.md) — assets, STRIDE analysis, and residual risk
 - [Event model](docs/EVENT_MODEL.md) — evidence levels, provenance, and gaps
+- [Product boundaries](docs/BOUNDARIES.md) — the event-journal boundary and portfolio comparison
 - [Evaluation](docs/EVALUATION.md) — correctness, privacy, and performance gates
 - [FSEvents lifecycle corpus](fixtures/fsevents-lifecycle-corpus-v1.json) — ground truth, coalescing, gaps, and guarded device rows
 - [Temporal ordering fixture](fixtures/temporal-ordering-v1.json) — clock skew, delayed delivery, tie-breaking, and missing source time

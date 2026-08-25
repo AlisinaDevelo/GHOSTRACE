@@ -109,7 +109,7 @@ def validate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     except ValueError as exc:
         raise IdentityError("as_of is not a valid calendar date") from exc
     descriptor = require_string(manifest.get("descriptor"), "descriptor")
-    if descriptor != "GHOSTRACE — local macOS causal event journal":
+    if descriptor != "GHOSTRACE — local macOS event provenance journal":
         raise IdentityError("descriptor is not the qualified product descriptor")
 
     decision = manifest.get("decision")

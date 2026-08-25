@@ -18,6 +18,8 @@ The M0 developer headstart should prove:
 - the same fixture and event ID produce byte-stable explanation structure;
 - explanations cite event IDs and label direct, contextual, inferred, and unknown
   evidence;
+- explanation statements describe observed facts or explicitly named inference
+  rules; they must not claim intent, proof of causality, or complete coverage;
 - gap and policy-blocked records appear in coverage summaries and exports;
 - export refuses an existing destination unless the user supplies --force;
 - browser-shaped fixture URLs lose userinfo, query, and fragment data before storage;

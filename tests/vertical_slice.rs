@@ -865,7 +865,7 @@ fn published_json_schema_compiles_and_matches_fixture_envelopes() {
 }
 
 #[test]
-fn fixture_explanation_is_deterministic_and_cites_the_complete_chain() {
+fn fixture_explanation_is_deterministic_and_cites_the_parent_chain() {
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/causal-chain.jsonl");
     let journal =
         Journal::in_memory(DeterministicKeyProvider::from_seed("explain-test")).expect("journal");
@@ -880,6 +880,10 @@ fn fixture_explanation_is_deterministic_and_cites_the_complete_chain() {
     assert!(first.coverage.warnings[0].contains("00000000-0000-4000-8000-000000000006"));
     for statement in &first.statements {
         assert_eq!(statement.citations, vec![statement.event_id]);
+        let normalized = statement.statement.to_ascii_lowercase();
+        assert!(!normalized.contains("caused"));
+        assert!(!normalized.contains("intent"));
+        assert!(!normalized.contains("complete causal"));
     }
 }
 

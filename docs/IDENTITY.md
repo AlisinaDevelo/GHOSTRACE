@@ -11,7 +11,7 @@ acceptance evidence is
 
 Retain the qualified public descriptor:
 
-> **GHOSTRACE — local macOS causal event journal**
+> **GHOSTRACE — local macOS event provenance journal**
 
 The bare name has a material collision with the VUSec GhostRace speculative
 race-condition research project. This repository is unrelated and must not imply

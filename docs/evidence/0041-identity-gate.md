@@ -65,8 +65,11 @@ commitments. Exact searches must be rerun at each distribution boundary.
 
 ## Decision and identifiers
 
-The project keeps **GHOSTRACE — local macOS causal event journal** as its qualified
-descriptor, explicitly unrelated to VUSec. Distribution identifiers are selected
+The original gate recorded **GHOSTRACE — local macOS causal event journal** as its
+qualified descriptor, explicitly unrelated to VUSec. On 2026-08-25 the public
+descriptor was amended to **GHOSTRACE — local macOS event provenance journal** to
+avoid implying complete causality; the namespace collision, legal status, and
+distribution identifiers remain unchanged. Distribution identifiers are selected
 as follows:
 
 | Surface | Identifier |

@@ -4,14 +4,15 @@
   "project": "GHOSTRACE",
   "repository": "AlisinaDevelo/GHOSTRACE",
   "owner": "AlisinaDevelo",
-  "as_of": "2026-08-24",
-  "descriptor": "GHOSTRACE — local macOS causal event journal",
+  "as_of": "2026-08-25",
+  "descriptor": "GHOSTRACE — local macOS event provenance journal",
   "decision": {
     "outcome": "retain-qualified-descriptor-and-rename-distribution-identifiers",
-    "public_descriptor": "GHOSTRACE — local macOS causal event journal",
+    "public_descriptor": "GHOSTRACE — local macOS event provenance journal",
     "rationale": [
       "The bare GhostRace name has an established VUSec security-research collision.",
       "The qualified descriptor distinguishes this local macOS journal without implying affiliation.",
+      "The event-provenance wording avoids implying complete causality while preserving the qualified local-journal boundary.",
       "Distribution identifiers add the journal qualifier before any broadly distributed release."
     ],
     "distribution_gate": "blocked-until-qualified-counsel-review-and-release-rerun",

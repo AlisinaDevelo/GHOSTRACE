@@ -5,6 +5,10 @@ path. The public slice replays synthetic JSONL fixtures and now contains an expl
 enabled selected-root FSEvents source. Ambient CLI capture remains disabled until the
 remaining path-policy, recovery, and release gates pass.
 
+GHOSTRACE is the event-observation and explanation layer in the portfolio. It does
+not index source documents, perform OCR, or analyze TypeScript architecture. Those
+are separate product boundaries; see [Product boundaries](BOUNDARIES.md).
+
 ## Pipeline
 
 ~~~text
