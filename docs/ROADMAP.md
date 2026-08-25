@@ -81,7 +81,10 @@ M2 treats FSEvents as a lossy change-notification source. The collector maps eve
 documented flag, binds cursors to the chosen stream mode plus device and volume
 identity, records dropped or wrapped history as gaps, tests APFS and path-containment
 edge cases, prevents feedback loops, and publishes controlled storm and lifecycle
-measurements. It does not claim process attribution.
+measurements. Task 0075 supplies the versioned storm/lifecycle corpus and a native
+macOS receipt for private safe rows; sleep/wake, logout, and volume-detach remain
+explicit guarded no-go rows until an authorized interactive device run. It does not
+claim process attribution.
 
 ### Query, explanation, export, and integrity
 

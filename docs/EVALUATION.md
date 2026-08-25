@@ -63,6 +63,29 @@ workload, journal size, collector mix, warm-up method, and build profile. Measur
 Performance budgets are not declared until a representative workload exists. A
 number without its workload would be a misleading guarantee.
 
+## Storm and lifecycle corpus (task 0075)
+
+[`fixtures/fsevents-lifecycle-corpus-v1.json`](../fixtures/fsevents-lifecycle-corpus-v1.json)
+is the versioned ground-truth contract for high-rate and lifecycle evaluation.
+It names the operation log, direct observations, permitted FSEvents coalescing,
+required coverage gaps, recovery expectation, and per-scenario resource bound for
+bulk checkout, package-like atomic install, rename storm, recursive directory
+deletion, sleep/wake, logout, volume detach, process termination, and collector
+restart. `python3 scripts/fsevents-lifecycle-corpus.py check` replays the corpus 32
+times with a pinned seed and emits omission, duplicate, ordering, recovery, and
+resource distributions. The replay report is synthetic validation of the reporting
+contract; it is not a native-device observation.
+
+The macOS integration receipt runs the six non-disruptive rows (bulk checkout,
+package install, rename storm, directory deletion, process kill, and restart) on a
+private temporary selected root. It records operation counts, source-ID duplicate
+handling, ordering inversions, restart recovery, callback/drop counters, and
+path-free output. Sleep/wake, logout, and volume detach remain explicit guarded
+no-go rows because triggering them would suspend or terminate the user's active
+session or risk user data. They are never converted into a pass by hosted CI or a
+synthetic replay; a future authorized interactive run must attach separate native
+evidence and verify the required gap before those rows can close.
+
 ## Test layers
 
 1. **Unit tests:** model validation, URL sanitization, policy decisions, evidence

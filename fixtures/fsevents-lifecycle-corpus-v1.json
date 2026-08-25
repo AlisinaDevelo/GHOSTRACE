@@ -1,0 +1,199 @@
+{
+  "schema_version": 1,
+  "program": "ghostrace-fsevents-lifecycle-corpus-v1",
+  "generator": {
+    "version": "ghostrace-lifecycle-replay-v1",
+    "seed": 7501,
+    "algorithm": "sha256(seed:scenario:run) deterministic projection; no runtime randomness",
+    "command": "python3 scripts/fsevents-lifecycle-corpus.py check"
+  },
+  "privacy": {
+    "synthetic_only": true,
+    "user_data_included": false,
+    "network_required": false
+  },
+  "repeat_runs": 32,
+  "resource_limits": {
+    "max_ground_truth_operations": 4096,
+    "max_observed_events": 4096,
+    "max_callback_batch": 128,
+    "max_run_ms": 30000
+  },
+  "distribution_expectations": {
+    "metrics": [
+      "omission_rate",
+      "duplicate_rate",
+      "ordering_inversion_rate",
+      "recovery_success_rate",
+      "resource_peak_events"
+    ],
+    "min_replay_runs": 32,
+    "recovery_success_rate_min": 1.0,
+    "resource_peak_events_max": 4096
+  },
+  "scenarios": [
+    {
+      "id": "bulk_checkout",
+      "mode": "device_safe",
+      "native_test": "native_safe",
+      "ground_truth": [
+        {"seq": 1, "operation": "created", "token": "checkout-01"},
+        {"seq": 2, "operation": "created", "token": "checkout-02"},
+        {"seq": 3, "operation": "created", "token": "checkout-03"},
+        {"seq": 4, "operation": "created", "token": "checkout-04"},
+        {"seq": 5, "operation": "created", "token": "checkout-05"},
+        {"seq": 6, "operation": "created", "token": "checkout-06"},
+        {"seq": 7, "operation": "created", "token": "checkout-07"},
+        {"seq": 8, "operation": "created", "token": "checkout-08"},
+        {"seq": 9, "operation": "created", "token": "checkout-09"},
+        {"seq": 10, "operation": "created", "token": "checkout-10"},
+        {"seq": 11, "operation": "created", "token": "checkout-11"},
+        {"seq": 12, "operation": "created", "token": "checkout-12"},
+        {"seq": 13, "operation": "created", "token": "checkout-13"},
+        {"seq": 14, "operation": "created", "token": "checkout-14"},
+        {"seq": 15, "operation": "created", "token": "checkout-15"},
+        {"seq": 16, "operation": "created", "token": "checkout-16"}
+      ],
+      "expected_direct": ["created"],
+      "permitted_coalescing": ["same-directory-create-callback"],
+      "required_gaps": [],
+      "recovery": "none",
+      "resource_budget": {"max_operations": 64, "max_observed_events": 64}
+    },
+    {
+      "id": "package_install",
+      "mode": "device_safe",
+      "native_test": "native_safe",
+      "ground_truth": [
+        {"seq": 1, "operation": "created", "token": "package-temp"},
+        {"seq": 2, "operation": "modified", "token": "package-temp"},
+        {"seq": 3, "operation": "renamed", "token": "package-final"},
+        {"seq": 4, "operation": "created", "token": "package-manifest"}
+      ],
+      "expected_direct": ["created", "modified", "renamed"],
+      "permitted_coalescing": ["atomic-install-may-omit-temp-modification"],
+      "required_gaps": [],
+      "recovery": "none",
+      "resource_budget": {"max_operations": 16, "max_observed_events": 16}
+    },
+    {
+      "id": "rename_storm",
+      "mode": "device_safe",
+      "native_test": "native_safe",
+      "ground_truth": [
+        {"seq": 1, "operation": "created", "token": "rename-01"},
+        {"seq": 2, "operation": "created", "token": "rename-02"},
+        {"seq": 3, "operation": "created", "token": "rename-03"},
+        {"seq": 4, "operation": "created", "token": "rename-04"},
+        {"seq": 5, "operation": "created", "token": "rename-05"},
+        {"seq": 6, "operation": "created", "token": "rename-06"},
+        {"seq": 7, "operation": "created", "token": "rename-07"},
+        {"seq": 8, "operation": "created", "token": "rename-08"},
+        {"seq": 9, "operation": "renamed", "token": "rename-01"},
+        {"seq": 10, "operation": "renamed", "token": "rename-02"},
+        {"seq": 11, "operation": "renamed", "token": "rename-03"},
+        {"seq": 12, "operation": "renamed", "token": "rename-04"},
+        {"seq": 13, "operation": "renamed", "token": "rename-05"},
+        {"seq": 14, "operation": "renamed", "token": "rename-06"},
+        {"seq": 15, "operation": "renamed", "token": "rename-07"},
+        {"seq": 16, "operation": "renamed", "token": "rename-08"}
+      ],
+      "expected_direct": ["created", "renamed"],
+      "permitted_coalescing": ["rename-burst-may-coalesce-by-directory", "rename-pairing-may-be-unknown"],
+      "required_gaps": [],
+      "recovery": "none",
+      "resource_budget": {"max_operations": 64, "max_observed_events": 64}
+    },
+    {
+      "id": "directory_deletion",
+      "mode": "device_safe",
+      "native_test": "native_safe",
+      "ground_truth": [
+        {"seq": 1, "operation": "created", "token": "delete-dir-a"},
+        {"seq": 2, "operation": "created", "token": "delete-dir-b"},
+        {"seq": 3, "operation": "created", "token": "delete-file-a"},
+        {"seq": 4, "operation": "created", "token": "delete-file-b"},
+        {"seq": 5, "operation": "deleted", "token": "delete-file-a"},
+        {"seq": 6, "operation": "deleted", "token": "delete-file-b"},
+        {"seq": 7, "operation": "deleted", "token": "delete-dir-a"},
+        {"seq": 8, "operation": "deleted", "token": "delete-dir-b"}
+      ],
+      "expected_direct": ["created", "deleted"],
+      "permitted_coalescing": ["recursive-delete-may-report-parent-only"],
+      "required_gaps": [],
+      "recovery": "none",
+      "resource_budget": {"max_operations": 32, "max_observed_events": 32}
+    },
+    {
+      "id": "sleep_wake",
+      "mode": "device_guarded",
+      "native_test": "guarded_no_go",
+      "ground_truth": [
+        {"seq": 1, "operation": "sleep", "token": "power-sleep"},
+        {"seq": 2, "operation": "wake", "token": "power-wake"}
+      ],
+      "expected_direct": [],
+      "permitted_coalescing": [],
+      "required_gaps": ["fsevents_history_incomplete"],
+      "recovery": "reconcile-before-live-claim",
+      "no_go_reason": "Interactive power transitions would suspend the active device session and are not triggered automatically.",
+      "resource_budget": {"max_operations": 8, "max_observed_events": 8}
+    },
+    {
+      "id": "logout",
+      "mode": "device_guarded",
+      "native_test": "guarded_no_go",
+      "ground_truth": [
+        {"seq": 1, "operation": "logout", "token": "session-logout"}
+      ],
+      "expected_direct": [],
+      "permitted_coalescing": [],
+      "required_gaps": ["fsevents_history_incomplete"],
+      "recovery": "reconcile-before-live-claim",
+      "no_go_reason": "Logging out would terminate the user's active session and is not triggered automatically.",
+      "resource_budget": {"max_operations": 8, "max_observed_events": 8}
+    },
+    {
+      "id": "volume_detach",
+      "mode": "device_guarded",
+      "native_test": "guarded_no_go",
+      "ground_truth": [
+        {"seq": 1, "operation": "volume_detach", "token": "volume-unmount"}
+      ],
+      "expected_direct": [],
+      "permitted_coalescing": [],
+      "required_gaps": ["fsevents_root_changed"],
+      "recovery": "reconcile-before-live-claim",
+      "no_go_reason": "Detaching a volume could interrupt user data and requires explicit hardware authorization.",
+      "resource_budget": {"max_operations": 8, "max_observed_events": 8}
+    },
+    {
+      "id": "process_kill",
+      "mode": "device_safe",
+      "native_test": "native_safe",
+      "ground_truth": [
+        {"seq": 1, "operation": "created", "token": "child-marker"},
+        {"seq": 2, "operation": "process_kill", "token": "child-process"}
+      ],
+      "expected_direct": ["created"],
+      "permitted_coalescing": ["process-termination-is-not-process-attribution"],
+      "required_gaps": [],
+      "recovery": "none",
+      "resource_budget": {"max_operations": 8, "max_observed_events": 8}
+    },
+    {
+      "id": "restart",
+      "mode": "device_safe",
+      "native_test": "native_safe",
+      "ground_truth": [
+        {"seq": 1, "operation": "restart", "token": "collector-restart"},
+        {"seq": 2, "operation": "created", "token": "post-restart-marker"}
+      ],
+      "expected_direct": ["created"],
+      "permitted_coalescing": ["restart-boundary-may-delay-first-callback"],
+      "required_gaps": [],
+      "recovery": "resume-after-explicit-stop-start",
+      "resource_budget": {"max_operations": 8, "max_observed_events": 8}
+    }
+  ]
+}
