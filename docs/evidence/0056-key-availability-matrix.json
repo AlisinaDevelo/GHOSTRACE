@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "contract_id": "ghostrace-key-availability-matrix-v1",
-  "generated_at": "2026-08-25T06:57:56+00:00",
-  "source_commit": "069cde6fed9ac7770d2f8f59c93b3d3e503cbdeb",
+  "generated_at": "2026-08-25T07:02:06+00:00",
+  "source_commit": "7aaa5e2ebc944d51908e56be1d87947f78f192d2",
   "device": {
     "model": "MacBookPro17,1",
     "os": "macOS 26.6.2",
@@ -14,8 +14,8 @@
     "command": "cargo +1.88.0 test --locked --offline --test keychain_lifecycle -- --ignored --nocapture",
     "status": "pass",
     "exit_code": 0,
-    "log": "/tmp/ghostrace-0056-keychain-lifecycle-source-final.log",
-    "log_sha256": "24873913bfc572ac18af2183204bf739def842320a71f61efb9db0e9cd9af8ab"
+    "log": "/tmp/ghostrace-0056-keychain-lifecycle-postmerge.log",
+    "log_sha256": "b22a81e2f67b36ef370b10eee919183a6947ce1ce3cf473410ceb458e3b9d9b1"
   },
   "transitions": [
     {
