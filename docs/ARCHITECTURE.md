@@ -128,9 +128,16 @@ file with a hard-link alias becomes an explicit refusal. The returned
 `ContainedFile` exposes descriptor metadata and identity stability but does not
 implement content reads, keeping source facts path-free and content-free.
 
-The collector deliberately does not persist an FSEvents cursor yet. Volume identity,
-reset/wrap recovery, storm backpressure, exclusion precedence, and the ambient CLI
-remain later gates (tasks 0014–0017 and their children).
+Each selected root also records path-free volume evidence: device number,
+filesystem identity, and an optional digest of a platform volume UUID. Mutable
+volume display names are not identity fields. `CursorIdentity::for_volume` binds
+live cursors to both this volume evidence and the selected per-host or per-device
+stream mode; a matching path or collector instance cannot resume a cursor from a
+different volume. Mount observations classify unmount, remount, device
+replacement, APFS snapshot restore, and path reuse as explicit discontinuities.
+The collector deliberately does not persist an FSEvents cursor yet. Durable
+volume-bound replay, reset/wrap recovery, storm backpressure, and the ambient CLI
+remain later gates (tasks 0015–0017 and their children).
 
 ## Policy-document boundary
 

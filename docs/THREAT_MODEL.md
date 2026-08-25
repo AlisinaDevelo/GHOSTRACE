@@ -71,10 +71,10 @@ plaintext chosen by the user.
 | --- | --- | --- | --- |
 | Spoofing | A fixture or adapter claims another source or policy | Sealed typed origin capabilities, versioned provenance namespaces, policy IDs, and validation | Fixture and selected-root live-origin boundaries are tested; Endpoint Security attestation remains future work |
 | Tampering | A local process edits journal rows or an export | Authenticated payloads; future integrity chain; explicit integrity status | Keychain encryption and chain verification are roadmap gates |
-| Repudiation | An explanation hides a denied interval, restart, or replay conflict, or a callback is lost during native shutdown | First-class gaps, typed source identity, event IDs, policy binding, deterministic output, bounded callback queue, lifecycle records, named crash/replay matrix, owner-thread FSEvents shutdown fence | Selected-root lifecycle, blocked-summary, and overflow-gap tests now; volume-aware cursor/recovery evidence remains required |
+| Repudiation | An explanation hides a denied interval, restart, or replay conflict, or a callback is lost during native shutdown | First-class gaps, typed source identity, volume-bound stream mode, event IDs, policy binding, deterministic output, bounded callback queue, lifecycle records, named crash/replay matrix, owner-thread FSEvents shutdown fence | Selected-root lifecycle, blocked-summary, overflow-gap, and volume-transition tests now; durable cursor recovery remains required |
 | Information disclosure | Logs, WAL files, exports, or errors reveal paths or payloads | Minimized fields, path digests, no sensitive diagnostics, explicit export, file permissions | Selected-root payloads and diagnostics contain no raw paths or contents; production release storage hardening remains |
 | Denial of service | Huge fixture, event storm, callback panic, or native lifecycle leak exhausts memory or leaves capture wedged | Bounded parser, bounded callback batches/paths, panic containment, single-owner lifecycle, bounded pending queue, writer admission, input limits, bounded retries, visible loss | Selected-root queue overflow becomes a gap; storm benchmarks and sustained backpressure remain future work |
-| Elevation of privilege | Collector asks for broad TCC access or follows a symlink outside scope | No root/Full Disk Access baseline, explicit selected roots, startup canonicalization, descriptor-backed no-follow walks, device/inode checks, policy gate, path digests | Selected-root metadata and descriptor-open containment are shipped; exclusion, cursor/recovery, and ambient capture gates remain required |
+| Elevation of privilege | Collector asks for broad TCC access or follows a symlink outside scope | No root/Full Disk Access baseline, explicit selected roots, startup canonicalization, descriptor-backed no-follow walks, device/inode and volume checks, policy gate, path digests | Selected-root metadata, descriptor-open containment, and volume identity are shipped; durable cursor/recovery and ambient capture gates remain required |
 
 ## Residual risks
 
@@ -86,8 +86,9 @@ plaintext chosen by the user.
   process attribution or completeness. An explanation cannot repair that limitation.
 - The lifecycle adapter and selected-root collector cannot make an FSEvents callback
   complete or attributable. They retain normalized flags, lifecycle state, explicit
-  overflow gaps, policy outcomes, and durable metadata, but volume-aware cursor
-  recovery and source completeness remain later gates.
+  overflow gaps, policy outcomes, volume transition metadata, and durable metadata,
+  but volume-bound cursor persistence, recovery, and source completeness remain
+  later gates.
 - A user may intentionally export sensitive data to an insecure destination.
 - A compromised dependency, toolchain, or build host can violate the local-only
   contract. CI checks reduce this risk; they do not prove source intent.

@@ -123,8 +123,11 @@ records; the raw callback path is never written to a payload or diagnostic. If a
 consumer must open a path, `SelectedRoot::open_contained` uses a descriptor walk with
 no-follow component opens, rejects symlink replacement and regular-file hard-link
 aliases, and exposes only descriptor metadata. Symlink and hard-link callback flags are
-retained as source facts without opening their targets. Exclusion, cursor, and ambient
-CLI gates are still required before capture can be enabled.
+retained as source facts without opening their targets. Volume identity adds only
+device/filesystem fields and an optional volume-UUID digest; mutable display names
+are excluded. Cursor identities require the same volume and stream mode before a
+resume is allowed. Exclusion, durable cursor, and ambient CLI gates are still
+required before capture can be enabled.
 
 ## Local storage and export
 
