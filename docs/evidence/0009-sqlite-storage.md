@@ -1,9 +1,10 @@
 # Task 0009 evidence: SQLite WAL schema and migration runner
 
-Status: review candidate. The production schema, WAL configuration, path
-hardening, and migration catalog are already on protected `main`; this review
-adds a focused file-backed contract test and records the complete target-device
-pipe. A protected-main rerun remains the final closure gate.
+Status: complete on protected `main` at
+`0d60e7b30c7e3c6951ad78a420a88698c6546492`. The production schema, WAL
+configuration, path hardening, migration catalog, and focused file-backed
+contract test are merged, and the same device matrix was rerun at that exact
+SHA.
 
 ## Contract and implementation
 
@@ -70,9 +71,26 @@ Intel/macOS 15 support, signed/notarized distribution, or unavailable audit
 tools. Hosted checks are an additional merge gate, not a substitute for the
 protected-main device rerun.
 
-## Merge gate
+## Protected-main rerun receipts
 
-After this review is merged, rerun the focused SQLite contract, complete debug
-and offline lanes, release, docs, and reproducibility at the exact protected-main
-merge SHA. Add those receipts here and only then change task 0009 to `done`,
-close issue #13, and publish the zero-delta roadmap result.
+The merge of [PR #228](https://github.com/AlisinaDevelo/GHOSTRACE/pull/228) was
+verified at `0d60e7b30c7e3c6951ad78a420a88698c6546492` on the same device before
+this task was closed.
+
+| Lane | Result and retained receipt |
+| --- | --- |
+| Focused SQLite contract | Pass: 2 tests; `/tmp/ghostrace-0009-postmerge-sqlite-storage.log`; SHA-256 `23a4579f1dbc960732fba9d97a5e0d2a0d6844075c0d629c1d0a983437e166c0` |
+| Debug all-target/all-feature suite | Pass; `/tmp/ghostrace-0009-postmerge-debug.log`; SHA-256 `9af9599be7605c83a18743b211b25877029a7c9369f072829115d17fccc94e72` |
+| Clippy with warnings denied | Pass; `/tmp/ghostrace-0009-postmerge-clippy.log`; SHA-256 `bcb74884a78099501f6bfc31de29d15aae4eb48dcd18d5c99bdde44d75b90089` |
+| Explicit network-denial pipe | Pass; `/tmp/ghostrace-0009-postmerge-offline.log`; SHA-256 `c3779f7f0e320d68b902086380ec81bd5e0742d0de624e158fa107cb26f2d231` |
+| Release all-target/all-feature suite | Pass; `/tmp/ghostrace-0009-postmerge-release.log`; SHA-256 `9cf0d579aecc61aa1afe71cc4cbbdb69d0ff7de46c3cf574e4adb82a3e160641` |
+| Reproducibility/static pipe | Pass: pinned inputs, 40 Python tests, and complete locked suite; `/tmp/ghostrace-0009-postmerge-repro.log`; SHA-256 `07651738daaa8c0c97a890c7f1a852c7643034bc71e8b4526fe4f9bf5efcde0a` |
+| Rust documentation | Pass; `/tmp/ghostrace-0009-postmerge-doc.log`; SHA-256 `f8c1da37ac5c70c080ae03a28c70c864277dbd1cfe0f76770f84c8f92089b349` |
+| Shell/action lint | Pass; `/tmp/ghostrace-0009-postmerge-shellcheck.log` and `/tmp/ghostrace-0009-postmerge-actionlint.log` (both empty-success receipts) |
+
+## Closure
+
+Issue #13 can be closed against this evidence. The verified scope remains the
+fixture file-backed journal: no live collection, capacity target,
+Intel/macOS 15, signed/notarized distribution, or unavailable audit tool is
+represented as covered.
