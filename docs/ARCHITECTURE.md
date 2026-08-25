@@ -110,13 +110,21 @@ enable operation; it records a typed lifecycle event before native observation b
 Callback batches are copied into a bounded owner-thread queue. The drain step normalizes
 the flags, resolves the reported path through the operating system's canonicalization,
 checks component containment plus device/inode identity, applies the versioned policy,
-and then applies the filesystem delivery contract. Exact transport duplicates are
+checks the bounded internal-artifact policy, and then applies the filesystem delivery
+contract. The journal path and SQLite sidecars are registered automatically; callers
+register export, backup, and temporary directories explicitly. Internal matches are
+denied before path hashing or writer admission and produce a path-free
+`internal_storage_path` policy-blocked summary. Existing internal objects remain
+denied after relocation through device/inode binding, while symlink redirects fail
+closed during canonicalization and selected-root containment. Exact transport duplicates are
 suppressed only when their source event ID, raw flags, and path digest all match a
 bounded event-ID window; the suppression count is exposed in collector status and
-never becomes a missing filesystem event. Source coalescing and repeated
-modification remain explicit path-free qualifiers. A rename is recorded with an
-unknown old-to-new pairing unless a future bounded adapter can provide contextual
-support; the collector never infers a path from temporal adjacency.
+never becomes a missing filesystem event. Source coalescing, repeated modification,
+and the source's `OwnEvent` flag remain explicit path-free qualifiers; OwnEvent is
+accepted as evidence for unrelated paths rather than treated as a blanket drop rule.
+A rename is recorded with an unknown old-to-new pairing unless a future bounded
+adapter can provide contextual support; the collector never infers a path from
+temporal adjacency.
 hashes canonical path bytes inside a root-scoped `sha256:...` digest domain, and creates
 only a `FilesystemChanged` payload with operation, entry kind, root ID, path class, and
 digest. It never opens the reported path or reads file content. Case and Unicode

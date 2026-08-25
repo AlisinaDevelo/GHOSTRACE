@@ -343,7 +343,7 @@
               ]
             },
             "observation": {
-              "enum": ["source_coalesced", "repeated_modification"]
+              "enum": ["source_coalesced", "repeated_modification", "own_event"]
             },
             "rename_pairing": {
               "enum": ["unknown", "contextual"]

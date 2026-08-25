@@ -51,6 +51,7 @@ fn config() -> FseventsCollectorConfig {
         actor: "human".to_owned(),
         reason: "root_opt_in".to_owned(),
         history_timeout: std::time::Duration::from_millis(50),
+        internal_paths: ghostrace::InternalPathPolicy::default(),
     }
 }
 
@@ -256,6 +257,79 @@ fn root_replacement_emits_a_bounded_gap_before_any_resume_claim() {
         stored.event.kind == EventKind::Gap
             && !serde_json::to_string(&stored.event).expect("json").contains("selected-root")
     }));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn internal_storage_writes_are_denied_before_persistence_and_reported_path_free() {
+    let directory = tempdir().expect("tempdir");
+    let root_path = directory.path().join("selected-root");
+    fs::create_dir(&root_path).expect("selected root");
+    let internal_path = root_path.join("private-output");
+    fs::create_dir(&internal_path).expect("internal output directory");
+    let root = SelectedRoot::new("root-main", &root_path).expect("selected root");
+    let secret_path = internal_path.join("external-writer-secret.txt");
+    let secret_digest = root.path_digest(&secret_path).expect("internal path digest");
+    let journal = Journal::in_memory(DeterministicKeyProvider::from_seed("collector-internal"))
+        .expect("journal");
+    let mut collector_config = config();
+    collector_config
+        .internal_paths
+        .register_directory(&internal_path)
+        .expect("internal path policy");
+    let mut collector = FseventsCollector::new(
+        confirmation(&policy()),
+        policy(),
+        [root],
+        journal,
+        collector_config,
+    )
+    .expect("collector");
+    collector.start().expect("start");
+
+    let writer_path = secret_path.clone();
+    let writer = std::thread::spawn(move || {
+        fs::write(writer_path, b"must-never-be-persisted").expect("external write");
+    });
+    writer.join().expect("writer");
+
+    let mut committed = Vec::new();
+    for _ in 0..100 {
+        committed.extend(
+            collector
+                .run_current_run_loop_for(Duration::from_millis(50))
+                .expect("drive internal write"),
+        );
+        if collector.status().internal_path_denials > 0 {
+            break;
+        }
+    }
+    collector.stop().expect("stop");
+
+    let status = collector.status();
+    assert!(status.internal_path_denials > 0, "internal write was not observed");
+    assert!(!committed.iter().any(|event| event.path_digest == secret_digest));
+    let events = collector.journal().events().expect("journal events");
+    assert!(!events.iter().any(|stored| {
+        matches!(
+            &stored.event.payload,
+            EventPayload::FilesystemChanged(payload)
+                if payload.path_digest.as_ref() == Some(&secret_digest)
+        )
+    }));
+    let summary = events
+        .iter()
+        .find(|stored| {
+            matches!(
+                &stored.event.payload,
+                EventPayload::PolicyBlockedSummary(payload)
+                    if payload.reason_code.as_str() == "internal_storage_path"
+            )
+        })
+        .expect("internal denial summary");
+    let rendered = serde_json::to_string(&summary.event).expect("summary JSON");
+    assert!(!rendered.contains("external-writer-secret"));
+    assert!(!rendered.contains(&internal_path.to_string_lossy().to_string()));
 }
 
 #[cfg(target_os = "macos")]

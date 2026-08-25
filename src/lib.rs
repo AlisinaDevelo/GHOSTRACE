@@ -63,8 +63,9 @@ pub use fsevents::{
 pub use fsevents_collector::{
     CollectedFilesystemEvent, CollectorCoverageState, CollectorState, CollectorStatus,
     ContainedFile, FseventsCollector, FseventsCollectorConfig, FseventsCollectorError,
-    SelectedRoot, DEFAULT_HISTORY_TIMEOUT, MAX_PENDING_EVENTS, MAX_SELECTED_ROOTS,
-    MAX_TRANSPORT_DEDUP_ENTRIES, MAX_TRANSPORT_DEDUP_EVENT_ID_SPAN,
+    InternalPathPolicy, SelectedRoot, DEFAULT_HISTORY_TIMEOUT, MAX_INTERNAL_PATHS,
+    MAX_INTERNAL_PATH_BYTES, MAX_PENDING_EVENTS, MAX_SELECTED_ROOTS, MAX_TRANSPORT_DEDUP_ENTRIES,
+    MAX_TRANSPORT_DEDUP_EVENT_ID_SPAN,
 };
 pub use fsevents_flags::{
     normalize_fsevents_event, FseventsBoundaryReason, FseventsCompleteness,

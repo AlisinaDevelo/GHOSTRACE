@@ -88,6 +88,12 @@ plaintext chosen by the user.
   new source fact. The selected-root collector therefore uses a bounded,
   deterministic `(event ID, flags, path digest)` window and exposes only a
   path-free suppression counter; distinct source IDs remain distinct evidence.
+- Journal, SQLite sidecar, export, backup, and temporary-file notifications can
+  otherwise feed back into the collector. The bounded internal-path policy checks
+  them before hashing or persistence, binds existing objects to device/inode
+  identity across relocation, and fails closed on symlink redirects. Denials are
+  retained as a path-free `internal_storage_path` policy summary; the policy does
+  not blanket-drop unrelated `OwnEvent` source deliveries.
 - A rename callback contains one redacted path digest, not an old-to-new pair.
   Rename output says `unknown` (or a future bounded `contextual` relationship)
   and has no inferred wire value, so temporal adjacency cannot manufacture a

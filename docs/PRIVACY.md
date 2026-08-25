@@ -154,6 +154,14 @@ verified as user-owned mode `0700`; the database and SQLite sidecars are verifie
 user-owned, single-link regular files mode `0600`; and exports and temporary output
 files are forced to mode `0600`. No-follow opens and identity rechecks reject a
 symlink, hard-link substitution, non-regular file, unsafe mode, or parent replacement.
+The selected-root collector separately denies source notifications that resolve to
+the journal, its sidecars, or caller-registered export/backup/temporary paths before
+hashing or persistence. Existing internal objects remain denied after relocation by
+device/inode identity; symlink redirects are canonicalized and fail closed. An
+internal denial is represented only by a bounded `internal_storage_path` summary,
+never by a raw path or a filesystem payload. The CoreServices `OwnEvent` flag is
+retained as source evidence for unrelated paths and is not an unconditional drop
+rule.
 These checks reduce local path-confusion risk but cannot prevent a privileged process,
 filesystem snapshot, crash dump, or a user from copying an explicit export.
 
