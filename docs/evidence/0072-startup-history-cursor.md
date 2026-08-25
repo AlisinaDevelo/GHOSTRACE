@@ -1,13 +1,15 @@
 # Task 0072 evidence: startup history and cursor gates
 
-Status: implementation and target-device verification complete. The
-implementation is protected on `main` at `906dc362e13ec96b10be607e8961c066bbd8d9a0`
-(PR [#256](https://github.com/AlisinaDevelo/GHOSTRACE/pull/256)).
-The post-merge hosted workflows for that exact protected commit all passed:
-[CI](https://github.com/AlisinaDevelo/GHOSTRACE/actions/runs/32846970296),
-[Rust advisories](https://github.com/AlisinaDevelo/GHOSTRACE/actions/runs/32846970256),
-[offline fixture](https://github.com/AlisinaDevelo/GHOSTRACE/actions/runs/32846970342),
-and [Cargo policy](https://github.com/AlisinaDevelo/GHOSTRACE/actions/runs/32846970298).
+Status: implementation and protected-main verification complete. The core
+implementation is in PR [#256](https://github.com/AlisinaDevelo/GHOSTRACE/pull/256)
+at `906dc362e13ec96b10be607e8961c066bbd8d9a0`; the timeout test and evidence
+receipt are protected on `main` at `45c755552046d520472f52a44bd3045b4e39d900`
+in PR [#257](https://github.com/AlisinaDevelo/GHOSTRACE/pull/257).
+The post-merge hosted workflows for the final protected commit all passed:
+[CI](https://github.com/AlisinaDevelo/GHOSTRACE/actions/runs/32847727645),
+[Rust advisories](https://github.com/AlisinaDevelo/GHOSTRACE/actions/runs/32847727708),
+[offline fixture](https://github.com/AlisinaDevelo/GHOSTRACE/actions/runs/32847727658),
+and [Cargo policy](https://github.com/AlisinaDevelo/GHOSTRACE/actions/runs/32847727702).
 
 ## Contract
 
@@ -34,22 +36,23 @@ status, or explicit stop before `HistoryDone` emits a path-free history gap with
 
 ## Target-device verification
 
-The exact protected implementation commit was checked on macOS 26.6.2
-(25G83), Apple M1 arm64, Rust 1.88.0, Cargo 1.88.0, and Python 3.9.6. Receipt
-hashes are SHA-256 of complete stdout/stderr logs.
+The exact final protected commit `45c755552046d520472f52a44bd3045b4e39d900`
+was checked on macOS 26.6.2 (25G83), Apple M1 arm64, Rust 1.88.0, Cargo
+1.88.0, and Python 3.9.6. Receipt hashes are SHA-256 of complete
+stdout/stderr logs.
 
 | Lane | Result | Receipt |
 | --- | --- | --- |
 | `cargo +1.88.0 fmt --check` | passed | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
-| `cargo +1.88.0 test --locked --all-targets --all-features` | passed; 31 unit tests and all integration targets; one explicit Keychain authorization test ignored | `3fdf6e1e3783245674177ab47fc97c5fa3b0876f5e10d7591d62456148e68c78` |
-| `cargo +1.88.0 clippy --locked --all-targets --all-features -- -D warnings` | passed | `bfc33773865ecee468d754a05bbdad2fc3de8be2a9eb4b5c9d80e230840b4515` |
-| `cargo +1.88.0 build --locked --all-features --release` | passed | `19ab943dd1741a8e723cd890de64253e60c903cca987e2efb24e87acaa32e132` |
-| `RUSTDOCFLAGS='-D warnings' cargo +1.88.0 doc --locked --all-features --no-deps` | passed | `155bbd45d76da815816ace46f1ee30d87250465a8d8df48796f24ebcdec409ab` |
-| `./scripts/offline-network-test.sh` | passed; denial canary enforced and full offline suite green | `2f6b656600411f369f22fcafcdd63d41042d11d2de7cad14e9a7197af1ddcff9` |
-| `./scripts/reproducibility-test.sh` | passed; 40 Python tests and deterministic fixture/replay/export lanes green | `290ae1c6c60e65e72f4464e97c7aeeb8415fbb89a8a6b00e75f1f0c495fc688e` |
-| `python3 -m unittest discover -s tests -p 'test_*.py'` | passed; 40/40 | `b929d895adf602e58ff58c6215c6ea2db9cec82bf23b2ec47a22e5e6cd00072b` |
+| `cargo +1.88.0 test --locked --all-targets --all-features` | passed; 31 unit tests and all integration targets; one explicit Keychain authorization test ignored | `641927a5e9cb63e7185d0119a3537992c4d841702cd359d9271dc04c7c6c0786` |
+| `cargo +1.88.0 clippy --locked --all-targets --all-features -- -D warnings` | passed | `beed191cf5cd39a57477a6d66e9acb53f3b4efe7566a30e0ada805357a0fe6ff` |
+| `cargo +1.88.0 build --locked --all-features --release` | passed | `f18e8aa44b81e7d9d1663536017be739eb80ede7041400fe06bf4e1c755d3d59` |
+| `RUSTDOCFLAGS='-D warnings' cargo +1.88.0 doc --locked --all-features --no-deps` | passed | `e77bb658b0e39ad801c3692ea0e91894abdad9facb43af5d714e434aa5f920f8` |
+| `./scripts/offline-network-test.sh` | passed; denial canary enforced and full offline suite green | `0aaab29a4d63c9c81cb6b962da0e17420c4caacba725345bab6426d158ac190c` |
+| `./scripts/reproducibility-test.sh` | passed; 40 Python tests and deterministic fixture/replay/export lanes green | `ad87103943756e006d5dbb4800224428f1a29ac01eb7b3345f09b51a07d8b5ba` |
+| `python3 -m unittest discover -s tests -p 'test_*.py'` | passed; 40/40 | `9326e11b30c6f829501ae04dc13852e95f67017c0ee6e05c56a53a0142a8fecd` |
 | `python3 scripts/roadmap.py check` | passed; 160 tasks, 488 dependency edges, 0 blocked | `b7fac9423fe493f5ef31e6c1524f35973c0d4190b83781322beb3b383e6ec212` |
-| `cargo +1.88.0 check --locked --target x86_64-unknown-linux-gnu --all-targets --all-features` | cross-target attempt was blocked locally because no `x86_64-linux-gnu-gcc` is installed; hosted Linux stable/MSRV checks passed after the portability fix | `520378b10eff0ae5040d369d50743f683eb6839cc919a6113aafede3f3217901` |
+| `cargo +1.88.0 check --locked --target x86_64-unknown-linux-gnu --all-targets --all-features` | cross-target attempt was blocked locally because no `x86_64-linux-gnu-gcc` is installed; hosted Linux stable/MSRV checks passed | `09fac9a697a5ecdbd891f4e8895e57969238676941a5679e9e79757b8d3ad311` |
 
 The locked-session Keychain lifecycle test still requires explicit device
 authorization and remains reported as ignored/unavailable rather than being
