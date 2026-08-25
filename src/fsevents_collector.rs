@@ -416,6 +416,7 @@ pub struct FseventsCollector {
     origin: IngestionOrigin,
     replay_boundary: ReplayBoundary,
     startup_decision: StartupCursorDecision,
+    #[cfg(target_os = "macos")]
     history_timeout: Duration,
     history_started_at: Option<Instant>,
     instance_label: InstanceLabel,
@@ -524,6 +525,7 @@ impl FseventsCollector {
             origin,
             replay_boundary,
             startup_decision,
+            #[cfg(target_os = "macos")]
             history_timeout: config.history_timeout,
             history_started_at: None,
             instance_label,
@@ -876,6 +878,7 @@ impl FseventsCollector {
         )
     }
 
+    #[cfg(target_os = "macos")]
     fn check_history_timeout(&mut self) -> Result<(), FseventsCollectorError> {
         let Some(started_at) = self.history_started_at else {
             return Ok(());
