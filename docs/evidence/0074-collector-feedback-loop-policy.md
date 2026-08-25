@@ -54,7 +54,7 @@ stdout/stderr log for the command.
 | selected-root collector debug test | passed; 9/9 | `da78f15e875262d3beeb74a2a13b45ca05bda62ac24bde1d95d27310815b2a26` |
 | selected-root collector release test | passed; 9/9 | `903c9f158f98bb9b7839732e18c0c2cbb53c2e637494f4018b3e45f4964f816a` |
 | `python3 -m unittest discover -s tests -p 'test_*.py'` | passed; 40/40 | `ae455508ef78c94e95e9422adacc8899ad25f359db662e765960be2222792d99` |
-| `python3 scripts/roadmap.py check` | passed; 160 tasks, 47 done, 113 backlog, 488 dependency edges, 0 blocked | `08f9c3dc9cc256fa795353ddc7f09ee4fd2b795ef826824c060793040d4c3335` |
+| `python3 scripts/roadmap.py check` | passed; 160 tasks, 48 done, 112 backlog, 488 dependency edges, 0 blocked | `f87838816f072e699d69c6167bd1ffc39271609937ff7cf7033966403e465086` |
 
 ## MVP demonstration
 
@@ -74,3 +74,24 @@ because it requires interactive device authorization; it is not substituted by
 hosted CI. Cross-target Linux compilation was not claimed on this device. No
 path, display name, account data, credential, file content, or capture key is
 retained in the event model or this evidence.
+
+## Final live reconciliation
+
+After the evidence merge, the authenticated owner read `main` at
+`f471fd7c5d073bc025e673c9854241ca22f14708` and independently queried the public
+repository. The result was exactly 160 issues (112 open, 48 closed), 12
+milestones (`M0` through `M11`), and 45 labels, of which 31 are managed by the
+program. Issue #78 is `CLOSED` with reason `COMPLETED` and has `status:done`
+without `status:backlog`. The raw read receipts are SHA-256 pinned:
+
+- issues: `1ee52b9b0e90d023968d96f045560407d5c7bb62cdb2d1dce26e639c5fc96831`
+- milestones: `8f345845ad8b5cd5a6f34437bfe3ef744d199a1aa21f4cf64d3ea72035713cf6`
+- labels: `723c2cd1c6654392eba5902bcb40ac1b79f77e3c57c08e643d8a4eff95d63854`
+
+The repository's managed public-metadata planner was run read-only against the
+same live state. It returned zero operations and zero blockers with task-tree
+digest `6c758cb466abf68d0cc8d5c90a9a2075f5267b2105b6f2529bf497a39cd29e2f`
+and plan digest
+`36bf4608b6d9e2afaa23c649ab2a9bb2feb9d43172bd8ac7f11624ab6a6bb6b2`. The
+complete JSON receipt is pinned as
+`bc1f691c632d6a22e163470f0710d291d4830e22e06f210445af91a76b9b828f`.
