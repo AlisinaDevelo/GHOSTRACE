@@ -21,7 +21,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0015 | Persist FSEvents cursors and recover after restart | M2 | done | filesystem | maintainer | — | 0010, 0013, 0066, 0070, 0071, 0072 |
 | 0016 | Add event-storm backpressure and loss accounting | M2 | done | filesystem | maintainer | — | 0010, 0013, 0015, 0073, 0074 |
 | 0017 | Publish filesystem correctness and latency benchmarks | M2 | done | filesystem | maintainer | — | 0013, 0014, 0015, 0016, 0075, 0076 |
-| 0018 | Implement time-window queries and stable ordering | M3 | backlog | explain-export | maintainer | — | 0010, 0012, 0077, 0078, 0079 |
+| 0018 | Implement time-window queries and stable ordering | M3 | done | explain-export | maintainer | — | 0010, 0012, 0077, 0078, 0079 |
 | 0019 | Implement deterministic evidence-backed explain | M3 | backlog | explain-export | maintainer | — | 0017, 0018, 0080, 0081, 0082 |
 | 0020 | Define and ship JSONL export v1 with manifest | M3 | backlog | explain-export | maintainer | — | 0018, 0019, 0083, 0084, 0085 |
 | 0021 | Add retention, deletion, and integrity-check commands | M3 | backlog | explain-export | maintainer | — | 0009, 0018, 0020, 0086, 0087 |
