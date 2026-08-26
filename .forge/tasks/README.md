@@ -97,7 +97,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0091 | Freeze the explicit shell metadata schema | M4 | done | shell-git | privacy-engineer | 0024 | 0007, 0018 |
 | 0092 | Test shell wrapper lifecycle and exit semantics | M4 | done | shell-git | test-engineer | 0024 | 0091 |
 | 0093 | Red-team shell secret leakage | M4 | done | shell-git | security-auditor | 0024 | 0091 |
-| 0094 | Define stable Git repository and worktree identity | M4 | backlog | shell-git | git-specialist | 0025 | 0007, 0018 |
+| 0094 | Define stable Git repository and worktree identity | M4 | done | shell-git | git-specialist | 0025 | 0007, 0018 |
 | 0095 | Minimize Git refs, object IDs, and snapshot fields | M4 | backlog | shell-git | privacy-engineer | 0025 | 0094 |
 | 0096 | Represent Git rewrites and unavailable history as gaps | M4 | backlog | shell-git | git-specialist | 0025 | 0094, 0095 |
 | 0097 | Make Git hook installation verifiable and reversible | M4 | backlog | shell-git | git-specialist | 0026 | 0094, 0095 |
