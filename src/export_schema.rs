@@ -252,7 +252,10 @@ pub fn validate_export(path: impl AsRef<Path>) -> Result<ExportValidation, Ghost
     let mut body_bytes = 0usize;
     let mut body_digest = Sha256::new();
     let mut last_order = None;
-    let mut seen_ingest_seq = BTreeSet::new();
+    // The journal's ingest sequence is durable and unique. Validation keeps
+    // only the previous stable-order key so a ten-million-record export does
+    // not materialize an unbounded set of sequence numbers; duplicate or
+    // reordered records are rejected when their complete order key regresses.
     let mut policy_profiles = BTreeSet::new();
     let mut gap_records = Vec::new();
     let mut collector_status = "unknown";
@@ -291,9 +294,7 @@ pub fn validate_export(path: impl AsRef<Path>) -> Result<ExportValidation, Ghost
                 "export exceeds the {MAX_EXPORT_EVENT_RECORDS}-event bound"
             )));
         }
-        if !seen_ingest_seq.insert(record.ingest_seq)
-            || last_order.is_some_and(|previous| order <= previous)
-        {
+        if last_order.is_some_and(|previous| order <= previous) {
             return Err(GhostraceError::ExportInvalid(
                 "event stable order is not unique and ordered".to_owned(),
             ));

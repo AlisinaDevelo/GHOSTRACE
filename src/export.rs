@@ -46,7 +46,10 @@ pub const MAX_EXPORT_RECORD_BYTES: usize = 1024 * 1024;
 /// much larger. A future registry version can raise these limits explicitly.
 pub const MAX_EXPORT_POLICY_PROFILES: usize = 4_096;
 pub const MAX_EXPORT_GAPS: usize = 4_096;
-pub const MAX_EXPORT_EVENT_RECORDS: usize = 1_000_000;
+/// Maximum event records in one export. The bound is high enough for the
+/// release-scale fixture lane while keeping validator counters and all
+/// metadata collections explicitly bounded.
+pub const MAX_EXPORT_EVENT_RECORDS: usize = 10_000_000;
 
 const EXPORT_BUFFER_BYTES: usize = 64 * 1024;
 pub const EXPORT_PREVIEW_SCHEMA_VERSION: u32 = 1;
@@ -1065,12 +1068,26 @@ pub(crate) fn hex_digest(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::PathBuf};
+    use std::{
+        fs,
+        io::{self, Write},
+        path::PathBuf,
+    };
+
+    use chrono::{Duration, TimeZone};
+    use uuid::Uuid;
 
     use tempfile::tempdir;
 
     use super::*;
-    use crate::{fixture::ingest_fixture, policy::PolicyProfile};
+    use crate::{
+        fixture::ingest_fixture,
+        model::{
+            EventEnvelope, EventKind, EventPayload, EventSource, Evidence, IngestionOrigin,
+            SourceErrorPayload,
+        },
+        policy::PolicyProfile,
+    };
 
     fn fixture() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/causal-chain.jsonl")
@@ -1133,5 +1150,74 @@ mod tests {
         assert!(matches!(error, GhostraceError::ExportCancelled));
         assert!(!output.exists());
         assert_eq!(fs::read_dir(directory.path()).expect("directory").count(), 0);
+    }
+
+    /// Device-scale acceptance lane for task 0020. The sink deliberately
+    /// discards bytes: the atomic publication and validator paths are covered
+    /// by the small durable fixture tests, while this lane proves that ten
+    /// million valid records can be serialized, counted, digested, and passed
+    /// through the same 64 KiB bounded writer without retaining the result.
+    #[test]
+    #[ignore = "resource-bound device lane; run explicitly on the named device"]
+    fn ten_million_synthetic_fixture_records_stream_through_bounded_buffer() {
+        const RECORDS: u64 = 10_000_000;
+        let origin = IngestionOrigin::fixture_instance("fixture-export-scale").expect("origin");
+        let timestamp = chrono::Utc.timestamp_opt(1_750_000_000, 0).single().expect("timestamp");
+        let payload = EventPayload::SourceError(SourceErrorPayload {
+            source: EventSource::Lifecycle,
+            reason_code: "synthetic".try_into().expect("reason code"),
+            retryable: false,
+        });
+        let mut stored = StoredEvent {
+            ingest_seq: 1,
+            event: EventEnvelope::new(
+                &origin,
+                Uuid::from_u128(1),
+                timestamp,
+                timestamp,
+                EventSource::Lifecycle,
+                EventKind::SourceError,
+                payload,
+                None,
+                "fixture-default-v1",
+                1,
+                Evidence::Direct,
+                None,
+            )
+            .expect("event"),
+        };
+        let mut stats = ExportStats::default();
+        let mut snapshot = SnapshotAccumulator::default();
+        let mut run = ExportRun {
+            output_path: Path::new("/dev/null"),
+            cancellation: None,
+            write_budget: None,
+            cancel_after_events: None,
+            events_written: 0,
+        };
+        let mut writer = io::BufWriter::with_capacity(EXPORT_BUFFER_BYTES, io::sink());
+        for index in 0..RECORDS {
+            let sequence = index + 1;
+            stored.ingest_seq = sequence;
+            stored.event.event_id = Uuid::from_u128(sequence as u128);
+            let observed_at = timestamp + Duration::microseconds(index as i64);
+            stored.event.observed_at = observed_at;
+            stored.event.ingested_at = observed_at;
+            let line = serialize_event_record(&stored).expect("serialize synthetic event");
+            assert!(line.len() <= MAX_EXPORT_RECORD_BYTES);
+            snapshot.observe(&stored, &line).expect("snapshot accounting");
+            run.write_bytes(&mut writer, &line).expect("bounded event write");
+            run.write_bytes(&mut writer, b"\n").expect("bounded newline write");
+            stats.observe(&stored, &line).expect("manifest accounting");
+            run.observe_event_written();
+        }
+        writer.flush().expect("flush bounded sink");
+        let snapshot = snapshot.finish();
+        let manifest = stats.into_manifest(ExportQuery::default().scope()).expect("manifest");
+        assert_eq!(snapshot.event_count, RECORDS);
+        assert_eq!(manifest.coverage.event_count as u64, RECORDS);
+        assert_eq!(manifest.record_counts["event"], RECORDS);
+        assert!(manifest.byte_counts["event"] > RECORDS);
+        assert_eq!(run.events_written, RECORDS);
     }
 }
