@@ -348,8 +348,12 @@ adjustments, sleep-sized gaps, delayed batches, equal timestamps, and missing
 source time are reported as temporal ambiguity in analysis and explanations.
 
 `QueryRequest` binds the policy profile ID/version and its scope digest, optional
-source/kind/time filters, and page size. The page token is an encrypted local
-capability, not a caller-editable offset: it also carries the query digest,
+source/root/kind/time filters, and page size. Root filtering decrypts candidate
+rows from the bounded snapshot because payloads are encrypted at rest; the
+stable cursor still advances over the full ordered stream, so non-matching roots
+cannot cause duplicates or skips. Policy-blocked summaries are never returned as query events;
+they remain visible through coverage statuses. The page token is an encrypted
+local capability, not a caller-editable offset: it also carries the query digest,
 event/storage schema versions, ordering-contract version, issue/expiry time,
 snapshot upper bound, and last ordering key. Forged, expired, cross-profile,
 changed-filter, and schema-changed
@@ -367,8 +371,9 @@ distinguish observed events, no events observed, source disabled, policy denied,
 source gap, retention deletion detected between pages, and unknown history.
 Callers may set `include_coverage=false`, but the response then sets
 `coverage.opted_out=true` rather than silently presenting an incomplete result.
-The query token contract is version `2` because the authenticated snapshot now
-also binds the matching-row count used to detect retention deletion.
+The query token contract is version `3` because the authenticated snapshot now
+binds root-scoped requests and excludes policy-blocked summaries from event
+pages, in addition to the matching-row count used to detect retention deletion.
 
 ## Components
 
