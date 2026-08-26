@@ -303,6 +303,24 @@ tests database bytes, WAL/SHM/temp/backup artifacts, FTS and archive shadow
 structures, then records the post-delete observation without claiming universal
 filesystem erasure.
 
+## Retention deletion and integrity (task 0021)
+
+`retention-delete` is a confirmed logical deletion, not a compaction or key
+destruction command. It binds three values from one dry-run—plan digest,
+candidate-set digest, and ingest snapshot boundary—then acquires an immediate
+SQLite transaction. The transaction re-evaluates and decodes every candidate,
+refuses scope changes, cursor-tail references, and unselected child events, and
+deletes in reverse ingest order so parent foreign keys cannot be left dangling.
+Its receipt reports exact requested/deleted/remaining counts and states that
+compaction and external-copy handling were not performed.
+
+`integrity-check` is a read-only SQLite `integrity_check` plus
+`foreign_key_check`. It returns bounded diagnostics and recovery guidance; a
+failure is a stop-and-preserve signal rather than an automatic repair. The
+focused retention matrix covers successful deletion, stale confirmation,
+unselected-child refusal without partial mutation, and a healthy integrity
+receipt.
+
 ## Time-window queries and stable ordering (task 0018)
 
 `QueryRequest` now covers source, opaque root identity, event kind, and observed

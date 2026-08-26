@@ -19,6 +19,7 @@ pub mod fixture;
 pub mod fsevents;
 pub mod fsevents_collector;
 pub mod fsevents_flags;
+pub mod integrity;
 pub mod journal;
 pub mod key_lifecycle;
 #[cfg(target_os = "macos")]
@@ -113,7 +114,13 @@ pub use fsevents_flags::{
     EVENT_FLAG_ROOT_CHANGED, EVENT_FLAG_UNMOUNT, EVENT_FLAG_USER_DROPPED,
     FSEVENTS_NORMALIZED_SCHEMA_VERSION,
 };
-pub use journal::{AppliedMigration, BackupReceipt, DiagnosticRecord, Journal, StoredEvent};
+pub use integrity::{
+    IntegrityForeignKeyViolation, IntegrityReport, INTEGRITY_REPORT_SCHEMA_VERSION,
+};
+pub use journal::{
+    AppliedMigration, BackupReceipt, DiagnosticRecord, Journal, RetentionDeletionReceipt,
+    StoredEvent,
+};
 pub use key_lifecycle::{
     DestructionConfirmation, DestructionReason, DestructionScope, KeyDestructionReceipt,
     KeyLifecycleError, KeyRing, KeyRotation, RotationCheckpoint, RotationPhase,
@@ -159,7 +166,7 @@ pub use residue::{
 pub use retention::{
     RetentionConfirmation, RetentionGapSummary, RetentionPlan, RetentionPolicy,
     RetentionSelectionReason, DEFAULT_RETENTION_DAYS, LEGACY_KEY_GENERATION,
-    MAX_RETENTION_GAP_SUMMARIES, RETENTION_PLAN_SCHEMA_VERSION,
+    MAX_RETENTION_GAP_SUMMARIES, RETENTION_DELETION_SCHEMA_VERSION, RETENTION_PLAN_SCHEMA_VERSION,
 };
 pub use volume::{
     MountState, VolumeIdentity, VolumeIdentityError, VolumeObservation, VolumeTransition,

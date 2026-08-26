@@ -231,6 +231,21 @@ the underlying storage device. The UI/CLI must use the same mode labels and show
 unsupported-media limits instead of displaying a generic "secure delete"
 success.
 
+### Transactional deletion and integrity recovery
+
+`retention-delete` accepts only a matching plan digest, candidate-set digest, and
+snapshot boundary. It takes an immediate SQLite transaction, re-evaluates the
+candidate identities, refuses scope changes, durable cursor tails, and
+unselected child references, then deletes rows in reverse ingest order. A
+failure before commit leaves the journal unchanged. The receipt explicitly says
+that compaction was not performed and external copies were untouched.
+
+`integrity-check` runs SQLite integrity and foreign-key checks without repair.
+When it fails, ingestion must stop, the original database and sidecars must be
+preserved, and recovery must happen on a private verified copy with before and
+after receipts. A successful check is not proof of deletion or external-copy
+erasure.
+
 ## Privacy verification
 
 Privacy changes require tests that:

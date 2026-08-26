@@ -24,6 +24,8 @@ use crate::{
 
 /// Retention policy and plan wire-contract version.
 pub const RETENTION_PLAN_SCHEMA_VERSION: u32 = 1;
+/// Version of the logical retention-deletion receipt contract.
+pub const RETENTION_DELETION_SCHEMA_VERSION: u32 = 1;
 /// The documented default is a 90-day window anchored at the caller's
 /// supplied `as_of` timestamp. The anchor is explicit so tests and receipts
 /// remain deterministic.
@@ -275,6 +277,15 @@ struct CandidateIdentity {
     source: EventSource,
     payload_bytes: u64,
     key_generation: u32,
+}
+
+/// One event selected by a validated retention plan. The payload is never
+/// retained in this helper; deletion only needs its durable identity and
+/// ingest order for foreign-key-safe removal.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct RetentionCandidate {
+    pub(crate) event_id: Uuid,
+    pub(crate) ingest_seq: u64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -587,4 +598,54 @@ pub(crate) fn plan_from_connection(
     };
     plan.plan_digest = plan.digest()?;
     Ok(plan)
+}
+
+/// Re-evaluate the candidate set for a previously validated plan inside a
+/// write transaction. This keeps the deletion path bound to the same policy,
+/// snapshot boundary, and candidate digest used by the dry-run receipt.
+pub(crate) fn candidate_events_from_plan(
+    connection: &rusqlite::Connection,
+    provider: &dyn KeyProvider,
+    plan: &RetentionPlan,
+) -> Result<Vec<RetentionCandidate>, GhostraceError> {
+    let stats = ScopeStats {
+        scoped_event_count: plan.scoped_event_count,
+        scoped_bytes: plan.scoped_bytes,
+        eligible_event_count: plan.eligible_event_count,
+        eligible_bytes: plan.eligible_bytes,
+        scoped_gap_count: plan.scoped_gap_count,
+    };
+    let mut candidates = Vec::new();
+    let mut candidate_hasher = Sha256::new();
+    let mut eligible_index = 0_u64;
+    let mut remaining_eligible_bytes = stats.eligible_bytes;
+    for_each_retention_row(connection, provider, plan.snapshot_boundary, |stored, metadata| {
+        let event = &stored.event;
+        if !plan.policy.matches_scope(event) {
+            return Ok(());
+        }
+        let selection =
+            selection_for(&plan.policy, event, &stats, eligible_index, remaining_eligible_bytes);
+        if selection.eligible {
+            eligible_index = eligible_index.saturating_add(1);
+            remaining_eligible_bytes =
+                remaining_eligible_bytes.saturating_sub(metadata.payload_bytes);
+        }
+        if !selection.selected {
+            return Ok(());
+        }
+        update_candidate_digest(&mut candidate_hasher, event, metadata)?;
+        candidates
+            .push(RetentionCandidate { event_id: event.event_id, ingest_seq: metadata.ingest_seq });
+        Ok(())
+    })?;
+    let digest = candidate_set_digest(candidate_hasher)?;
+    if digest != plan.candidate_set_digest
+        || u64::try_from(candidates.len()).map_err(|_| {
+            GhostraceError::RetentionPolicyInvalid("candidate count is too large".to_owned())
+        })? != plan.affected_event_count
+    {
+        return Err(GhostraceError::RetentionConfirmationMismatch);
+    }
+    Ok(candidates)
 }

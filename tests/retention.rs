@@ -33,7 +33,25 @@ fn timestamp(seconds: i64) -> chrono::DateTime<Utc> {
     Utc.timestamp_opt(seconds, 0).single().expect("timestamp")
 }
 
+#[test]
+fn default_retention_window_is_explicitly_ninety_days() {
+    let as_of = timestamp(1_767_225_608);
+    let policy = RetentionPolicy::default_at(as_of);
+    assert_eq!(policy.before, Some(as_of - chrono::Duration::days(90)));
+    assert!(policy.preserve_gaps);
+}
+
 fn lifecycle_event(id: u128, seconds: i64, policy: &PolicyProfile) -> EventEnvelope {
+    lifecycle_event_with_cursor(id, seconds, policy, "cursor-retention", None)
+}
+
+fn lifecycle_event_with_cursor(
+    id: u128,
+    seconds: i64,
+    policy: &PolicyProfile,
+    cursor: &str,
+    parent_event_id: Option<Uuid>,
+) -> EventEnvelope {
     let origin = IngestionOrigin::fixture_instance("fixture-retention").expect("origin");
     EventEnvelope::new(
         &origin,
@@ -46,11 +64,11 @@ fn lifecycle_event(id: u128, seconds: i64, policy: &PolicyProfile) -> EventEnvel
             collector: EventSource::Lifecycle,
             instance_label: "retention-test".try_into().expect("label"),
         }),
-        Some("cursor-retention".try_into().expect("cursor")),
+        Some(cursor.try_into().expect("cursor")),
         policy.id.clone(),
         policy.version,
         Evidence::Direct,
-        None,
+        parent_event_id,
     )
     .expect("event")
 }
@@ -151,4 +169,72 @@ fn invalid_policy_cannot_plan_all_rows_implicitly_or_mix_root_sources() {
     invalid.source = Some(EventSource::Browser);
     invalid.root_id = Some(RootId::try_from("workspace-demo").expect("root"));
     assert!(journal.retention_plan(&invalid).is_err());
+}
+
+#[test]
+fn deletion_requires_the_exact_confirmation_and_removes_only_selected_rows() {
+    let journal = Journal::in_memory(DeterministicKeyProvider::from_seed("retention-delete"))
+        .expect("journal");
+    let policy = PolicyProfile::fixture_default();
+    let origin = IngestionOrigin::fixture_instance("fixture-retention").expect("origin");
+    for (index, seconds) in [(1_u128, 100_i64), (2, 200), (3, 300)] {
+        journal
+            .ingest(
+                &origin,
+                &lifecycle_event_with_cursor(
+                    index,
+                    seconds,
+                    &policy,
+                    &format!("seq-0-{index}"),
+                    None,
+                ),
+                &policy,
+            )
+            .expect("event");
+    }
+    let plan = journal.retention_plan(&RetentionPolicy::before(timestamp(250))).expect("plan");
+    assert_eq!(plan.affected_event_count, 2);
+    let receipt = journal.delete_retention(&plan, &plan.confirm()).expect("delete");
+    assert_eq!(receipt.requested_event_count, 2);
+    assert_eq!(receipt.deleted_event_count, 2);
+    assert_eq!(receipt.remaining_event_count, 1);
+    assert!(!receipt.compaction_performed);
+    assert!(receipt.external_copies_untouched);
+    receipt.validate().expect("valid deletion receipt");
+    assert_eq!(journal.events().expect("events").len(), 1);
+    assert!(journal.integrity_check().expect("integrity").integrity_ok);
+
+    let stale = journal.delete_retention(&plan, &plan.confirm());
+    assert!(matches!(stale, Err(ghostrace::GhostraceError::RetentionConfirmationMismatch)));
+}
+
+#[test]
+fn deletion_refuses_an_unselected_child_without_partial_mutation() {
+    let journal = Journal::in_memory(DeterministicKeyProvider::from_seed("retention-parent"))
+        .expect("journal");
+    let policy = PolicyProfile::fixture_default();
+    let origin = IngestionOrigin::fixture_instance("fixture-retention").expect("origin");
+    let parent = lifecycle_event_with_cursor(11, 100, &policy, "seq-0-1", None);
+    journal.ingest(&origin, &parent, &policy).expect("parent");
+    let child = lifecycle_event_with_cursor(12, 300, &policy, "seq-0-2", Some(parent.event_id));
+    journal.ingest(&origin, &child, &policy).expect("child");
+    let plan = journal.retention_plan(&RetentionPolicy::before(timestamp(250))).expect("plan");
+    assert_eq!(plan.affected_event_count, 1);
+    let error = journal.delete_retention(&plan, &plan.confirm()).expect_err("child refusal");
+    assert!(matches!(error, ghostrace::GhostraceError::RetentionDeletionRefused(_)));
+    assert_eq!(journal.events().expect("events").len(), 2);
+}
+
+#[test]
+fn integrity_report_is_bounded_and_supplies_recovery_guidance() {
+    let (_directory, journal, _policy) = journal("retention-integrity");
+    let report = journal.integrity_check().expect("integrity report");
+    assert!(report.integrity_ok);
+    assert_eq!(report.schema_version, 1);
+    assert_eq!(report.user_version, 4);
+    assert_eq!(report.migration_count, 5);
+    assert_eq!(report.integrity_messages, vec!["ok"]);
+    assert!(report.foreign_key_violations.is_empty());
+    assert_eq!(report.recovery_guidance.len(), 4);
+    report.validate().expect("valid report");
 }

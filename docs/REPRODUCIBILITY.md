@@ -148,6 +148,11 @@ removed on exit. The durable journal path is created below a mode-0700 temporary
 directory; the CLI refuses broader parent directories rather than weakening the
 path boundary.
 
+The same lane confirms an empty transactional retention deletion with all three
+plan values, compares two integrity-check receipts byte-for-byte, and requires
+the bounded recovery guidance to remain present. The deletion receipt is
+logical-only: compaction and external-copy handling are asserted false/untouched.
+
 The export step is complete only after `validate_export` confirms the manifest
 before consuming body records; a green build alone is not sufficient evidence of
 schema or digest integrity.

@@ -1,6 +1,7 @@
 //! SQLite journal and migration runner.
 
 use std::{
+    cmp::Reverse,
     collections::HashSet,
     fmt::Write as _,
     path::{Path, PathBuf},
@@ -9,8 +10,10 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use rusqlite::{params, types::Type, Connection, OptionalExtension, Transaction};
-use serde::Serialize;
+use rusqlite::{
+    params, types::Type, Connection, OptionalExtension, Transaction, TransactionBehavior,
+};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -21,6 +24,7 @@ use crate::{
     cursor::{CursorIdentity, CursorKind, CursorState, CursorStatus, CursorToken, ReplayBoundary},
     error::GhostraceError,
     fault::{FaultPlan, FaultPoint},
+    integrity::IntegrityReport,
     model::{
         CollectorInstanceId, EventEnvelope, EventKind, EventPayload, EventSource, Evidence,
         IngestionOrigin, OriginBinding, PolicyProfileId, ProvenanceVersion, SourceCursor,
@@ -34,7 +38,11 @@ use crate::{
         QueryTokenPayload, MAX_COVERAGE_MARKERS,
     },
     residue::ResidueReport,
-    retention::{plan_from_connection, RetentionPlan, RetentionPolicy, RetentionStorageMetadata},
+    retention::{
+        candidate_events_from_plan, plan_from_connection, RetentionCandidate,
+        RetentionConfirmation, RetentionPlan, RetentionPolicy, RetentionStorageMetadata,
+        RETENTION_DELETION_SCHEMA_VERSION,
+    },
     storage,
     wal::{CheckpointMode, WalCheckpointReport, WalPolicy},
 };
@@ -123,6 +131,37 @@ pub struct BackupReceipt {
     pub wal_bytes: u64,
     pub frames_in_wal: u64,
     pub frames_checkpointed: u64,
+}
+
+/// Receipt for one scoped, transactional logical-deletion operation. It does
+/// not claim compaction, key destruction, or removal of external copies.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetentionDeletionReceipt {
+    pub schema_version: u32,
+    pub plan_digest: crate::model::SnapshotDigest,
+    pub candidate_set_digest: crate::model::SnapshotDigest,
+    pub snapshot_boundary: u64,
+    pub requested_event_count: u64,
+    pub deleted_event_count: u64,
+    pub remaining_event_count: u64,
+    pub compaction_performed: bool,
+    pub external_copies_untouched: bool,
+}
+
+impl RetentionDeletionReceipt {
+    pub fn validate(&self) -> Result<(), GhostraceError> {
+        if self.schema_version != RETENTION_DELETION_SCHEMA_VERSION
+            || self.deleted_event_count > self.requested_event_count
+            || self.compaction_performed
+            || !self.external_copies_untouched
+        {
+            return Err(GhostraceError::RetentionDeletionRefused(
+                "retention deletion receipt violates its logical-only contract".to_owned(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone)]
@@ -439,6 +478,107 @@ impl Journal {
         self.with_read_snapshot(|connection| {
             plan_from_connection(connection, self.key_provider.as_ref(), policy)
         })
+    }
+
+    /// Delete exactly the rows selected by a previously confirmed plan. The
+    /// plan is re-evaluated inside an immediate transaction and every selected
+    /// identity is checked before the first row is removed. A scope change,
+    /// child reference, cursor reference, or digest mismatch aborts the whole
+    /// transaction without partial deletion.
+    pub fn delete_retention(
+        &self,
+        plan: &RetentionPlan,
+        confirmation: &RetentionConfirmation,
+    ) -> Result<RetentionDeletionReceipt, GhostraceError> {
+        plan.validate()?;
+        if !plan.matches_confirmation(confirmation) {
+            return Err(GhostraceError::RetentionConfirmationMismatch);
+        }
+
+        let mut connection = self.lock_connection()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let live_boundary = transaction
+            .query_row("SELECT COALESCE(MAX(ingest_seq), 0) FROM events", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .and_then(|value| {
+                u64::try_from(value).map_err(|_| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        0,
+                        Type::Integer,
+                        Box::new(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "ingest boundary is out of range",
+                        )),
+                    )
+                })
+            })?;
+        if live_boundary != plan.snapshot_boundary {
+            return Err(GhostraceError::RetentionConfirmationMismatch);
+        }
+
+        let current_plan =
+            plan_from_connection(&transaction, self.key_provider.as_ref(), &plan.policy)?;
+        if current_plan.plan_digest != plan.plan_digest
+            || current_plan.candidate_set_digest != plan.candidate_set_digest
+            || current_plan.snapshot_boundary != plan.snapshot_boundary
+        {
+            return Err(GhostraceError::RetentionConfirmationMismatch);
+        }
+
+        let mut candidates =
+            candidate_events_from_plan(&transaction, self.key_provider.as_ref(), plan)?;
+        ensure_retention_references(&transaction, &candidates)?;
+        candidates.sort_by_key(|candidate| Reverse(candidate.ingest_seq));
+        for candidate in &candidates {
+            let changed = transaction.execute(
+                "DELETE FROM events WHERE event_id = ?1",
+                params![candidate.event_id.to_string()],
+            )?;
+            if changed != 1 {
+                return Err(GhostraceError::RetentionConfirmationMismatch);
+            }
+        }
+        let deleted_event_count = u64::try_from(candidates.len()).map_err(|_| {
+            GhostraceError::RetentionPolicyInvalid("deleted event count is too large".to_owned())
+        })?;
+        transaction.commit()?;
+
+        if let Some(path) = self.path.as_deref() {
+            storage::verify_database_artifacts(path)?;
+        }
+        let remaining_event_count = connection
+            .query_row("SELECT COUNT(*) FROM events", [], |row| row.get::<_, i64>(0))
+            .and_then(|value| {
+                u64::try_from(value).map_err(|_| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        0,
+                        Type::Integer,
+                        Box::new(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "remaining event count is out of range",
+                        )),
+                    )
+                })
+            })?;
+        let receipt = RetentionDeletionReceipt {
+            schema_version: RETENTION_DELETION_SCHEMA_VERSION,
+            plan_digest: plan.plan_digest.clone(),
+            candidate_set_digest: plan.candidate_set_digest.clone(),
+            snapshot_boundary: plan.snapshot_boundary,
+            requested_event_count: plan.affected_event_count,
+            deleted_event_count,
+            remaining_event_count,
+            compaction_performed: false,
+            external_copies_untouched: true,
+        };
+        receipt.validate()?;
+        Ok(receipt)
+    }
+
+    /// Run SQLite integrity and foreign-key checks without attempting repair.
+    pub fn integrity_check(&self) -> Result<IntegrityReport, GhostraceError> {
+        self.with_read_snapshot(IntegrityReport::from_connection)
     }
 
     /// Build a path-free, read-only inventory of known SQLite residue classes
@@ -869,6 +1009,41 @@ impl Journal {
     fn lock_connection(&self) -> Result<std::sync::MutexGuard<'_, Connection>, GhostraceError> {
         self.conn.lock().map_err(|_| GhostraceError::Migration("journal mutex poisoned".to_owned()))
     }
+}
+
+fn ensure_retention_references(
+    transaction: &Transaction<'_>,
+    candidates: &[RetentionCandidate],
+) -> Result<(), GhostraceError> {
+    let selected =
+        candidates.iter().map(|candidate| candidate.event_id.to_string()).collect::<HashSet<_>>();
+    for candidate in candidates {
+        let mut children = transaction.prepare(
+            "SELECT event_id FROM events WHERE parent_event_id = ?1 ORDER BY ingest_seq",
+        )?;
+        let mut rows = children.query(params![candidate.event_id.to_string()])?;
+        while let Some(row) = rows.next()? {
+            let child: String = row.get(0)?;
+            if !selected.contains(&child) {
+                return Err(GhostraceError::RetentionDeletionRefused(
+                    "a selected event has an unselected child event".to_owned(),
+                ));
+            }
+        }
+        let cursor_reference: Option<String> = transaction
+            .query_row(
+                "SELECT source FROM cursors WHERE last_event_id = ?1 LIMIT 1",
+                params![candidate.event_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if cursor_reference.is_some() {
+            return Err(GhostraceError::RetentionDeletionRefused(
+                "a selected event is the durable cursor tail".to_owned(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Visit raw journal rows in the same stable order used by query and export.
