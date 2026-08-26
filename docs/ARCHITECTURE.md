@@ -114,6 +114,31 @@ validated result. Unknown fields, mixed versions, undeclared record types,
 duplicate/order regressions, or any accounting drift are bounded errors; no
 caller can treat a partially validated body as a complete export.
 
+### Derived Parquet archive profile
+
+[`schemas/parquet-archive-profile-v1.json`](../schemas/parquet-archive-profile-v1.json)
+and its [golden profile](../fixtures/parquet-archive-profile-v1.golden.json) define
+the contract for a future optional Parquet cold archive. The profile is not a writer
+and does not replace the encrypted journal or JSONL export: it describes a derived,
+explicit plaintext boundary that must be validated before publication. Version `1`
+has exactly 23 columns. Event identity, both timestamps, source/kind, provenance,
+policy identity, evidence, causal parent, and canonical payload JSON are retained
+without lossy coercion. Gap payload facts have dedicated nullable columns; the
+essential gap source, reason, and dropped count are required on a gap row and every
+gap column is null on other event kinds.
+
+Rows sort by `(observed_at, ingest_seq, event_id)`, matching the query and JSONL
+contracts. Provenance and policy mappings are exact and unknown values reject.
+Evolution is additive-nullable only: additions, removals, and type changes require a
+new profile version, while undeclared columns are rejected. Streaming validation is
+bounded to 23 columns, 1 MiB per row, 10 million rows, and 64 KiB of profile metadata.
+The profile requires Zstandard compression, disables dictionary encoding, column
+statistics, and page indexes to reduce metadata leakage, and records that Parquet
+encryption is not assumed. A future writer must use mode `0600` temporary files,
+atomic publication, cleanup on failure, and leave the source journal untouched.
+Automatic archive creation is forbidden, and deletion semantics explicitly stop at
+the external-copy boundary.
+
 ## FSEvents lifecycle boundary
 
 The `fsevents` module is a deliberately small native boundary beneath the selected-root

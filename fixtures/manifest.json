@@ -88,6 +88,14 @@
       "bytes": 1197
     },
     {
+      "path": "fixtures/parquet-archive-profile-v1.golden.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "708458968f536ea483c19df2c67324d0bd1050e69da886aefe3a8ae44d7915dd",
+      "bytes": 5182
+    },
+    {
       "path": "fixtures/event-envelope-v1.golden.json",
       "format": "json",
       "generator_version": "ghostrace-fixture-manifest-v1",
