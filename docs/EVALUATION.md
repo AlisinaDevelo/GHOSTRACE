@@ -125,7 +125,7 @@ causes a fail-closed `ExportCancelled` result and leaves an existing destination
 unchanged.
 
 Per-record JSON is bounded to 1 MiB; event records, policy-profile metadata, and
-gap metadata are bounded to 1,000,000, 4,096, and 4,096 entries respectively.
+gap metadata are bounded to 10,000,000, 4,096, and 4,096 entries respectively.
 These explicit limits keep the writer and validator memory bounded while leaving
 large event bodies on disk rather than retaining the full plaintext export in
 memory. `tests/export_streaming.rs` and the export unit matrix cover successful

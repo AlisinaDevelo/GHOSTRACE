@@ -15,11 +15,13 @@ holds a read snapshot and visits one decrypted event at a time; a private body
 spool records one bounded JSON line per visit and updates counts and SHA-256
 state incrementally. A second private temporary writes the manifest and copies
 the body in 64 KiB chunks. The complete temporary is validated before it can be
-renamed into place.
+renamed into place. The event-record bound is now 10,000,000 so the parent M3
+scale gate can exercise a ten-million-record stream without changing the v1
+manifest contract.
 
 | Acceptance criterion | Implementation and retained proof | Result |
 | --- | --- | --- |
-| Records stream in stable order with bounded buffers and incremental manifest digests. | `Journal::for_each_ordered_event` uses the shared `(observed_at, ingest_seq, event_id)` SQL order without collecting a `Vec<StoredEvent>`. `ExportStats` retains only one encoded record plus bounded policy/gap metadata, and updates body bytes and SHA-256 per record. `MAX_EXPORT_RECORD_BYTES=1 MiB`, `MAX_EXPORT_EVENT_RECORDS=1,000,000`, `MAX_EXPORT_POLICY_PROFILES=4,096`, and `MAX_EXPORT_GAPS=4,096` are enforced by both writer and validator. `tests/export_streaming.rs::successful_streaming_export_remains_fully_validated` and the merged reproducibility lane pass. | PASS |
+| Records stream in stable order with bounded buffers and incremental manifest digests. | `Journal::for_each_ordered_event` uses the shared `(observed_at, ingest_seq, event_id)` SQL order without collecting a `Vec<StoredEvent>`. `ExportStats` retains only one encoded record plus bounded policy/gap metadata, and updates body bytes and SHA-256 per record. `MAX_EXPORT_RECORD_BYTES=1 MiB`, `MAX_EXPORT_EVENT_RECORDS=10,000,000`, `MAX_EXPORT_POLICY_PROFILES=4,096`, and `MAX_EXPORT_GAPS=4,096` are enforced by both writer and validator. `tests/export_streaming.rs::successful_streaming_export_remains_fully_validated` and the merged reproducibility lane pass. | PASS |
 | Temporary creation, permissions, fsync, rename, cancellation, disk-full, and existing-destination behavior are fault-tested. | Body and final files use explicit `.ghostrace-export-incomplete-*` prefixes, mode `0600`, `sync_all`, pre-rename validation, same-directory `persist`/`persist_noclobber`, and directory fsync. `tests/export_streaming.rs` covers successful publication, pre-cancelled export, forced-export destination preservation, and bounded-line rejection. Export unit tests cover cancellation after one streamed record and simulated disk-full during final copy while preserving the old destination and removing both temporaries. Existing overwrite and private-mode coverage also remains in `tests/vertical_slice.rs`. | PASS |
 | Partial output is removed or unmistakably marked incomplete and never carries a valid final manifest. | Every error path drops both `NamedTempFile`s before publication; cancellation is checked before each event, body copy chunk, and rename. Temporary names are explicitly marked incomplete, and the final temporary must pass `validate_export` before rename. Mid-stream cancellation leaves no destination or temporary; disk-full leaves the prior destination byte-identical. | PASS |
 
