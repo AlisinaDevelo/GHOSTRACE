@@ -246,6 +246,24 @@ preserved, and recovery must happen on a private verified copy with before and
 after receipts. A successful check is not proof of deletion or external-copy
 erasure.
 
+### Authenticated state and deletion boundaries
+
+The authenticated-state anchor stores only keyed digests, counts, schema/key
+generations, chain boundaries, and a deletion digest. Canonical inputs include
+event metadata and ciphertext bytes, cursor fields, policy-history JSON, and
+bounded diagnostic fields; they never include key bytes, plaintext payloads,
+filesystem paths, or retained event identifiers. The local key is used only to
+authenticate the anchor and is never serialized.
+
+The verifier reports edits, insertion/deletion, reorder or truncation, cursor
+rollback, policy substitution, diagnostic tampering, and missing/invalid
+anchors. Retention deletion advances a chain epoch and records only the
+confirmed plan/candidate digests, snapshot boundary, and counts. A valid result
+means possession of the configured local key authenticated the local state; it
+does not prove collection origin, completeness, remote identity, or legal
+chain of custody. A missing anchor after bootstrap is a stop signal and cannot
+be reseeded automatically.
+
 ## Privacy verification
 
 Privacy changes require tests that:

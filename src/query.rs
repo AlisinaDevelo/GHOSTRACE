@@ -425,7 +425,7 @@ mod tests {
             contract_version: QUERY_CONTRACT_VERSION,
             ordering_contract_version: ORDERING_CONTRACT_VERSION,
             event_schema_version: EVENT_SCHEMA_VERSION,
-            storage_schema_version: 4,
+            storage_schema_version: crate::JOURNAL_SCHEMA_VERSION,
             policy_profile_id: request.policy_profile_id.clone(),
             policy_profile_version: request.policy_profile_version,
             scope_digest: request.scope_digest.clone(),

@@ -231,8 +231,8 @@ fn integrity_report_is_bounded_and_supplies_recovery_guidance() {
     let report = journal.integrity_check().expect("integrity report");
     assert!(report.integrity_ok);
     assert_eq!(report.schema_version, 1);
-    assert_eq!(report.user_version, 4);
-    assert_eq!(report.migration_count, 5);
+    assert_eq!(report.user_version, 5);
+    assert_eq!(report.migration_count, 6);
     assert_eq!(report.integrity_messages, vec!["ok"]);
     assert!(report.foreign_key_violations.is_empty());
     assert_eq!(report.recovery_guidance.len(), 4);

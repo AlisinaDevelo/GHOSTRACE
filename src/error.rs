@@ -78,6 +78,9 @@ pub enum GhostraceError {
     #[error("integrity report is invalid: {0}")]
     IntegrityReportInvalid(String),
 
+    #[error("authenticated journal state is invalid: {0}")]
+    AuthenticatedStateInvalid(String),
+
     #[error("journal directory permissions are not private (expected no group/world access)")]
     InsecurePermissions(PathBuf),
 

@@ -201,6 +201,26 @@ if len(report["recovery_guidance"]) != 4:
     raise SystemExit("integrity recovery guidance drifted")
 PY
 
+echo "reproducibility: authenticated journal state"
+cargo +1.88.0 run --quiet -- authenticated-check --journal "$journal" \
+  > "$WORK_DIR/authenticated-a.json"
+cargo +1.88.0 run --quiet -- authenticated-check --journal "$journal" \
+  > "$WORK_DIR/authenticated-b.json"
+cmp -s "$WORK_DIR/authenticated-a.json" "$WORK_DIR/authenticated-b.json"
+python3 - "$WORK_DIR/authenticated-a.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    report = json.load(handle)
+if not report["valid"] or not report["local_key_only"]:
+    raise SystemExit("authenticated journal state did not verify")
+if report["event_count"] != 8 or report["stored_event_count"] != 8:
+    raise SystemExit("authenticated event count drifted")
+if report["anomalies"]:
+    raise SystemExit("authenticated report unexpectedly contains anomalies")
+PY
+
 echo "reproducibility: capture refusal"
 if cargo +1.88.0 run --quiet -- capture > "$WORK_DIR/capture.stdout" 2> "$WORK_DIR/capture.stderr"; then
   echo "capture unexpectedly succeeded" >&2

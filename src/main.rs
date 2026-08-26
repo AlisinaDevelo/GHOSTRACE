@@ -133,6 +133,11 @@ enum Command {
         #[arg(long)]
         journal: PathBuf,
     },
+    /// Verify keyed event, cursor, policy, diagnostic, and deletion state.
+    AuthenticatedCheck {
+        #[arg(long)]
+        journal: PathBuf,
+    },
     /// Validate a JSONL export before consuming its records.
     Validate {
         #[arg(long)]
@@ -148,6 +153,7 @@ fn run(cli: Cli) -> Result<(), GhostraceError> {
     match cli.command {
         Command::Init { journal } => {
             let journal = open_fixture_journal(journal)?;
+            journal.initialize_authenticated_state()?;
             journal.shutdown()?;
             println!("initialized fixture journal");
             Ok(())
@@ -299,6 +305,17 @@ fn run(cli: Cli) -> Result<(), GhostraceError> {
                 Err(GhostraceError::IntegrityReportInvalid(
                     "integrity check failed; follow the recovery guidance".to_owned(),
                 ))
+            }
+        }
+        Command::AuthenticatedCheck { journal } => {
+            let journal = open_fixture_journal(journal)?;
+            let report = journal.authenticated_state_report()?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            journal.shutdown()?;
+            if report.valid {
+                Ok(())
+            } else {
+                Err(GhostraceError::AuthenticatedStateInvalid(report.message))
             }
         }
         Command::Validate { export } => {

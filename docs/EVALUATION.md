@@ -321,6 +321,17 @@ focused retention matrix covers successful deletion, stale confirmation,
 unselected-child refusal without partial mutation, and a healthy integrity
 receipt.
 
+## Authenticated state (task 0088)
+
+The authenticated-state contract uses canonical, length-delimited bytes and a
+versioned domain separator. Its keyed anchor covers event order/set/content,
+cursor state, policy history, diagnostics, key generation, chain epoch, and
+explicit retention deletion boundaries. The negative matrix mutates each class
+to prove detection of edits, insertion, deletion, reorder, truncation, cursor
+rollback, policy substitution, and diagnostic changes. Deleting the anchor is
+reported and cannot be silently reseeded after bootstrap. Verification states
+the local-key-only limit and makes no origin-authenticity claim.
+
 ## Time-window queries and stable ordering (task 0018)
 
 `QueryRequest` now covers source, opaque root identity, event kind, and observed
