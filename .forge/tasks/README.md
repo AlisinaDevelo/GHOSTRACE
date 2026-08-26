@@ -26,7 +26,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0020 | Define and ship JSONL export v1 with manifest | M3 | done | explain-export | maintainer | — | 0018, 0019, 0083, 0084, 0085 |
 | 0021 | Add retention, deletion, and integrity-check commands | M3 | done | explain-export | maintainer | — | 0009, 0018, 0020, 0086, 0087 |
 | 0022 | Add optional Parquet cold-archive export | M3 | backlog | explain-export | maintainer | — | 0020, 0021, 0090 |
-| 0023 | Add tamper-evident event chain and verifier | M3 | backlog | explain-export | maintainer | — | 0008, 0009, 0020, 0088, 0089 |
+| 0023 | Add tamper-evident event chain and verifier | M3 | done | explain-export | maintainer | — | 0008, 0009, 0020, 0088, 0089 |
 | 0024 | Add explicit shell-wrapper metadata capture | M4 | backlog | shell-git | maintainer | — | 0007, 0018, 0091, 0092, 0093 |
 | 0025 | Add explicit Git snapshot integration | M4 | backlog | shell-git | maintainer | — | 0007, 0018, 0094, 0095, 0096 |
 | 0026 | Add opt-in Git hook install and uninstall | M4 | backlog | shell-git | maintainer | — | 0025, 0097 |
