@@ -92,4 +92,13 @@ jobs:
         with:
           toolchain: ${{ matrix.toolchain }}
       - name: Run tests
-        run: cargo test --locked --all-targets --all-features
+        run: |
+          if [ "${{ matrix.name }}" = "macOS stable" ]; then
+            # The native FSEvents benchmark is a separately authorized,
+            # resource-bound device lane; keep the general CI contract
+            # deterministic and run its explicit command on the named device.
+            cargo test --locked --all-targets --all-features -- \
+              --skip native_benchmark_runs_all_synthetic_workloads_and_emits_receipt
+          else
+            cargo test --locked --all-targets --all-features
+          fi

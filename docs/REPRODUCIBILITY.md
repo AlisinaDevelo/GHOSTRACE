@@ -51,8 +51,21 @@ root-filter cases add matching and non-matching opaque roots, exercise page-toke
 continuation across filtered rows, and confirm policy-blocked summaries are
 reported through coverage rather than returned as query events. The ordering and
 clock matrix uses the same stable key as export.
+
 forgery, cross-profile reuse, changed filters/page size, and expiry are negative
 cases; no hosted runner is needed to substitute for this local contract.
+
+The hosted macOS CI job intentionally excludes only the resource-bound native
+FSEvents benchmark from its deterministic suite. Run that lane explicitly on
+the authorized device when its hardware and filesystem budget are available:
+
+```sh
+cargo +1.88.0 test --locked --test filesystem_benchmark \
+  macos::native_benchmark_runs_all_synthetic_workloads_and_emits_receipt -- --nocapture
+```
+
+If a scenario exceeds its 30-second budget, retain the failure as a no-go
+receipt; do not substitute a fixture-only result for the native run.
 
 ## Install the pinned inputs
 
