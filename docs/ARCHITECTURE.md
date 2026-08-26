@@ -55,14 +55,20 @@ ingest --journal <path> --fixture <JSONL>
         |
         +--> explain --journal <path> --event <UUID>
         |
-        +--> export --journal <path> --output <JSONL>
+        +--> preview --journal <path> --output <JSONL>
+                    |
+                    +--> export --journal <path> --output <JSONL> \
+                         --confirm-plan <digest> --confirm-snapshot <digest>
 ```
 
 `init` is idempotent and runs the same hardened SQLite path checks as the library.
 `ingest` reopens the durable journal in a separate process, validates the fixture
 origin and deny-by-default policy, and commits the batch before reporting success.
-`explain` and `export` reopen that journal with the same synthetic fixture key and
+`explain` and `preview` reopen that journal with the same synthetic fixture key and
 therefore exercise the persistence boundary rather than an in-memory shortcut.
+`export` recomputes the plan and journal snapshot and refuses to write unless both
+digests match the explicit confirmation from the preview. The receipt records only
+the destination class and artifact digests, never the destination path.
 The key is intentionally deterministic only for the synthetic headstart; it is not
 the production Keychain design. `capture` remains an explicit refusal, and no CLI
 command enables a live collector or network path.

@@ -133,6 +133,27 @@ validation, pre- and mid-stream cancellation, destination preservation, bounded
 line rejection, simulated disk-full during final copy, temporary cleanup, and
 stable byte/digest accounting.
 
+## Export declassification preview and receipt (task 0085)
+
+Plaintext export is now a two-step operation. `preview_export` scans one read
+snapshot and renders the query's source/time range, the complete v1 authorized
+field inventory, policy identity/version and scope digest, matched profiles,
+record count, observed range, gaps, and destination class. It also renders an
+explicit warning that authorized plaintext metadata will leave encrypted
+storage. The preview contains only bounded labels, counts, and digests; it
+never retains a destination path or event payload.
+
+`ExportPreview::confirm` produces the only execution capability. Execution
+recomputes the plan digest (query, redaction inventory, policy scope, force
+choice, and destination class) and the journal snapshot digest before any
+publication. A policy or destination change returns
+`ExportConfirmationMismatch`; any journal addition, deletion, or mutation
+returns `ExportSnapshotChanged`. The resulting `ExportReceipt` records plan,
+snapshot, and manifest digests, destination class, policy identity/version,
+and event count without a path. The v1 field inventory is intentionally the
+complete authorized envelope; a future schema version must add a real
+field-level projection before a narrower inventory can execute.
+
 ## Future live-source gates
 
 The selected-root FSEvents API is a bounded first slice, not a release-ready ambient

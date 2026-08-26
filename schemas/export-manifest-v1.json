@@ -26,7 +26,7 @@
       "additionalProperties": false,
       "required": ["kind", "source", "observed_from", "observed_until", "include_coverage"],
       "properties": {
-        "kind": { "const": "all_committed" },
+        "kind": { "enum": ["all_committed", "filtered"] },
         "source": { "oneOf": [{ "enum": ["filesystem", "frontmost_app", "shell", "git", "browser", "lifecycle", "fixture"] }, { "type": "null" }] },
         "observed_from": { "oneOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }] },
         "observed_until": { "oneOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }] },

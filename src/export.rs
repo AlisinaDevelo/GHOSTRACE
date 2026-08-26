@@ -3,7 +3,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::File,
-    io::{BufReader, BufWriter, ErrorKind, Read, Write},
+    io::{BufRead, BufReader, BufWriter, ErrorKind, Read, Write},
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -11,6 +11,7 @@ use std::{
     },
 };
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tempfile::Builder as TempFileBuilder;
@@ -26,7 +27,10 @@ use crate::{
     },
     fixture::ingest_fixture,
     journal::{Journal, StoredEvent},
-    model::{EventKind, EventPayload, EventSource, GapPayload, EVENT_SCHEMA_VERSION},
+    model::{
+        EventKind, EventPayload, EventSource, GapPayload, PolicyProfileId, SnapshotDigest,
+        EVENT_SCHEMA_VERSION,
+    },
     ordering::ORDERING_CONTRACT_VERSION,
     policy::PolicyProfile,
     storage,
@@ -45,6 +49,283 @@ pub const MAX_EXPORT_GAPS: usize = 4_096;
 pub const MAX_EXPORT_EVENT_RECORDS: usize = 1_000_000;
 
 const EXPORT_BUFFER_BYTES: usize = 64 * 1024;
+pub const EXPORT_PREVIEW_SCHEMA_VERSION: u32 = 1;
+pub const EXPORT_PLAINTEXT_WARNING: &str =
+    "This export writes authorized plaintext metadata outside encrypted journal storage; review and confirm this exact plan before continuing.";
+
+/// The destination class is deliberately coarse. It lets a confirmation bind
+/// to whether a new file or an existing file will be touched without retaining
+/// the user-selected path in a preview or receipt.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportDestinationClass {
+    NewFile,
+    ExistingFile,
+}
+
+/// Field inventory shown in the declassification preview. The v1 export
+/// schema carries the complete authorized event envelope; keeping this list
+/// explicit makes that fact reviewable and gives a future schema version a
+/// stable place to add true field-level redaction.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportField {
+    EventId,
+    ObservedAt,
+    IngestedAt,
+    Source,
+    Kind,
+    CollectorInstance,
+    SourceCursor,
+    ProvenanceVersion,
+    PolicyProfile,
+    Evidence,
+    ParentEventId,
+    Payload,
+}
+
+impl ExportField {
+    fn authorized_event_v1() -> Vec<Self> {
+        vec![
+            Self::EventId,
+            Self::ObservedAt,
+            Self::IngestedAt,
+            Self::Source,
+            Self::Kind,
+            Self::CollectorInstance,
+            Self::SourceCursor,
+            Self::ProvenanceVersion,
+            Self::PolicyProfile,
+            Self::Evidence,
+            Self::ParentEventId,
+            Self::Payload,
+        ]
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExportRedactionPlan {
+    pub schema_version: u32,
+    pub fields: Vec<ExportField>,
+}
+
+impl Default for ExportRedactionPlan {
+    fn default() -> Self {
+        Self::authorized_event_v1()
+    }
+}
+
+impl ExportRedactionPlan {
+    pub fn authorized_event_v1() -> Self {
+        Self {
+            schema_version: EXPORT_PREVIEW_SCHEMA_VERSION,
+            fields: ExportField::authorized_event_v1(),
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), GhostraceError> {
+        if self.schema_version != EXPORT_PREVIEW_SCHEMA_VERSION
+            || self.fields != ExportField::authorized_event_v1()
+        {
+            return Err(GhostraceError::ExportPlanInvalid(
+                "v1 execution requires the complete authorized event field inventory".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn fields(&self) -> &[ExportField] {
+        &self.fields
+    }
+}
+
+/// A typed, immutable query shape for the preview and execution gate.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExportQuery {
+    pub source: Option<EventSource>,
+    pub observed_from: Option<DateTime<Utc>>,
+    pub observed_until: Option<DateTime<Utc>>,
+    pub include_coverage: bool,
+}
+
+impl Default for ExportQuery {
+    fn default() -> Self {
+        Self { source: None, observed_from: None, observed_until: None, include_coverage: true }
+    }
+}
+
+impl ExportQuery {
+    pub fn all_committed() -> Self {
+        Self::default()
+    }
+
+    pub fn validate(&self) -> Result<(), GhostraceError> {
+        if !self.include_coverage
+            || self.observed_from.zip(self.observed_until).is_some_and(|(from, until)| from > until)
+        {
+            return Err(GhostraceError::ExportPlanInvalid(
+                "export query coverage must be enabled and its time range ordered".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn matches(&self, event: &crate::model::EventEnvelope) -> bool {
+        self.source.is_none_or(|source| source == event.source)
+            && self.observed_from.is_none_or(|from| event.observed_at >= from)
+            && self.observed_until.is_none_or(|until| event.observed_at <= until)
+    }
+
+    fn scope(&self) -> ExportQueryScope {
+        ExportQueryScope {
+            kind: if self.source.is_none()
+                && self.observed_from.is_none()
+                && self.observed_until.is_none()
+            {
+                "all_committed".to_owned()
+            } else {
+                "filtered".to_owned()
+            },
+            source: self.source,
+            observed_from: self.observed_from.map(|value| value.to_rfc3339()),
+            observed_until: self.observed_until.map(|value| value.to_rfc3339()),
+            include_coverage: self.include_coverage,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExportRequest {
+    pub query: ExportQuery,
+    pub redaction: ExportRedactionPlan,
+    pub force: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExportPlan {
+    pub schema_version: u32,
+    pub query: ExportQuery,
+    pub redaction: ExportRedactionPlan,
+    pub policy_profile_id: PolicyProfileId,
+    pub policy_profile_version: u32,
+    pub policy_scope_digest: SnapshotDigest,
+    pub destination_class: ExportDestinationClass,
+    pub force: bool,
+}
+
+impl ExportPlan {
+    fn build(
+        policy: &PolicyProfile,
+        request: &ExportRequest,
+        destination_class: ExportDestinationClass,
+    ) -> Result<Self, GhostraceError> {
+        request.query.validate()?;
+        request.redaction.validate()?;
+        let policy_document = policy.to_document()?;
+        Ok(Self {
+            schema_version: EXPORT_PREVIEW_SCHEMA_VERSION,
+            query: request.query.clone(),
+            redaction: request.redaction.clone(),
+            policy_profile_id: PolicyProfileId::try_from(policy.id.clone())?,
+            policy_profile_version: policy.version,
+            policy_scope_digest: policy_document.scope_digest()?,
+            destination_class,
+            force: request.force,
+        })
+    }
+
+    pub fn digest(&self) -> Result<SnapshotDigest, GhostraceError> {
+        if self.schema_version != EXPORT_PREVIEW_SCHEMA_VERSION {
+            return Err(GhostraceError::ExportPlanInvalid(
+                "unsupported export preview schema version".to_owned(),
+            ));
+        }
+        let bytes = serde_json::to_vec(self)?;
+        digest_as_snapshot(&bytes)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExportPreview {
+    pub schema_version: u32,
+    pub plan: ExportPlan,
+    pub plan_digest: SnapshotDigest,
+    pub snapshot_digest: SnapshotDigest,
+    pub snapshot_event_count: u64,
+    pub snapshot_boundary: u64,
+    pub event_count: u64,
+    pub sources: Vec<EventSource>,
+    pub observed_from: Option<String>,
+    pub observed_until: Option<String>,
+    pub policy_profiles: Vec<ExportPolicyProfile>,
+    pub gaps: Vec<ExportGap>,
+    pub collector_status: String,
+    pub plaintext_warning: String,
+}
+
+impl ExportPreview {
+    /// Confirm the exact rendered preview. The returned value is required by
+    /// the execution API and carries no destination path or event payload.
+    pub fn confirm(self) -> ExportConfirmation {
+        ExportConfirmation { preview: self }
+    }
+
+    pub fn plan_digest(&self) -> &SnapshotDigest {
+        &self.plan_digest
+    }
+
+    pub fn snapshot_digest(&self) -> &SnapshotDigest {
+        &self.snapshot_digest
+    }
+
+    pub fn warning(&self) -> &str {
+        &self.plaintext_warning
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExportConfirmation {
+    preview: ExportPreview,
+}
+
+impl ExportConfirmation {
+    pub fn plan_digest(&self) -> &SnapshotDigest {
+        &self.preview.plan_digest
+    }
+
+    pub fn snapshot_digest(&self) -> &SnapshotDigest {
+        &self.preview.snapshot_digest
+    }
+
+    pub fn preview(&self) -> &ExportPreview {
+        &self.preview
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExportReceipt {
+    pub schema_version: u32,
+    pub plan_digest: SnapshotDigest,
+    pub snapshot_digest: SnapshotDigest,
+    pub manifest_digest: SnapshotDigest,
+    pub destination_class: ExportDestinationClass,
+    pub policy_profile_id: PolicyProfileId,
+    pub policy_profile_version: u32,
+    pub event_count: u64,
+    pub recorded_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExportResult {
+    pub manifest: ExportManifest,
+    pub receipt: ExportReceipt,
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct ExportCancellation {
@@ -149,6 +430,107 @@ pub fn export_journal(
     export_journal_with_options(journal, output_path, ExportOptions { force, cancellation: None })
 }
 
+/// Build a bounded, privacy-safe declassification preview. The scan occurs on
+/// one read snapshot and retains only digests, counts, source/profile labels,
+/// and bounded gap metadata; it never retains an event payload in the preview.
+pub fn preview_export(
+    journal: &Journal,
+    policy: &PolicyProfile,
+    request: &ExportRequest,
+    output_path: impl AsRef<Path>,
+) -> Result<ExportPreview, GhostraceError> {
+    let output_path = output_path.as_ref();
+    if journal.path().is_some_and(|journal_path| journal_path == output_path) {
+        return Err(GhostraceError::ExportSourceConflict);
+    }
+    let destination_class = destination_class(output_path, request.force)?;
+    let plan = ExportPlan::build(policy, request, destination_class)?;
+    let plan_digest = plan.digest()?;
+    let (snapshot, stats) = inspect_snapshot(journal, &plan)?;
+    let sources = stats.sources.iter().copied().collect();
+    let policy_profiles = stats.policy_profiles();
+    let observed_from = stats.observed_from.map(|value| value.to_rfc3339());
+    let observed_until = stats.observed_until.map(|value| value.to_rfc3339());
+    let collector_status = stats.collector_status_value();
+    Ok(ExportPreview {
+        schema_version: EXPORT_PREVIEW_SCHEMA_VERSION,
+        plan,
+        plan_digest,
+        snapshot_digest: snapshot.digest,
+        snapshot_event_count: snapshot.event_count,
+        snapshot_boundary: snapshot.boundary,
+        event_count: stats.event_count,
+        sources,
+        observed_from,
+        observed_until,
+        policy_profiles,
+        gaps: stats.gaps,
+        collector_status,
+        plaintext_warning: EXPORT_PLAINTEXT_WARNING.to_owned(),
+    })
+}
+
+/// Execute exactly the confirmed preview. A changed policy, destination class,
+/// query/redaction plan, or journal snapshot fails before publication and never
+/// changes an existing destination.
+pub fn export_journal_with_confirmation(
+    journal: &Journal,
+    output_path: impl AsRef<Path>,
+    confirmation: ExportConfirmation,
+    policy: &PolicyProfile,
+) -> Result<ExportResult, GhostraceError> {
+    let output_path = output_path.as_ref();
+    if journal.path().is_some_and(|journal_path| journal_path == output_path) {
+        return Err(GhostraceError::ExportSourceConflict);
+    }
+    let request = ExportRequest {
+        query: confirmation.preview.plan.query.clone(),
+        redaction: confirmation.preview.plan.redaction.clone(),
+        force: confirmation.preview.plan.force,
+    };
+    let destination_class = destination_class(output_path, request.force)?;
+    let current_plan = ExportPlan::build(policy, &request, destination_class)?;
+    if current_plan.digest()? != *confirmation.plan_digest()
+        || current_plan.policy_profile_id != confirmation.preview.plan.policy_profile_id
+        || current_plan.policy_profile_version != confirmation.preview.plan.policy_profile_version
+    {
+        return Err(GhostraceError::ExportConfirmationMismatch);
+    }
+    let manifest = export_journal_inner(
+        journal,
+        output_path,
+        request.force,
+        None,
+        None,
+        None,
+        Some(&current_plan.query),
+        Some(confirmation.snapshot_digest()),
+    )?;
+    let receipt = ExportReceipt {
+        schema_version: EXPORT_PREVIEW_SCHEMA_VERSION,
+        plan_digest: confirmation.preview.plan_digest,
+        snapshot_digest: confirmation.preview.snapshot_digest,
+        manifest_digest: manifest_digest(output_path)?,
+        destination_class: current_plan.destination_class,
+        policy_profile_id: current_plan.policy_profile_id,
+        policy_profile_version: current_plan.policy_profile_version,
+        event_count: manifest.coverage.event_count as u64,
+        recorded_at: Utc::now(),
+    };
+    Ok(ExportResult { manifest, receipt })
+}
+
+/// Alias with a concise name for callers that treat the confirmation as the
+/// explicit declassification capability.
+pub fn export_confirmed(
+    journal: &Journal,
+    output_path: impl AsRef<Path>,
+    confirmation: ExportConfirmation,
+    policy: &PolicyProfile,
+) -> Result<ExportResult, GhostraceError> {
+    export_journal_with_confirmation(journal, output_path, confirmation, policy)
+}
+
 /// Stream a journal through a private body spool, then publish one complete
 /// manifest-plus-body artifact with an atomic same-directory rename. The body
 /// spool and final temporary file are removed automatically on every error,
@@ -166,9 +548,12 @@ pub fn export_journal_with_options(
         options.cancellation.as_ref(),
         None,
         None,
+        None,
+        None,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn export_journal_inner(
     journal: &Journal,
     output_path: &Path,
@@ -176,6 +561,8 @@ fn export_journal_inner(
     cancellation: Option<&ExportCancellation>,
     write_budget: Option<WriteBudget>,
     cancel_after_events: Option<u64>,
+    query: Option<&ExportQuery>,
+    expected_snapshot_digest: Option<&SnapshotDigest>,
 ) -> Result<ExportManifest, GhostraceError> {
     if journal.path().is_some_and(|journal_path| journal_path == output_path) {
         return Err(GhostraceError::ExportSourceConflict);
@@ -211,6 +598,7 @@ fn export_journal_inner(
         .map_err(|source| GhostraceError::Io { path: parent.to_path_buf(), source })?;
     storage::set_private_file_permissions(body_temporary.path())?;
     let mut stats = ExportStats::default();
+    let mut snapshot = SnapshotAccumulator::default();
     {
         let mut writer =
             BufWriter::with_capacity(EXPORT_BUFFER_BYTES, body_temporary.as_file_mut());
@@ -222,6 +610,10 @@ fn export_journal_inner(
                     "event record exceeds the {MAX_EXPORT_RECORD_BYTES}-byte bound"
                 )));
             }
+            snapshot.observe(&stored, &line)?;
+            if query.is_some_and(|query| !query.matches(&stored.event)) {
+                return Ok(());
+            }
             run.write_bytes(&mut writer, &line)?;
             run.write_bytes(&mut writer, b"\n")?;
             stats.observe(&stored, &line)?;
@@ -232,12 +624,17 @@ fn export_journal_inner(
             .flush()
             .map_err(|source| GhostraceError::Io { path: output_path.to_path_buf(), source })?;
     }
+    let snapshot = snapshot.finish();
+    if expected_snapshot_digest.is_some_and(|expected| expected != &snapshot.digest) {
+        return Err(GhostraceError::ExportSnapshotChanged);
+    }
     body_temporary
         .as_file()
         .sync_all()
         .map_err(|source| GhostraceError::Io { path: output_path.to_path_buf(), source })?;
     run.check_cancelled()?;
-    let manifest = stats.into_manifest()?;
+    let manifest =
+        stats.into_manifest(query.map_or_else(ExportQuery::default, Clone::clone).scope())?;
 
     // Pass two places the now-known manifest before copying the private body
     // spool in bounded chunks. The destination remains absent or unchanged
@@ -345,6 +742,9 @@ struct ExportStats {
     policy_profiles: BTreeSet<(String, u32)>,
     gaps: Vec<ExportGap>,
     collector_status: &'static str,
+    sources: BTreeSet<EventSource>,
+    observed_from: Option<DateTime<Utc>>,
+    observed_until: Option<DateTime<Utc>>,
 }
 
 impl ExportStats {
@@ -363,6 +763,15 @@ impl ExportStats {
         self.body_digest.update(line);
         self.body_digest.update(b"\n");
         self.event_count += 1;
+        self.sources.insert(stored.event.source);
+        self.observed_from = Some(
+            self.observed_from
+                .map_or(stored.event.observed_at, |current| current.min(stored.event.observed_at)),
+        );
+        self.observed_until = Some(
+            self.observed_until
+                .map_or(stored.event.observed_at, |current| current.max(stored.event.observed_at)),
+        );
 
         let profile = (
             stored.event.policy_profile_id.as_str().to_owned(),
@@ -398,10 +807,30 @@ impl ExportStats {
         Ok(())
     }
 
-    fn into_manifest(self) -> Result<ExportManifest, GhostraceError> {
+    fn policy_profiles(&self) -> Vec<ExportPolicyProfile> {
+        self.policy_profiles
+            .iter()
+            .cloned()
+            .map(|(id, version)| ExportPolicyProfile { id, version })
+            .collect()
+    }
+
+    fn collector_status_value(&self) -> String {
+        if self.collector_status.is_empty() {
+            "unknown".to_owned()
+        } else {
+            self.collector_status.to_owned()
+        }
+    }
+
+    fn into_manifest(
+        self,
+        query_scope: ExportQueryScope,
+    ) -> Result<ExportManifest, GhostraceError> {
         let event_count = usize::try_from(self.event_count).map_err(|_| {
             GhostraceError::ExportInvalid("event count exceeds platform size".to_owned())
         })?;
+        let collector_status = self.collector_status_value();
         let policy_profiles = self
             .policy_profiles
             .into_iter()
@@ -450,21 +879,112 @@ impl ExportStats {
             record_counts,
             byte_counts,
             record_digests,
-            query_scope: ExportQueryScope::default(),
+            query_scope,
             policy_profiles,
             coverage: ExportCoverage {
                 event_count,
                 gap_count,
                 warning: (gap_count > 0).then(|| "coverage gaps are present".to_owned()),
             },
-            collector_status: if self.collector_status.is_empty() {
-                "unknown".to_owned()
-            } else {
-                self.collector_status.to_owned()
-            },
+            collector_status,
             gaps: self.gaps,
         })
     }
+}
+
+#[derive(Default)]
+struct SnapshotAccumulator {
+    event_count: u64,
+    boundary: u64,
+    digest: Sha256,
+}
+
+struct SnapshotSummary {
+    event_count: u64,
+    boundary: u64,
+    digest: SnapshotDigest,
+}
+
+impl SnapshotAccumulator {
+    fn observe(&mut self, stored: &StoredEvent, line: &[u8]) -> Result<(), GhostraceError> {
+        if self.event_count >= MAX_EXPORT_EVENT_RECORDS as u64 {
+            return Err(GhostraceError::ExportInvalid(format!(
+                "journal snapshot exceeds the {MAX_EXPORT_EVENT_RECORDS}-event bound"
+            )));
+        }
+        self.digest.update(line);
+        self.digest.update(b"\n");
+        self.event_count += 1;
+        self.boundary = self.boundary.max(stored.ingest_seq);
+        Ok(())
+    }
+
+    fn finish(self) -> SnapshotSummary {
+        SnapshotSummary {
+            event_count: self.event_count,
+            boundary: self.boundary,
+            digest: snapshot_digest_from_hash(self.digest.finalize().as_slice())
+                .expect("SHA-256 digest always has the canonical length"),
+        }
+    }
+}
+
+fn inspect_snapshot(
+    journal: &Journal,
+    plan: &ExportPlan,
+) -> Result<(SnapshotSummary, ExportStats), GhostraceError> {
+    let mut snapshot = SnapshotAccumulator::default();
+    let mut stats = ExportStats::default();
+    journal.for_each_ordered_event(|stored| {
+        let line = serialize_event_record(&stored)?;
+        if line.len() > MAX_EXPORT_RECORD_BYTES {
+            return Err(GhostraceError::ExportInvalid(format!(
+                "event record exceeds the {MAX_EXPORT_RECORD_BYTES}-byte bound"
+            )));
+        }
+        snapshot.observe(&stored, &line)?;
+        if plan.query.matches(&stored.event) {
+            stats.observe(&stored, &line)?;
+        }
+        Ok(())
+    })?;
+    Ok((snapshot.finish(), stats))
+}
+
+fn destination_class(
+    output_path: &Path,
+    force: bool,
+) -> Result<ExportDestinationClass, GhostraceError> {
+    let exists = if force {
+        storage::validate_existing_artifact_for_overwrite(output_path)?
+    } else {
+        storage::validate_existing_artifact(output_path)?
+    };
+    Ok(if exists { ExportDestinationClass::ExistingFile } else { ExportDestinationClass::NewFile })
+}
+
+fn digest_as_snapshot(bytes: &[u8]) -> Result<SnapshotDigest, GhostraceError> {
+    SnapshotDigest::try_from(format!("sha256:{}", sha256_digest(bytes)))
+}
+
+fn snapshot_digest_from_hash(bytes: &[u8]) -> Result<SnapshotDigest, GhostraceError> {
+    SnapshotDigest::try_from(format!("sha256:{}", hex_digest(bytes)))
+}
+
+fn manifest_digest(path: &Path) -> Result<SnapshotDigest, GhostraceError> {
+    let file = File::open(path)
+        .map_err(|source| GhostraceError::Io { path: path.to_path_buf(), source })?;
+    let mut reader = BufReader::with_capacity(EXPORT_BUFFER_BYTES, file);
+    let mut line = Vec::new();
+    let bytes = reader
+        .read_until(b'\n', &mut line)
+        .map_err(|source| GhostraceError::Io { path: path.to_path_buf(), source })?;
+    if bytes == 0 || !line.ends_with(b"\n") {
+        return Err(GhostraceError::ExportInvalid(
+            "published export has no complete manifest line".to_owned(),
+        ));
+    }
+    digest_as_snapshot(&line)
 }
 
 struct ExportRun<'a> {
@@ -584,6 +1104,8 @@ mod tests {
             None,
             Some(WriteBudget::fail_after(failure_after)),
             None,
+            None,
+            None,
         )
         .expect_err("simulated disk full");
         assert!(matches!(error, GhostraceError::Io { .. }));
@@ -597,9 +1119,17 @@ mod tests {
         let directory = tempdir().expect("directory");
         let output = directory.path().join("cancelled.jsonl");
         let cancellation = ExportCancellation::new();
-        let error =
-            export_journal_inner(&journal(), &output, false, Some(&cancellation), None, Some(1))
-                .expect_err("mid-stream cancellation");
+        let error = export_journal_inner(
+            &journal(),
+            &output,
+            false,
+            Some(&cancellation),
+            None,
+            Some(1),
+            None,
+            None,
+        )
+        .expect_err("mid-stream cancellation");
         assert!(matches!(error, GhostraceError::ExportCancelled));
         assert!(!output.exists());
         assert_eq!(fs::read_dir(directory.path()).expect("directory").count(), 0);

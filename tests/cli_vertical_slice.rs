@@ -80,12 +80,42 @@ fn durable_fixture_cli_path_is_reopenable_deterministic_and_capture_disabled() {
     assert_success(&second_explain, "second explain");
     assert_eq!(first_explain.stdout, second_explain.stdout);
 
+    let preview = run(&[
+        OsStr::new("preview"),
+        OsStr::new("--journal"),
+        journal.as_os_str(),
+        OsStr::new("--output"),
+        export.as_os_str(),
+    ]);
+    assert_success(&preview, "preview export");
+    let preview_json: Value = serde_json::from_slice(&preview.stdout).expect("preview JSON");
+    let plan_digest = preview_json["plan_digest"].as_str().expect("plan digest");
+    let snapshot_digest = preview_json["snapshot_digest"].as_str().expect("snapshot digest");
+
+    let unconfirmed_output = directory.path().join("unconfirmed.jsonl");
+    let unconfirmed = run(&[
+        OsStr::new("export"),
+        OsStr::new("--journal"),
+        journal.as_os_str(),
+        OsStr::new("--output"),
+        unconfirmed_output.as_os_str(),
+    ]);
+    assert!(!unconfirmed.status.success());
+    assert!(
+        String::from_utf8_lossy(&unconfirmed.stderr).contains("explicit plaintext confirmation")
+    );
+    assert!(!unconfirmed_output.exists());
+
     let export_result = run(&[
         OsStr::new("export"),
         OsStr::new("--journal"),
         journal.as_os_str(),
         OsStr::new("--output"),
         export.as_os_str(),
+        OsStr::new("--confirm-plan"),
+        OsStr::new(plan_digest),
+        OsStr::new("--confirm-snapshot"),
+        OsStr::new(snapshot_digest),
     ]);
     assert_success(&export_result, "export");
     let records = fs::read_to_string(&export).expect("export file");

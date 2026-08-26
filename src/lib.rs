@@ -67,9 +67,13 @@ pub use exclusion::{
 };
 pub use explain::{explain, CoverageSummary, Explanation, ExplanationStatement};
 pub use export::{
-    export_fixture, export_journal, export_journal_with_options, ExportCancellation,
-    ExportManifest, ExportOptions, ExportPolicyProfile, EXPORT_VERSION, MAX_EXPORT_EVENT_RECORDS,
-    MAX_EXPORT_GAPS, MAX_EXPORT_POLICY_PROFILES, MAX_EXPORT_RECORD_BYTES,
+    export_confirmed, export_fixture, export_journal, export_journal_with_confirmation,
+    export_journal_with_options, preview_export, ExportCancellation, ExportConfirmation,
+    ExportDestinationClass, ExportField, ExportManifest, ExportOptions, ExportPlan,
+    ExportPolicyProfile, ExportPreview, ExportQuery, ExportReceipt, ExportRedactionPlan,
+    ExportRequest, ExportResult, EXPORT_PLAINTEXT_WARNING, EXPORT_PREVIEW_SCHEMA_VERSION,
+    EXPORT_VERSION, MAX_EXPORT_EVENT_RECORDS, MAX_EXPORT_GAPS, MAX_EXPORT_POLICY_PROFILES,
+    MAX_EXPORT_RECORD_BYTES,
 };
 pub use export_schema::{
     validate_export, validate_registry, ExportQueryScope, ExportValidation, SchemaDescriptor,

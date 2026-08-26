@@ -51,6 +51,18 @@ pub enum GhostraceError {
     #[error("export was cancelled before publication")]
     ExportCancelled,
 
+    #[error("export requires an explicit plaintext confirmation")]
+    ExportConfirmationRequired,
+
+    #[error("export confirmation does not match the current plan")]
+    ExportConfirmationMismatch,
+
+    #[error("export journal snapshot changed after preview")]
+    ExportSnapshotChanged,
+
+    #[error("export redaction plan is invalid: {0}")]
+    ExportPlanInvalid(String),
+
     #[error("journal directory permissions are not private (expected no group/world access)")]
     InsecurePermissions(PathBuf),
 
