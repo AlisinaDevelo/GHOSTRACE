@@ -230,6 +230,20 @@ crash reporter can observe synthetic process state outside GHOSTRACE's retention
 boundary. GHOSTRACE makes no claim to hide those values from the operating system;
 it only verifies that the application does not retain them.
 
+### Git repository and worktree identity
+
+The Git identity contract is metadata-only and path-free. A future adapter may read
+the common object database and worktree directory metadata, but persistence receives
+only domain-separated digests of their device/file identities, an opaque selected-root
+ID, an explicit source scope, and a repository-kind enum. Remote URLs, credential
+helpers, config values, reflog messages, and filesystem paths are not fields and are
+rejected by strict deserialization. The checked-in synthetic matrix covers move,
+clone, linked-worktree, submodule, bare, source-scope rebinding, and repository
+reinitialization outcomes. A move is continuous only after the selected-root binding
+is deliberately retained; clone and reinitialization break repository continuity.
+This contract does not run Git, fetch remotes, or claim authorship, intent, or source
+completeness.
+
 ## Retention and deletion
 
 The fixture headstart has no ambient retention burden. The read-only

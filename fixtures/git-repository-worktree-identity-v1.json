@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "program": "ghostrace-git-repository-worktree-identity-v1",
+  "generator": {
+    "version": "ghostrace-git-identity-fixture-v1",
+    "seed": "ghostrace-git-identity-seed-v1",
+    "algorithm": "fixed filesystem identity pairs and continuity outcomes; no runtime randomness",
+    "command": "cargo +1.88.0 test --locked --test git_identity"
+  },
+  "privacy": {
+    "synthetic_only": true,
+    "user_data_included": false,
+    "network_required": false,
+    "retains_remote_urls": false,
+    "retains_credentials": false,
+    "retains_config_values": false,
+    "retains_reflog_messages": false,
+    "retains_filesystem_paths": false
+  },
+  "resource_limits": {
+    "max_scenarios": 7,
+    "max_identity_bytes": 4096
+  },
+  "scenarios": [
+    {
+      "id": "move",
+      "previous": {
+        "object_database": {"device_id": 11, "file_id": 101},
+        "worktree": {"device_id": 11, "file_id": 102},
+        "selected_root_id": "root-main",
+        "source_scope": "selected_root",
+        "repository_kind": "standard"
+      },
+      "current": {
+        "object_database": {"device_id": 11, "file_id": 101},
+        "worktree": {"device_id": 11, "file_id": 102},
+        "selected_root_id": "root-main",
+        "source_scope": "selected_root",
+        "repository_kind": "standard"
+      },
+      "expected_continuity": "continuous"
+    },
+    {
+      "id": "clone",
+      "previous": {
+        "object_database": {"device_id": 11, "file_id": 201},
+        "worktree": {"device_id": 11, "file_id": 202},
+        "selected_root_id": "root-source",
+        "source_scope": "selected_root",
+        "repository_kind": "standard"
+      },
+      "current": {
+        "object_database": {"device_id": 11, "file_id": 203},
+        "worktree": {"device_id": 11, "file_id": 204},
+        "selected_root_id": "root-clone",
+        "source_scope": "selected_root",
+        "repository_kind": "standard"
+      },
+      "expected_continuity": "repository_changed"
+    },
+    {
+      "id": "worktree_add",
+      "previous": {
+        "object_database": {"device_id": 11, "file_id": 301},
+        "worktree": {"device_id": 11, "file_id": 302},
+        "selected_root_id": "root-main",
+        "source_scope": "selected_root",
+        "repository_kind": "standard"
+      },
+      "current": {
+        "object_database": {"device_id": 11, "file_id": 301},
+        "worktree": {"device_id": 11, "file_id": 303},
+        "selected_root_id": "root-linked",
+        "source_scope": "worktree",
+        "repository_kind": "standard"
+      },
+      "expected_continuity": "worktree_changed"
+    },
+    {
+      "id": "submodule",
+      "previous": {
+        "object_database": {"device_id": 11, "file_id": 401},
+        "worktree": {"device_id": 11, "file_id": 402},
+        "selected_root_id": "root-main",
+        "source_scope": "selected_root",
+        "repository_kind": "standard"
+      },
+      "current": {
+        "object_database": {"device_id": 11, "file_id": 403},
+        "worktree": {"device_id": 11, "file_id": 404},
+        "selected_root_id": "root-submodule",
+        "source_scope": "submodule",
+        "repository_kind": "submodule"
+      },
+      "expected_continuity": "repository_changed"
+    },
+    {
+      "id": "bare",
+      "previous": {
+        "object_database": {"device_id": 11, "file_id": 501},
+        "worktree": null,
+        "selected_root_id": "root-bare",
+        "source_scope": "repository",
+        "repository_kind": "bare"
+      },
+      "current": {
+        "object_database": {"device_id": 11, "file_id": 501},
+        "worktree": null,
+        "selected_root_id": "root-bare",
+        "source_scope": "repository",
+        "repository_kind": "bare"
+      },
+      "expected_continuity": "continuous"
+    },
+    {
+      "id": "repository_reinitialization",
+      "previous": {
+        "object_database": {"device_id": 11, "file_id": 601},
+        "worktree": {"device_id": 11, "file_id": 602},
+        "selected_root_id": "root-reinitialized",
+        "source_scope": "selected_root",
+        "repository_kind": "standard"
+      },
+      "current": {
+        "object_database": {"device_id": 11, "file_id": 603},
+        "worktree": {"device_id": 11, "file_id": 604},
+        "selected_root_id": "root-reinitialized",
+        "source_scope": "selected_root",
+        "repository_kind": "standard"
+      },
+      "expected_continuity": "repository_changed"
+    },
+    {
+      "id": "source_scope_rebinding",
+      "previous": {
+        "object_database": {"device_id": 11, "file_id": 701},
+        "worktree": {"device_id": 11, "file_id": 702},
+        "selected_root_id": "root-scope",
+        "source_scope": "selected_root",
+        "repository_kind": "standard"
+      },
+      "current": {
+        "object_database": {"device_id": 11, "file_id": 701},
+        "worktree": {"device_id": 11, "file_id": 702},
+        "selected_root_id": "root-scope",
+        "source_scope": "repository",
+        "repository_kind": "standard"
+      },
+      "expected_continuity": "scope_changed"
+    }
+  ]
+}

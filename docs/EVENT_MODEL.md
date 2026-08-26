@@ -138,6 +138,24 @@ distinct fallible constructors for these retained values. Serde uses those same
 constructors, so a value cannot enter a payload through a deserialization shortcut, and
 the wrappers serialize back to the unchanged string wire encoding.
 
+### Git identity boundary
+
+The Git snapshot's `repository_id` remains an opaque event identifier. The companion
+`GitIdentity` contract distinguishes the Git common object database from an optional
+worktree, the selected-root binding, and the source scope without adding paths or
+remote metadata to an event. Object-database and worktree device/file identities are
+immediately projected into domain-separated `sha256:` digests; only those digests are
+serializable. `repository_id()` derives a stable event identifier from the object-
+database digest, so adding a linked worktree does not create a second repository.
+
+Continuity is conservative: move is continuous only when the selected-root binding is
+retained, clone and repository reinitialization are repository changes, a linked
+worktree is a worktree change, and a source/root rebinding is a scope change. Bare
+repositories have no worktree digest and submodules are explicitly marked with their
+own source scope. Remote URLs, credential helpers, config values, reflog messages, and
+raw filesystem paths are structurally absent; an adapter must discard those inputs
+before constructing an identity.
+
 ## Evidence levels
 
 - **Direct:** the source reported the fact itself, such as a fixture event containing

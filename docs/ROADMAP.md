@@ -159,7 +159,11 @@ unknown-field records fail closed before an export is considered complete.
 
 M4 adds only integrations the person deliberately enables. The shell wrapper cannot
 retain arguments, environment, input, or output. Git snapshots exclude content,
-messages, remote credentials, and raw paths. Frontmost-application evidence excludes
+messages, remote credentials, and raw paths. Task 0094 defines the companion
+path-free identity contract: object-database and worktree device/file identities
+become digests, selected-root and source-scope bindings stay explicit, and move,
+clone, linked-worktree, submodule, bare, and repository-reinitialization continuity
+outcomes are tested offline before any live adapter exists. Frontmost-application evidence excludes
 titles and documents and remains contextual rather than actor attribution. A
 ground-truth workflow corpus evaluates the combined claims.
 

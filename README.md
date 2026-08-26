@@ -172,6 +172,7 @@ encryption or key-management claim.
 | Explicit shell metadata schema | Available as a strict v1 contract for wrapper session, executable identity, sanitized working-directory identity, timing, outcome, exit code, and signal; raw command state is structurally rejected |
 | Shell wrapper lifecycle contract | Available as synthetic reference tests for child status propagation and explicit incomplete-execution gaps; no shell executor is shipped |
 | Shell secret-leakage red-team contract | Available as synthetic negative tests for metadata, journal, diagnostics, exports, panic output, and documented OS exposure; no shell capture is shipped |
+| Git repository/worktree identity contract | Available as a path-free metadata contract with object-database/worktree digests, selected-root/source-scope binding, and move/clone/linked-worktree/submodule/bare/reinitialization continuity tests; no Git command runner or remote access is shipped |
 | Shell, Git, frontmost-app, or browser collectors | Not shipped |
 | macOS Keychain-backed production encryption | Not shipped |
 | Signed/notarized release artifacts | Not shipped |
@@ -238,6 +239,13 @@ and state when the source cannot establish completeness. See
 Journal ingestion also requires a typed adapter-origin capability. Fixture, live,
 import, and repair paths own separate provenance namespaces and allowed event classes;
 deserializing a fixture cannot grant a live-collector capability.
+
+The Git identity headstart is similarly bounded. `GitIdentity` retains only
+object-database/worktree digests, an opaque selected-root ID, source scope, and
+repository kind. It classifies moves, clones, linked worktrees, submodules, bare
+repositories, and reinitialization without retaining remote URLs, credentials,
+configuration, reflog messages, or paths. It is a contract for a future explicit Git
+adapter; no Git command runner, remote access, or authorship/causality claim is shipped.
 
 ## Trust contract
 
@@ -310,6 +318,7 @@ docs/adr/            Immutable architecture decisions
 - [Explicit shell metadata schema](schemas/shell-execution-metadata-v1.json) — wrapper-only metadata contract; [golden record](fixtures/shell-execution-metadata-v1.golden.json)
 - [Shell wrapper lifecycle fixture](fixtures/shell-wrapper-lifecycle-v1.json) — synthetic status, timeout, cancellation, and explicit gap contract
 - [Shell secret-leakage fixture](fixtures/shell-secret-leakage-v1.json) — synthetic unique-sentinel corpus for denied shell channels and documented external OS exposure
+- [Git repository/worktree identity fixture](fixtures/git-repository-worktree-identity-v1.json) — path-free object-database/worktree continuity matrix for move, clone, linked worktree, submodule, bare, scope rebinding, and reinitialization
 - [Filesystem benchmark corpus](fixtures/filesystem-benchmark-corpus-v1.json) — bounded synthetic trees and native measurement contract
 - [Reproducibility](docs/REPRODUCIBILITY.md) — pinned toolchain, fixture provenance, and clean-machine smoke
 - [Research](docs/RESEARCH.md) — landscape, differentiation, and primary sources

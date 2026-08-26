@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ghostrace.dev/schemas/git-repository-worktree-identity-v1.json",
+  "title": "GHOSTRACE Git repository and worktree identity fixture",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "program", "generator", "privacy", "resource_limits", "scenarios"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "program": {"const": "ghostrace-git-repository-worktree-identity-v1"},
+    "generator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "seed", "algorithm", "command"],
+      "properties": {
+        "version": {"const": "ghostrace-git-identity-fixture-v1"},
+        "seed": {"const": "ghostrace-git-identity-seed-v1"},
+        "algorithm": {"type": "string", "const": "fixed filesystem identity pairs and continuity outcomes; no runtime randomness"},
+        "command": {"type": "string", "const": "cargo +1.88.0 test --locked --test git_identity"}
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["synthetic_only", "user_data_included", "network_required", "retains_remote_urls", "retains_credentials", "retains_config_values", "retains_reflog_messages", "retains_filesystem_paths"],
+      "properties": {
+        "synthetic_only": {"const": true},
+        "user_data_included": {"const": false},
+        "network_required": {"const": false},
+        "retains_remote_urls": {"const": false},
+        "retains_credentials": {"const": false},
+        "retains_config_values": {"const": false},
+        "retains_reflog_messages": {"const": false},
+        "retains_filesystem_paths": {"const": false}
+      }
+    },
+    "resource_limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_scenarios", "max_identity_bytes"],
+      "properties": {
+        "max_scenarios": {"const": 7},
+        "max_identity_bytes": {"const": 4096}
+      }
+    },
+    "scenarios": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "items": {"$ref": "#/$defs/scenario"}
+    }
+  },
+  "$defs": {
+    "filesystem_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device_id", "file_id"],
+      "properties": {
+        "device_id": {"type": "integer", "minimum": 1},
+        "file_id": {"type": "integer", "minimum": 1}
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["object_database", "worktree", "selected_root_id", "source_scope", "repository_kind"],
+      "properties": {
+        "object_database": {"$ref": "#/$defs/filesystem_identity"},
+        "worktree": {"anyOf": [{"$ref": "#/$defs/filesystem_identity"}, {"type": "null"}]},
+        "selected_root_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*[a-z0-9]$", "maxLength": 128},
+        "source_scope": {"enum": ["selected_root", "repository", "worktree", "submodule"]},
+        "repository_kind": {"enum": ["standard", "bare", "submodule"]}
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "previous", "current", "expected_continuity"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "previous": {"$ref": "#/$defs/identity"},
+        "current": {"$ref": "#/$defs/identity"},
+        "expected_continuity": {"enum": ["continuous", "worktree_changed", "repository_changed", "scope_changed", "incomparable"]}
+      }
+    }
+  }
+}

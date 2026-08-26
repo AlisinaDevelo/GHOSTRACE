@@ -76,6 +76,16 @@ plaintext chosen by the user.
 | Denial of service | Huge fixture, event storm, callback panic, or native lifecycle leak exhausts memory or leaves capture wedged | Bounded parser, bounded callback batches/paths, panic containment, single-owner lifecycle, bounded pending queue, writer admission, one emergency status reservation, input limits, bounded retries, visible loss | Task 0016's native-safe stress lane proves the pending cap, auditable overflow gap, writer status reservation, and `recovery_required` transition; larger cross-device throughput remains future work |
 | Elevation of privilege | Collector asks for broad TCC access or follows a symlink outside scope | No root/Full Disk Access baseline, explicit selected roots, startup canonicalization, descriptor-backed no-follow walks, device/inode and volume checks, policy gate, path digests | Selected-root metadata, descriptor-open containment, volume identity, and durable boundary binding are shipped; source-loss recovery and ambient capture gates remain required |
 
+Git identity adds a narrow information-disclosure and repudiation boundary: the
+object database and worktree are represented by domain-separated digests of
+device/file identity, while selected-root and source-scope bindings remain
+explicit. A clone or repository reinitialization is never treated as a moved
+worktree. Remote URLs, credential helpers, config values, reflog messages, and raw
+paths are absent from the type and rejected as unknown fields. The synthetic
+transition matrix covers move, clone, linked-worktree, submodule, bare, scope
+rebinding, and reinitialization; a future adapter still has to supply the stable
+metadata and prove its Git command parsing separately.
+
 ## Residual risks
 
 - A same-user attacker may read plaintext while a process is running, inspect
