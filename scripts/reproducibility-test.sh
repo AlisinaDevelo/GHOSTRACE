@@ -105,6 +105,28 @@ if len(records) != 9:
     raise SystemExit("durable export record count drifted")
 PY
 
+echo "reproducibility: retention dry-run"
+cargo +1.88.0 run --quiet -- retention-plan \
+  --journal "$journal" \
+  --before 2026-01-01T00:00:08Z \
+  > "$WORK_DIR/retention-a.json"
+cargo +1.88.0 run --quiet -- retention-plan \
+  --journal "$journal" \
+  --before 2026-01-01T00:00:08Z \
+  > "$WORK_DIR/retention-b.json"
+cmp -s "$WORK_DIR/retention-a.json" "$WORK_DIR/retention-b.json"
+python3 - "$WORK_DIR/retention-a.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    plan = json.load(handle)
+if plan["snapshot_event_count"] != 8 or plan["affected_event_count"] != 7:
+    raise SystemExit("retention dry-run scope drifted")
+if plan["protected_gap_count"] != 1 or not plan["candidate_set_digest"].startswith("sha256:"):
+    raise SystemExit("retention coverage binding drifted")
+PY
+
 echo "reproducibility: capture refusal"
 if cargo +1.88.0 run --quiet -- capture > "$WORK_DIR/capture.stdout" 2> "$WORK_DIR/capture.stderr"; then
   echo "capture unexpectedly succeeded" >&2

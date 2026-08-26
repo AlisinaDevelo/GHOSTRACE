@@ -179,10 +179,30 @@ GHOSTRACE does not upload or fetch a destination.
 
 ## Retention and deletion
 
-The fixture headstart has no ambient retention burden. Live retention and deletion
-commands are roadmap work. They must define whether deletion covers WAL files,
-backups, exports, diagnostic records, cursors, and encryption-key references, and
-must report what cannot be recovered from an external copy.
+The fixture headstart has no ambient retention burden. The read-only
+`retention-plan` command is the first retention boundary: its documented default
+is observations older than 90 days, anchored at an explicit UTC `as_of` time. A
+caller can instead supply a UTC cutoff, source, opaque filesystem root, maximum
+newest event count, or maximum newest encrypted-payload bytes. Scope filters are
+intersected first; gap preservation is enabled by default; time, event-count, and
+byte selectors then union their oldest eligible rows. The plan reports a stable
+observed/ingested range, affected sources, ciphertext key generations, gap
+summaries, a conservative encrypted-payload byte estimate, and an authenticated
+candidate-set digest.
+
+The plan is evaluated inside one SQLite read snapshot and binds its committed
+`ingest_seq` upper bound. Its confirmation contains only the plan digest,
+candidate digest, and boundary. A later deletion command must refuse any set that
+would exceed that boundary or differ from that digest, so concurrent ingest or a
+changed policy cannot expand a previously confirmed scope. The plan is not a
+deletion command and does not infer consent from a prior export.
+
+Retention deliberately excludes exports, database backups, SQLite WAL/SHM
+sidecars, diagnostic records, cursors, and encryption-key references from this
+journal-event scope. Legal holds are not implemented and are never inferred from
+an export or backup. Future deletion work must define residue, transactional
+behavior, recovery, and what remains recoverable from external copies before it
+can remove journal rows or related artifacts.
 
 ## Privacy verification
 
