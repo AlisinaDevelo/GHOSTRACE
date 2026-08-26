@@ -37,6 +37,10 @@ mode-0700 file-backed journal. Run the focused matrix with the pinned toolchain:
 ```sh
 cargo +1.88.0 test --locked --test query_pagination
 cargo +1.88.0 test --locked --lib query::tests
+
+# Authenticated journal-state happy and negative paths (offline/private journals).
+cargo +1.88.0 test --locked --test authenticated_state -- --nocapture
+cargo +1.88.0 run -- authenticated-check --journal "$JOURNAL"
 ```
 
 The tests use only the checked-in synthetic fixture and bounded local SQLite

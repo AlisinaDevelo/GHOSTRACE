@@ -4,6 +4,7 @@
 //! screen/audio capture, or keylogging implementation.  The public boundary is
 //! fixture ingestion into an encrypted local SQLite journal.
 
+pub mod authenticated;
 pub mod claims;
 pub mod consent;
 pub mod correlation;
@@ -35,6 +36,10 @@ pub mod volume;
 pub mod wal;
 pub mod writer;
 
+pub use authenticated::{
+    AuthenticatedAnomaly, AuthenticatedDeletionMarker, AuthenticatedState,
+    AuthenticatedStateReport, AUTHENTICATED_STATE_DOMAIN, AUTHENTICATED_STATE_SCHEMA_VERSION,
+};
 pub use claims::{
     render_claim, ClaimLocale, ClaimTemplateDescriptor, ClaimTemplateId, EvidenceRequirement,
     GapBehavior, ProhibitedImplication, RenderedClaim, RequiredFact, CLAIM_GRAMMAR_VERSION,
@@ -186,6 +191,9 @@ pub const FSEVENTS_NORMALIZED_SCHEMA_JSON: &str =
     include_str!("../schemas/fsevents-normalized-v1.json");
 pub const FSEVENTS_STARTUP_SCHEMA_JSON: &str = include_str!("../schemas/fsevents-startup-v1.json");
 pub const KEY_LIFECYCLE_SCHEMA_JSON: &str = include_str!("../schemas/key-lifecycle-v1.json");
+
+/// Latest SQLite journal schema used by authenticated query tokens and reports.
+pub const JOURNAL_SCHEMA_VERSION: u32 = 5;
 
 pub fn capture() -> Result<(), GhostraceError> {
     Err(GhostraceError::LiveCaptureDisabled)

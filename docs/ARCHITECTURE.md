@@ -466,6 +466,25 @@ path-free read snapshot. It provides recovery guidance but never repairs the
 database. A failure requires preserving the original and performing any repair
 on a private verified copy with before-and-after receipts.
 
+### Authenticated journal state (task 0088)
+
+Mutable metadata that SQLite does not authenticate has a separate versioned
+keyed anchor. Canonical bytes are length-delimited under the domain separator
+`ghostrace:authenticated-journal-state:v1`; component digests bind event order
+and identity set, event metadata/ciphertext, cursors, policy history, and
+diagnostics. The head MAC also binds the chain epoch, chain-start boundary, key
+generation, and deletion digest. The anchor contains no key material, paths,
+plaintext, or retained event identifiers.
+
+Every event/cursor/policy/diagnostic transaction refreshes the anchor before
+commit. A confirmed retention delete advances the chain epoch and records only
+the plan/candidate digests, snapshot boundary, and counts. After bootstrap, a
+missing anchor is a failure and is never silently reseeded. `authenticated-check`
+reports bounded insertion, deletion, reorder, edit, truncation, cursor rollback,
+policy substitution, diagnostic tampering, anchor, and key anomalies. A valid
+report authenticates only the configured local key; it is not origin attestation
+or a legal chain-of-custody claim.
+
 The macOS key provider uses only the data-protection Keychain generic-password path:
 non-synchronizable items, `WhenUnlockedThisDeviceOnly` access control, and an explicit
 service/account identity. The default app has no access-group entitlement; a signed

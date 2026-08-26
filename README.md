@@ -89,6 +89,12 @@ cargo +1.88.0 run -- retention-delete \
 cargo +1.88.0 run -- integrity-check \
   --journal "$JOURNAL"
 
+# Verify keyed local state. This detects event edits/insertion/deletion/reorder,
+# cursor rollback, policy substitution, and diagnostic tampering without making
+# an origin-authenticity claim beyond the local key.
+cargo +1.88.0 run -- authenticated-check \
+  --journal "$JOURNAL"
+
 # Inventory residue classes without printing journal or backup paths. This is
 # explanatory and read-only; it does not delete or compact anything.
 cargo +1.88.0 run -- residue-report \
@@ -127,6 +133,7 @@ encryption or key-management claim.
 | ghostrace retention-delete --journal ... [selectors] --confirm-plan ... --confirm-candidate-set ... --confirm-snapshot-boundary ... | Available; transactional logical deletion bound to one retention plan; refuses scope changes and leaves compaction/external copies separate |
 | ghostrace residue-report --journal ... [--backup <path>] | Available; path-free residue inventory and explicit logical/compaction/cryptographic/external-copy guarantees; read-only |
 | ghostrace integrity-check --journal ... | Available; bounded SQLite integrity/foreign-key checks with path-free recovery guidance; read-only |
+| ghostrace authenticated-check --journal ... | Available; keyed canonical-state verification for events, cursors, policy history, diagnostics, and explicit deletion boundaries; local-key-only validity |
 | ghostrace demo --fixture ... --event <uuid> | Available |
 | ghostrace preview --journal ... --output ... [--force] | Available; prints the bounded query, field inventory, policy, snapshot, coverage, and destination-class receipt before declassification |
 | ghostrace export --journal ... --output ... --confirm-plan ... --confirm-snapshot ... [--force] | Available; requires the matching preview digests, then decrypts and writes one bounded record at a time before atomically publishing a validated 0600 artifact |

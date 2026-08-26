@@ -43,16 +43,17 @@ fn migration_ledger_records_stable_identity_checksum_and_tool_version() {
             "0002_journal_metadata",
             "0003_cursor_contract",
             "0004_replay_boundary",
+            "0005_authenticated_state",
         ]
     );
-    assert_eq!(records.iter().map(|record| record.version).collect::<Vec<_>>(), [0, 1, 2, 3, 4]);
+    assert_eq!(records.iter().map(|record| record.version).collect::<Vec<_>>(), [0, 1, 2, 3, 4, 5]);
     assert!(records.iter().all(|record| record.checksum.len() == 64));
     assert!(records.iter().all(|record| {
         record.checksum.chars().all(|character| character.is_ascii_hexdigit())
             && record.tool_version == "ghostrace/0.0.1"
             && !record.applied_at.is_empty()
     }));
-    assert_eq!(journal.schema_version().expect("schema version"), 4);
+    assert_eq!(journal.schema_version().expect("schema version"), 5);
     println!("MIGRATION_LEDGER {records:?}");
 }
 
@@ -69,13 +70,13 @@ fn legacy_v1_database_upgrades_and_reopens_idempotently() {
     fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).expect("legacy permissions");
 
     let journal = open(&path);
-    assert_eq!(journal.schema_version().expect("upgraded schema"), 4);
-    assert_eq!(journal.applied_migrations().expect("upgraded ledger").len(), 5);
+    assert_eq!(journal.schema_version().expect("upgraded schema"), 5);
+    assert_eq!(journal.applied_migrations().expect("upgraded ledger").len(), 6);
     drop(journal);
 
     let reopened = open(&path);
-    assert_eq!(reopened.schema_version().expect("reopened schema"), 4);
-    assert_eq!(reopened.applied_migrations().expect("reopened ledger").len(), 5);
+    assert_eq!(reopened.schema_version().expect("reopened schema"), 5);
+    assert_eq!(reopened.applied_migrations().expect("reopened ledger").len(), 6);
     let connection = Connection::open(&path).expect("inspect upgraded database");
     let format: String = connection
         .query_row(
@@ -138,7 +139,7 @@ fn missing_reordered_partial_and_future_migrations_refuse_startup() {
         match expected {
             "missing" => assert!(matches!(error, GhostraceError::MigrationRecordMissing { .. })),
             "order" => assert!(matches!(error, GhostraceError::MigrationOrder { .. })),
-            "partial" => assert!(matches!(error, GhostraceError::PartialMigration { .. })),
+            "partial" => assert!(matches!(error, GhostraceError::MigrationRecordMissing { .. })),
             "future" => assert!(matches!(error, GhostraceError::FutureMigration { version: 99 })),
             _ => unreachable!(),
         }
@@ -157,7 +158,7 @@ fn unsupported_downgrade_refuses_startup() {
         Journal::open_fixture(&path, DeterministicKeyProvider::from_seed("migration-tests"))
             .err()
             .expect("downgrade must refuse");
-    assert!(matches!(error, GhostraceError::UnsupportedDowngrade { recorded: 4, database: 1 }));
+    assert!(matches!(error, GhostraceError::UnsupportedDowngrade { recorded: 5, database: 1 }));
     println!("MIGRATION_DOWNGRADE_REFUSAL {error}");
 }
 
@@ -173,7 +174,7 @@ fn backup_restore_preserves_migration_ledger() {
 
     let restored = open(&destination);
     assert_eq!(restored.applied_migrations().expect("restored ledger"), source_records);
-    assert_eq!(restored.schema_version().expect("restored schema"), 4);
+    assert_eq!(restored.schema_version().expect("restored schema"), 5);
     println!("MIGRATION_BACKUP bytes={} records={}", receipt.bytes, source_records.len());
 }
 
@@ -185,9 +186,13 @@ fn crash_after_each_migration_step_recovers_transactionally() {
         unreachable!("migration crash child should abort inside the runner");
     }
 
-    for migration_id in
-        ["0001_init", "0002_journal_metadata", "0003_cursor_contract", "0004_replay_boundary"]
-    {
+    for migration_id in [
+        "0001_init",
+        "0002_journal_metadata",
+        "0003_cursor_contract",
+        "0004_replay_boundary",
+        "0005_authenticated_state",
+    ] {
         let directory = private_directory();
         let path = directory.path().join(format!("crash-{migration_id}.sqlite3"));
         let status = Command::new(std::env::current_exe().expect("test executable"))
@@ -202,8 +207,8 @@ fn crash_after_each_migration_step_recovers_transactionally() {
         assert!(!status.success(), "migration child must abort at {migration_id}");
 
         let recovered = open(&path);
-        assert_eq!(recovered.schema_version().expect("recovered schema"), 4);
-        assert_eq!(recovered.applied_migrations().expect("recovered ledger").len(), 5);
+        assert_eq!(recovered.schema_version().expect("recovered schema"), 5);
+        assert_eq!(recovered.applied_migrations().expect("recovered ledger").len(), 6);
         println!("MIGRATION_CRASH_RECOVERY {migration_id} PASS");
     }
 }

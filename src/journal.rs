@@ -18,6 +18,9 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
+    authenticated::{
+        self, AuthenticatedDeletionMarker, AuthenticatedState, AuthenticatedStateReport,
+    },
     crypto::{
         decrypt_payload, encrypt_payload, CiphertextEnvelope, KeyProvider, SharedKeyProvider,
     },
@@ -52,6 +55,8 @@ const MIGRATION: &str = include_str!("../migrations/0001_init.sql");
 const MIGRATION_METADATA: &str = include_str!("../migrations/0002_journal_metadata.sql");
 const MIGRATION_CURSOR_CONTRACT: &str = include_str!("../migrations/0003_cursor_contract.sql");
 const MIGRATION_REPLAY_BOUNDARY: &str = include_str!("../migrations/0004_replay_boundary.sql");
+const MIGRATION_AUTHENTICATED_STATE: &str =
+    include_str!("../migrations/0005_authenticated_state.sql");
 const MIGRATION_TOOL_VERSION: &str = concat!("ghostrace/", env!("CARGO_PKG_VERSION"));
 const MIGRATION_MODE_KEY: &str = "mode";
 
@@ -476,6 +481,7 @@ impl Journal {
         policy: &RetentionPolicy,
     ) -> Result<RetentionPlan, GhostraceError> {
         self.with_read_snapshot(|connection| {
+            authenticated::require_valid(connection, self.key_provider.as_ref())?;
             plan_from_connection(connection, self.key_provider.as_ref(), policy)
         })
     }
@@ -496,6 +502,7 @@ impl Journal {
         }
 
         let mut connection = self.lock_connection()?;
+        self.ensure_authenticated_for_write(&mut connection)?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let live_boundary = transaction
             .query_row("SELECT COALESCE(MAX(ingest_seq), 0) FROM events", [], |row| {
@@ -542,6 +549,20 @@ impl Journal {
         let deleted_event_count = u64::try_from(candidates.len()).map_err(|_| {
             GhostraceError::RetentionPolicyInvalid("deleted event count is too large".to_owned())
         })?;
+        if deleted_event_count > 0 {
+            let marker = AuthenticatedDeletionMarker {
+                plan_digest: plan.plan_digest.to_string(),
+                candidate_set_digest: plan.candidate_set_digest.to_string(),
+                snapshot_boundary: plan.snapshot_boundary,
+                requested_event_count: plan.affected_event_count,
+                deleted_event_count,
+            };
+            authenticated::refresh_transaction(
+                &transaction,
+                self.key_provider.as_ref(),
+                Some(&marker),
+            )?;
+        }
         transaction.commit()?;
 
         if let Some(path) = self.path.as_deref() {
@@ -579,6 +600,39 @@ impl Journal {
     /// Run SQLite integrity and foreign-key checks without attempting repair.
     pub fn integrity_check(&self) -> Result<IntegrityReport, GhostraceError> {
         self.with_read_snapshot(IntegrityReport::from_connection)
+    }
+
+    /// Return the durable keyed anchor without exposing key material.
+    pub fn authenticated_state(&self) -> Result<AuthenticatedState, GhostraceError> {
+        let connection = self.lock_connection()?;
+        authenticated::load_public(&connection)
+    }
+
+    /// Create the initial authenticated anchor for an empty or legacy journal.
+    /// Opening never requires key access; callers that need an explicit
+    /// initialized receipt may invoke this command-level operation.
+    pub fn initialize_authenticated_state(&self) -> Result<(), GhostraceError> {
+        let mut connection = self.lock_connection()?;
+        authenticated::ensure_anchor(&mut connection, self.key_provider.as_ref())
+    }
+
+    /// Verify ordering, cursor state, policy history, diagnostics, and
+    /// explicit deletion boundaries against the configured local key.
+    pub fn authenticated_state_report(&self) -> Result<AuthenticatedStateReport, GhostraceError> {
+        self.with_read_snapshot(|connection| {
+            authenticated::report(connection, self.key_provider.as_ref())
+        })
+    }
+
+    /// Fail closed when authenticated state is not valid. The report method
+    /// remains available so callers can retain its bounded anomaly classes.
+    pub fn verify_authenticated_state(&self) -> Result<AuthenticatedStateReport, GhostraceError> {
+        let report = self.authenticated_state_report()?;
+        if report.valid {
+            Ok(report)
+        } else {
+            Err(GhostraceError::AuthenticatedStateInvalid(report.message.clone()))
+        }
     }
 
     /// Build a path-free, read-only inventory of known SQLite residue classes
@@ -705,6 +759,7 @@ impl Journal {
         }
         self.faults.hit(FaultPoint::IngestBeforeTransaction)?;
         let mut connection = self.lock_connection()?;
+        self.ensure_authenticated_for_write(&mut connection)?;
         let transaction = connection.transaction()?;
         self.faults.hit(FaultPoint::IngestAfterTransaction)?;
         record_policy_profile(&transaction, policy)?;
@@ -716,6 +771,7 @@ impl Journal {
             boundary,
         )?;
         insert_diagnostics(&transaction, diagnostics, &self.faults)?;
+        authenticated::refresh_transaction(&transaction, self.key_provider.as_ref(), None)?;
         self.faults.hit(FaultPoint::IngestBeforeCommit)?;
         transaction.commit()?;
         self.faults.hit(FaultPoint::IngestAfterCommit)?;
@@ -802,6 +858,7 @@ impl Journal {
     pub fn invalidate_cursor(&self, identity: &CursorIdentity) -> Result<(), GhostraceError> {
         self.faults.hit(FaultPoint::ControlBeforeTransaction)?;
         let mut connection = self.lock_connection()?;
+        self.ensure_authenticated_for_write(&mut connection)?;
         let transaction = connection.transaction()?;
         self.faults.hit(FaultPoint::ControlAfterTransaction)?;
         let changed = transaction.execute(
@@ -811,6 +868,7 @@ impl Journal {
         if changed == 0 {
             return Err(GhostraceError::CursorStateMissing { event_source: identity.source });
         }
+        authenticated::refresh_transaction(&transaction, self.key_provider.as_ref(), None)?;
         self.faults.hit(FaultPoint::ControlBeforeCommit)?;
         transaction.commit()?;
         self.faults.hit(FaultPoint::ControlAfterCommit)?;
@@ -835,6 +893,7 @@ impl Journal {
         }
         self.faults.hit(FaultPoint::ControlBeforeTransaction)?;
         let mut connection = self.lock_connection()?;
+        self.ensure_authenticated_for_write(&mut connection)?;
         let transaction = connection.transaction()?;
         self.faults.hit(FaultPoint::ControlAfterTransaction)?;
         record_policy_profile(&transaction, policy)?;
@@ -882,6 +941,7 @@ impl Journal {
                 boundary.map(serde_json::to_string).transpose()?,
             ],
         )?;
+        authenticated::refresh_transaction(&transaction, self.key_provider.as_ref(), None)?;
         self.faults.hit(FaultPoint::ControlBeforeCommit)?;
         transaction.commit()?;
         self.faults.hit(FaultPoint::ControlAfterCommit)?;
@@ -1008,6 +1068,21 @@ impl Journal {
 
     fn lock_connection(&self) -> Result<std::sync::MutexGuard<'_, Connection>, GhostraceError> {
         self.conn.lock().map_err(|_| GhostraceError::Migration("journal mutex poisoned".to_owned()))
+    }
+
+    fn ensure_authenticated_for_write(
+        &self,
+        connection: &mut Connection,
+    ) -> Result<(), GhostraceError> {
+        if self.path.is_none() {
+            // An in-memory connection cannot be modified by another process;
+            // the first transaction bootstraps its anchor after the event,
+            // preserving the single key access at the encryption boundary.
+            return Ok(());
+        }
+        authenticated::ensure_anchor(connection, self.key_provider.as_ref())?;
+        authenticated::require_valid(connection, self.key_provider.as_ref())?;
+        Ok(())
     }
 }
 
@@ -2134,7 +2209,7 @@ fn parse_kind(value: &str) -> Result<crate::model::EventKind, GhostraceError> {
         .map_err(|_| GhostraceError::InvalidEvent("stored event kind is invalid".to_owned()))
 }
 
-fn migration_specs() -> [MigrationSpec; 5] {
+fn migration_specs() -> [MigrationSpec; 6] {
     [
         MigrationSpec {
             id: "0000_migration_ledger",
@@ -2160,6 +2235,12 @@ fn migration_specs() -> [MigrationSpec; 5] {
             version: 4,
             schema_version: 4,
             sql: MIGRATION_REPLAY_BOUNDARY,
+        },
+        MigrationSpec {
+            id: "0005_authenticated_state",
+            version: 5,
+            schema_version: 5,
+            sql: MIGRATION_AUTHENTICATED_STATE,
         },
     ]
 }
@@ -2216,7 +2297,7 @@ fn run_migrations(connection: &mut Connection, faults: &FaultPlan) -> Result<(),
 
 fn initialize_migration_ledger(
     connection: &mut Connection,
-    specs: &[MigrationSpec; 5],
+    specs: &[MigrationSpec; 6],
     faults: &FaultPlan,
 ) -> Result<(), GhostraceError> {
     let ledger_exists = table_exists(connection, "migration_records")?;
@@ -2340,7 +2421,7 @@ fn insert_applied_migration(
 
 fn validate_applied_prefix(
     records: &[AppliedMigration],
-    specs: &[MigrationSpec; 5],
+    specs: &[MigrationSpec; 6],
 ) -> Result<usize, GhostraceError> {
     for (index, record) in records.iter().enumerate() {
         let Some(spec) = specs.get(index) else {
@@ -2381,7 +2462,7 @@ fn validate_applied_prefix(
 
 fn validate_final_schema(
     connection: &Connection,
-    specs: &[MigrationSpec; 5],
+    specs: &[MigrationSpec; 6],
 ) -> Result<(), GhostraceError> {
     let records = load_applied_migrations(connection)?;
     if records.len() != specs.len() {
