@@ -158,6 +158,14 @@
       "seed": "ghostrace-fixture-seed-v1",
       "sha256": "0a7574897299f8e3af5cc258c7f13b2dab0ecd9146924ba54d0c9f9dacbdc827",
       "bytes": 1931
+    },
+    {
+      "path": "fixtures/shell-secret-leakage-v1.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "a86e12ca24c01e9cb08bad0c8f2b25a50c750fdc08d7113d6ace83f5f3b6a512",
+      "bytes": 3441
     }
   ],
   "privacy": {

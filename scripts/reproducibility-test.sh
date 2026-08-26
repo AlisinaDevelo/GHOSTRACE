@@ -60,6 +60,9 @@ PY
 echo "reproducibility: shell wrapper lifecycle"
 cargo +1.88.0 test --quiet --locked --test shell_wrapper_lifecycle -- --nocapture
 
+echo "reproducibility: shell secret leakage"
+cargo +1.88.0 test --quiet --locked --test shell_secret_leakage -- --nocapture
+
 echo "reproducibility: deterministic demo"
 event_id=00000000-0000-4000-8000-000000000008
 cargo +1.88.0 run --quiet -- demo --fixture fixtures/causal-chain.jsonl --event "$event_id" > "$WORK_DIR/demo-a.json"
