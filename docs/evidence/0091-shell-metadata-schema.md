@@ -85,8 +85,9 @@ PR #316 was pushed from `feature/shell-metadata-schema` and merged only after
 both duplicate workflow runs were green. All 20 live checks passed: Linux
 stable, Linux MSRV, macOS stable, rustfmt, Clippy, roadmap, Cargo policy/deny,
 advisories/audit, dependency review, and both network-denial fixture lanes.
-Required checks were not bypassed. The evidence publication is this branch and
-will be reviewed and merged separately after the implementation merge.
+Required checks were not bypassed. Evidence PR [#317](https://github.com/AlisinaDevelo/GHOSTRACE/pull/317)
+was subsequently reviewed and squash-merged to protected `main` at
+`3f62237aeabbdab04433f4fc4cc08ba58f78ebf5`.
 
 ## Retained artifacts
 
