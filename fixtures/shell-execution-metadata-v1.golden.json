@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "wrapper_session_id": "wrapper-session-1",
+  "executable_id": "zsh",
+  "working_directory": {"path_class":"workspace_relative","path_digest":"sha256:0000000000000000000000000000000000000000000000000000000000000000"},
+  "started_at": "2026-08-26T09:00:00Z",
+  "ended_at": "2026-08-26T09:00:01Z",
+  "status": "succeeded",
+  "exit_code": 0,
+  "signal": null
+}

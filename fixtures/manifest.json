@@ -134,6 +134,22 @@
       "seed": "ghostrace-fixture-seed-v1",
       "sha256": "321d071b79b512a6d5ed6094ac88231f3021d56f5db08de148780d0bd88f223a",
       "bytes": 578
+    },
+    {
+      "path": "fixtures/shell-execution-metadata-v1.golden.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "b783af7c36285d66906ca742a814d036f95a9147fa74fe345aa45220253de33f",
+      "bytes": 384
+    },
+    {
+      "path": "tests/fixtures/shell-metadata-adversarial-v1.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "c2f59848c0d7d3918a53218721ac5246a6b6df865a6ea762942bf20550c8a1a9",
+      "bytes": 1268
     }
   ],
   "privacy": {

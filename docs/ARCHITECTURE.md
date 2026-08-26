@@ -139,6 +139,26 @@ atomic publication, cleanup on failure, and leave the source journal untouched.
 Automatic archive creation is forbidden, and deletion semantics explicitly stop at
 the external-copy boundary.
 
+### Explicit shell-wrapper metadata
+
+[`schemas/shell-execution-metadata-v1.json`](../schemas/shell-execution-metadata-v1.json)
+defines the only metadata a future user-invoked shell wrapper may submit. The
+strict v1 record contains an opaque wrapper session, a normalized executable
+basename identity, a working-directory class plus root-scoped digest, start and
+end timestamps, an outcome class, an exit code, and a signal. The raw working
+directory is never a field; the executable identity cannot contain a path,
+credentials, or shell text. Outcome validation requires `0` for success, a
+non-zero exit code for failure, a signal with no exit code for signaled
+termination, and no status details for unknown outcomes. End time cannot precede
+start time and a wrapper run is bounded to seven days.
+
+The schema has no representation for arguments, environment variables, standard
+input/output, shell history, aliases, command text, or expanded command text.
+`ShellExecutionMetadata` uses deny-unknown-fields deserialization plus semantic
+validation, and its field registry records the semantic and sensitivity class of
+every retained field. This is a data contract, not a shell executor or ambient
+collector; a later wrapper must remain explicit and policy-gated.
+
 ## FSEvents lifecycle boundary
 
 The `fsevents` module is a deliberately small native boundary beneath the selected-root

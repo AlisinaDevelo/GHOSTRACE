@@ -234,3 +234,10 @@ The event model does not include keystrokes, microphone or screen data, clipboar
 values, window titles, page contents, file contents, credentials, environment
 variables, command arguments, standard input, or standard output. A future adapter
 must justify every new field in the privacy and threat documents before adding it.
+
+The explicit shell-wrapper proposal follows the same rule. Its standalone v1
+metadata schema permits only wrapper session, normalized executable identity,
+sanitized working-directory class/digest, start/end time, outcome, exit code, and
+signal. It has no field for arguments, environment, terminal streams, history,
+aliases, or command text; see
+[`schemas/shell-execution-metadata-v1.json`](../schemas/shell-execution-metadata-v1.json).

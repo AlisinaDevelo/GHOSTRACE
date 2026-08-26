@@ -196,6 +196,24 @@ backups. Any future deletion feature must identify the copy owner and scope, rep
 what remains recoverable, and preserve the source journal when archive publication
 fails.
 
+### Explicit shell wrapper boundary
+
+The shell metadata contract is intentionally narrower than a terminal transcript.
+`ghostrace shell-schema` only prints the checked-in v1 contract and never executes
+a shell. A future wrapper may retain the opaque wrapper session, normalized
+executable identity, sanitized working-directory class/digest, start/end timing,
+outcome, exit code, and termination signal. These fields are identifying,
+sensitive metadata, timing evidence, or outcome evidence as declared by the field
+registry; they are not proof of command intent or complete process history.
+
+Arguments, environment variables, standard input/output, shell history, aliases,
+raw or expanded command text, and raw working-directory paths are not schema
+properties and are rejected by both JSON Schema and typed deserialization. Invalid
+tokens, credential-like executable identities, reversed timestamps, inconsistent
+exit/signal combinations, and oversized metadata fail closed without echoing the
+untrusted value. This contract does not authorize ambient shell capture; an
+explicit wrapper and a later policy/consent gate remain required.
+
 ## Retention and deletion
 
 The fixture headstart has no ambient retention burden. The read-only
