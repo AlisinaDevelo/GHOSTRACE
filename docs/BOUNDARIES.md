@@ -11,6 +11,13 @@ reported it, which policy allowed or denied it, how strong the evidence is, and
 where coverage is missing. Its explanation layer links observations without
 turning temporal order into proof of intent or complete causality.
 
+GHOSTRACE is currently the incubation track in the evidence-engineering family.
+The fixture path and consent-gated collector API are useful research and contract
+surfaces, but live capture remains disabled until the privacy, cursor-recovery,
+durable-writer, encryption, and release gates are demonstrated on the named
+device. This posture is deliberate: a long roadmap or green fixture suite does
+not substitute for a safe live-capture experiment.
+
 The current release includes the fixture CLI and an explicitly consent-gated,
 selected-root FSEvents collector API. Ambient CLI capture remains disabled until
 the remaining path-policy, recovery, writer, encryption, and release gates pass.
@@ -28,6 +35,13 @@ The public descriptions of STRATA and CARTOGRAPH may evolve independently. That 
 a sibling-project identity decision, not a reason to merge either analyzer into
 GHOSTRACE. This repository refers to both as source-code architecture analysis and
 does not present them as event-journal components.
+
+The four repositories share only vocabulary and explicit artifact boundaries
+(versioning, provenance, evidence quality, digests, and test-vector conventions).
+They remain separate implementations with no runtime or database dependency:
+LOOM owns exact document evidence, STRATA owns compiler-backed semantic change
+analysis, CARTOGRAPH owns broader architecture graph and reconciliation, and
+GHOSTRACE owns local runtime observations and evidence-linked explanations.
 
 ## Allowed relationship
 

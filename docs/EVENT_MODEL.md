@@ -156,6 +156,20 @@ own source scope. Remote URLs, credential helpers, config values, reflog message
 raw filesystem paths are structurally absent; an adapter must discard those inputs
 before constructing an identity.
 
+### Metadata-only Git snapshot
+
+The future explicit Git snapshot adapter uses the separate
+[`GitSnapshotMetadata`](GIT_SNAPSHOT.md) contract. It replaces raw ref names with
+a `branch_class`, tags every optional HEAD/tree/index object ID with its SHA-1
+or SHA-256 algorithm, and retains only bounded status and operation classes.
+Partial-clone, replace-ref, shallow-history, submodule, and alternate-object-
+database limitations are required fields; an unavailable fact is `unknown`.
+The metadata contract structurally excludes messages, authors, remotes,
+filenames, diffs, patches, paths, and object contents and performs no object
+reads. The existing v1 `GitSnapshotPayload` row in the synthetic causal fixture
+is retained for event-envelope compatibility only; it is not a live-adapter
+permission to collect those excluded fields.
+
 ## Evidence levels
 
 - **Direct:** the source reported the fact itself, such as a fixture event containing

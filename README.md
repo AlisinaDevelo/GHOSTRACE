@@ -9,8 +9,8 @@ GHOSTRACE is a local macOS event provenance journal. It records bounded,
 user-authorized evidence about changes—not everything a person does—and explains
 which observations support each sequence.
 
-> **Status:** M2 selected-root collector API headstart (0.0.1). The API requires an
-> explicit consent confirmation and writes only bounded filesystem metadata through the
+> **Status:** incubation / M2 selected-root collector API headstart (0.0.1). The API
+> requires an explicit consent confirmation and writes only bounded filesystem metadata through the
 > existing writer; the ambient `capture` command remains intentionally disabled until
 > path-race containment, cursor recovery, and release gates are complete. This
 > repository makes no legal chain-of-custody claim.
@@ -173,6 +173,7 @@ encryption or key-management claim.
 | Shell wrapper lifecycle contract | Available as synthetic reference tests for child status propagation and explicit incomplete-execution gaps; no shell executor is shipped |
 | Shell secret-leakage red-team contract | Available as synthetic negative tests for metadata, journal, diagnostics, exports, panic output, and documented OS exposure; no shell capture is shipped |
 | Git repository/worktree identity contract | Available as a path-free metadata contract with object-database/worktree digests, selected-root/source-scope binding, and move/clone/linked-worktree/submodule/bare/reinitialization continuity tests; no Git command runner or remote access is shipped |
+| Metadata-only Git snapshot contract | Available as a strict algorithm-aware SHA-1/SHA-256 snapshot boundary with bounded status/operation facts and explicit partial-history, replace-ref, shallow, submodule, and alternate-object-database limitations; no object content is read |
 | Shell, Git, frontmost-app, or browser collectors | Not shipped |
 | macOS Keychain-backed production encryption | Not shipped |
 | Signed/notarized release artifacts | Not shipped |
@@ -319,6 +320,8 @@ docs/adr/            Immutable architecture decisions
 - [Shell wrapper lifecycle fixture](fixtures/shell-wrapper-lifecycle-v1.json) — synthetic status, timeout, cancellation, and explicit gap contract
 - [Shell secret-leakage fixture](fixtures/shell-secret-leakage-v1.json) — synthetic unique-sentinel corpus for denied shell channels and documented external OS exposure
 - [Git repository/worktree identity fixture](fixtures/git-repository-worktree-identity-v1.json) — path-free object-database/worktree continuity matrix for move, clone, linked worktree, submodule, bare, scope rebinding, and reinitialization
+- [Metadata-only Git snapshot contract](docs/GIT_SNAPSHOT.md) — algorithm-aware object IDs, bounded status/operation facts, explicit source limitations, and excluded Git metadata
+- [Git snapshot golden fixture](fixtures/git-snapshot-metadata-v1.golden.json) — deterministic metadata-only snapshot example
 - [Filesystem benchmark corpus](fixtures/filesystem-benchmark-corpus-v1.json) — bounded synthetic trees and native measurement contract
 - [Reproducibility](docs/REPRODUCIBILITY.md) — pinned toolchain, fixture provenance, and clean-machine smoke
 - [Research](docs/RESEARCH.md) — landscape, differentiation, and primary sources

@@ -86,6 +86,14 @@ transition matrix covers move, clone, linked-worktree, submodule, bare, scope
 rebinding, and reinitialization; a future adapter still has to supply the stable
 metadata and prove its Git command parsing separately.
 
+Task 0095 extends that boundary with `GitSnapshotMetadata`: object IDs are
+explicitly algorithm-tagged, branch names are reduced to classes, status and
+operation facts are bounded, and partial-clone, replace-ref, shallow-history,
+submodule, and alternate-object-database conditions are visible. The type has
+no object reader and no representation for refs, messages, authors, remotes,
+paths, filenames, diffs, patches, or content. Unknown source state remains an
+explicit limitation rather than a completeness claim.
+
 ## Residual risks
 
 - A same-user attacker may read plaintext while a process is running, inspect

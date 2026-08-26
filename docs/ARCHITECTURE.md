@@ -181,6 +181,19 @@ These are identity and continuity semantics only: the adapter must supply stable
 filesystem metadata and must not turn a path, remote, reflog, or Git command
 output into retained evidence.
 
+### Metadata-only Git snapshot boundary
+
+[`GitSnapshotMetadata`](GIT_SNAPSHOT.md) is the privacy contract for the next
+Git integration stage. It accepts an opaque repository identity, an explicit
+SHA-1 or SHA-256 format, optional algorithm-tagged HEAD/tree/index IDs, bounded
+status counts, branch and operation classes, and required source limitations.
+It has no path, ref name, remote, message, author, filename, diff, patch, or
+object-content field. Its constructors perform no filesystem, Git, network, or
+object-database I/O; a future adapter must normalize metadata before calling
+them and must discard all other command output. Unknown source conditions are
+represented explicitly rather than promoted to complete history. The snapshot
+schema and digest are validated before any future event projection.
+
 ### Shell-wrapper lifecycle reference harness
 
 [`fixtures/shell-wrapper-lifecycle-v1.json`](../fixtures/shell-wrapper-lifecycle-v1.json)

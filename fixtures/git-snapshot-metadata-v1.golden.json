@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "repository_id": "git-demo",
+  "repository_kind": "standard",
+  "object_format": "sha1",
+  "head": {
+    "algorithm": "sha1",
+    "hex": "0123456789abcdef0123456789abcdef01234567"
+  },
+  "tree": {
+    "algorithm": "sha1",
+    "hex": "89abcdef0123456789abcdef0123456789abcdef"
+  },
+  "index": null,
+  "worktree_state": "modified",
+  "branch_class": "local",
+  "operation": "idle",
+  "status": {
+    "staged": 1,
+    "unstaged": 2,
+    "untracked": 1,
+    "conflicted": 0
+  },
+  "limitations": {
+    "partial_clone": "full",
+    "replace_refs": "none",
+    "shallow_history": "complete",
+    "submodules": "none",
+    "alternate_object_database": "none"
+  },
+  "snapshot_digest": "sha256:8bd47ac09eaf41499aea51f928085a1e18c164f15c51340cb69cfa0ab5a87c55"
+}
