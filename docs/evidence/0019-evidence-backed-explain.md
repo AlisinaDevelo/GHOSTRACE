@@ -38,7 +38,7 @@ not a causal conclusion.
 ## Protected-main device reproduction
 
 The focused parent matrix and all safety pipes below ran on protected `main`
-`0680747f8d913453e9d84d5c65c9f65ac389f580` on the named device. Combined
+`1fea9a1967cfd8b9e8033e2a07719d03a6bf762d` on the named device. Combined
 stdout and stderr are retained in `/tmp` and hashed here.
 
 | Fact | Recorded value |
@@ -49,16 +49,26 @@ stdout and stderr are retained in `/tmp` and hashed here.
 | Python | 3.9.6 |
 | Counterexample fixture | `fixtures/explanation-counterexamples-v1.json`, 2115 bytes, SHA-256 `7b2158d83919ef03649c54bedbd5bed2b2f259f1e05c9b6e7b8de377298b7d49` |
 | Causal fixture | `fixtures/causal-chain.jsonl`, 4740 bytes, SHA-256 `22c4e9df8520cbd5b14b343ea2f6c5cca3bcdf0de34433384f6e069b7984bdc8` |
-| Source | protected `main` `0680747f8d913453e9d84d5c65c9f65ac389f580` |
+| Source | protected `main` `1fea9a1967cfd8b9e8033e2a07719d03a6bf762d` |
 | Date | 2026-08-26 |
 
 | Lane | Result | Log SHA-256 |
 | --- | --- | --- |
-| focused debug: claim grammar, correlation, determinism, vertical slice | 4 + 4 + 4 + 28 passed, exit 0 | `df9f63239a300cdab6375f08bdbab864cab7c657a0462ef2bfaf80cecf31297d` |
-| focused release: claim grammar, correlation, determinism, vertical slice | 4 + 4 + 4 + 28 passed, exit 0 | `16c9d60f7cb166779cba77cdda32c1238c7a365c6df375da5189f7cf7b4d301b` |
-| `scripts/reproducibility-test.sh` | exit 0; all checks passed | `264c211cc284d8b48d94906fb6bf9e865f1adcb15d8bde54f75ff34424600134` |
-| `scripts/offline-network-test.sh` | exit 0 under macOS `sandbox-exec` | `f787b3dd09c6bedea77dd2093295cc8fdc0662498c1022ad4aa132d48f514fee` |
-| `scripts/fsevents-sanitizer.sh` | exit 0; native test passed with documented suppressions | `1073e58d218aaa30faf7c977e8ff202c627afb5fe306ca6889f8f4012ea1ae76` |
+| focused debug: claim grammar, correlation, determinism, vertical slice | 4 + 4 + 4 + 28 passed, exit 0 | `da7e9dce56a5d4a3676fab8949da1468b3d29f8cdc65ddea367b1b3447a6659f` |
+| focused release: claim grammar, correlation, determinism, vertical slice | 4 + 4 + 4 + 28 passed, exit 0 | `ab24775e3e35d6e73f704865a8f11bdba91b4d1e59a125585e4f177237e855de` |
+| `scripts/reproducibility-test.sh` (final rerun) | exit 0; all checks passed | `4b1006ffe3ad06f1dab0d5b1ccbd456a5df127462fbc330b7a9c82b63d694ba7` |
+| `scripts/offline-network-test.sh` | exit 0 under macOS `sandbox-exec` | `b18304f6e9692609d1dbb931709ec36677274aeb9cf7e03dd501b9173200acb0` |
+| `scripts/fsevents-sanitizer.sh` | exit 0; native test passed with documented suppressions | `5142f783eec2ecc330236f6aab6ee880533b839e22acc8836d44d9de13e2d95b` |
+| isolated native safe-storm retry | exit 0; 170 observations, 0 ordering inversions, 3/3 recoveries, 0 drops | `86bbf6d5999878d106cf24f6a41597572e574067c1d8071e786389d89bf485ce` |
+
+The first full reproducibility attempt surfaced a transient native
+`CursorRegression { event_source: Filesystem }` in the lifecycle corpus (exit
+101; receipt `fa31c9180698c1b9254e97e9394bef566c7870d2863f6ffed16b36f7ef57525f`).
+The lifecycle test was immediately rerun in isolation and passed with the
+receipt above; a second complete reproducibility run then passed all checks
+with receipt `4b1006ffe3ad06f1dab0d5b1ccbd456a5df127462fbc330b7a9c82b63d694ba7`.
+The event-ordering guard remains fail-closed; this transient observation is
+retained rather than hidden.
 
 The reproducibility lane includes schema/fixture checks, deterministic CLI
 explanation/export comparisons, capture refusal, Python tests, Clippy, and all
@@ -78,9 +88,9 @@ cargo +1.88.0 test --locked --test vertical_slice \
 ```
 
 It exited 0 with 1 passed and 27 filtered tests. The combined receipt is
-`/tmp/ghostrace-0019-mvp.log`, SHA-256
-`d2f9e301ba154d806aa55cfccdbda95d96cc2b1ac580fa0b22420519e33baa3b`; elapsed
-time was 0.29 s and maximum resident set size was 60,555,264 bytes. The
+`/tmp/ghostrace-0019-merged-mvp.log`, SHA-256
+`4c8107d394c1c978b5b6b7e24c5cb7e2d87459a75bfb10d94b2a0e4647256c60`; elapsed
+time was 0.31 s and maximum resident set size was 59,703,296 bytes. The
 receipt contains only synthetic fixture test output and resource counters.
 
 ## Existing child evidence and hosted review
@@ -102,13 +112,16 @@ The current main checkout also passes the hosted gates on the docs-only parent
 record; the device receipts above remain the acceptance evidence rather than a
 CI substitution.
 
-The parent closure validators also passed: 46 Python tests (log SHA-256
-`dd5b664058ca22e6e3cc07a6abb0d85965455fabc773e4f7493b17fdfc5937ca`), the
-roadmap validator with 160 tasks, 12 milestones, 488 dependency edges, 108
-parent edges, and one additional done task (receipt SHA-256
-`87071c70cc9899ab088e15a71cb913cb0916a3a4bde2b80d790ddc88106c2793`), and the
-release-evidence validator with 36 measures (receipt SHA-256
-`82ff0862f41c422cc4ad89be1d9fb40f64e2fda7179a690ffadff32994edc3f7`).
+The parent closure validators also passed: 46 Python tests, the roadmap
+validator with 160 tasks, 12 milestones, 488 dependency edges, 108 parent
+edges, and one additional done task, and the release-evidence validator with 36
+measures. These checks were rerun after the protected-main reproduction.
+
+| Closure validator | Result | Log SHA-256 |
+| --- | --- | --- |
+| `python3 -m unittest discover -s tests -p 'test_*.py'` | 46 passed, exit 0 | `5959fd127f3e4ca1a241752487e7ec6b45d0f09ad2c81e63b304ab9eb7cda0b7` |
+| `python3 scripts/roadmap.py check` | 160 tasks, 12 milestones, 488 dependency edges, 108 parent edges, exit 0 | `87071c70cc9899ab088e15a71cb913cb0916a3a4bde2b80d790ddc88106c2793` |
+| `python3 scripts/release-evidence.py check` | 36 measures, 12 milestones, exit 0 | `82ff0862f41c422cc4ad89be1d9fb40f64e2fda7179a690ffadff32994edc3f7` |
 
 ## Boundaries and limitations
 
