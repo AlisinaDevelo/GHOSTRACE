@@ -5,7 +5,8 @@ use clap::{Parser, Subcommand};
 use ghostrace::{
     capture, explain, export_journal_with_confirmation, fixture::ingest_fixture, journal::Journal,
     policy::PolicyProfile, preview_export, validate_export, DeterministicKeyProvider,
-    ExportRequest, GhostraceError, RetentionPolicy, RootId, EVENT_SCHEMA_JSON,
+    ExportRequest, GhostraceError, RetentionConfirmation, RetentionPolicy, RootId, SnapshotDigest,
+    EVENT_SCHEMA_JSON,
 };
 use uuid::Uuid;
 
@@ -93,6 +94,31 @@ enum Command {
         #[arg(long)]
         retain_at_most_bytes: Option<u64>,
     },
+    /// Apply one previously previewed retention scope as a transactional
+    /// logical deletion. Compaction and external-copy handling remain separate.
+    RetentionDelete {
+        #[arg(long)]
+        journal: PathBuf,
+        #[arg(long)]
+        before: Option<String>,
+        #[arg(long)]
+        source: Option<String>,
+        #[arg(long)]
+        root_id: Option<String>,
+        #[arg(long)]
+        retain_at_most_events: Option<u64>,
+        #[arg(long)]
+        retain_at_most_bytes: Option<u64>,
+        /// Plan digest printed by the matching `retention-plan` command.
+        #[arg(long)]
+        confirm_plan: String,
+        /// Candidate-set digest printed by the matching `retention-plan` command.
+        #[arg(long)]
+        confirm_candidate_set: String,
+        /// Snapshot boundary printed by the matching `retention-plan` command.
+        #[arg(long)]
+        confirm_snapshot_boundary: u64,
+    },
     /// Print a read-only, path-free inventory of retention residue classes.
     ResidueReport {
         #[arg(long)]
@@ -101,6 +127,11 @@ enum Command {
         /// printed in the report.
         #[arg(long = "backup")]
         backups: Vec<PathBuf>,
+    },
+    /// Run bounded SQLite integrity and foreign-key checks without repair.
+    IntegrityCheck {
+        #[arg(long)]
+        journal: PathBuf,
     },
     /// Validate a JSONL export before consuming its records.
     Validate {
@@ -210,12 +241,65 @@ fn run(cli: Cli) -> Result<(), GhostraceError> {
             journal.shutdown()?;
             Ok(())
         }
+        Command::RetentionDelete {
+            journal,
+            before,
+            source,
+            root_id,
+            retain_at_most_events,
+            retain_at_most_bytes,
+            confirm_plan,
+            confirm_candidate_set,
+            confirm_snapshot_boundary,
+        } => {
+            let mut policy = if let Some(before) = before {
+                RetentionPolicy::before(parse_timestamp(&before)?)
+            } else if retain_at_most_events.is_some() || retain_at_most_bytes.is_some() {
+                RetentionPolicy::default()
+            } else {
+                RetentionPolicy::default_at(Utc::now())
+            };
+            policy.source = source.map(|value| parse_source(&value)).transpose()?;
+            policy.root_id = root_id.map(RootId::try_from).transpose().map_err(|_| {
+                GhostraceError::RetentionPolicyInvalid("root ID is invalid".to_owned())
+            })?;
+            policy.retain_at_most_events = retain_at_most_events;
+            policy.retain_at_most_bytes = retain_at_most_bytes;
+            let journal = open_fixture_journal(journal)?;
+            let plan = journal.retention_plan(&policy)?;
+            let confirmation = RetentionConfirmation {
+                schema_version: plan.schema_version,
+                plan_digest: SnapshotDigest::try_from(confirm_plan)
+                    .map_err(|_| GhostraceError::RetentionConfirmationMismatch)?,
+                candidate_set_digest: SnapshotDigest::try_from(confirm_candidate_set)
+                    .map_err(|_| GhostraceError::RetentionConfirmationMismatch)?,
+                snapshot_boundary: confirm_snapshot_boundary,
+                confirmed: true,
+            };
+            let receipt = journal.delete_retention(&plan, &confirmation)?;
+            println!("{}", serde_json::to_string_pretty(&receipt)?);
+            journal.shutdown()?;
+            Ok(())
+        }
         Command::ResidueReport { journal, backups } => {
             let journal = open_fixture_journal(journal)?;
             let report = journal.residue_report(&backups)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
             journal.shutdown()?;
             Ok(())
+        }
+        Command::IntegrityCheck { journal } => {
+            let journal = open_fixture_journal(journal)?;
+            let report = journal.integrity_check()?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            journal.shutdown()?;
+            if report.integrity_ok {
+                Ok(())
+            } else {
+                Err(GhostraceError::IntegrityReportInvalid(
+                    "integrity check failed; follow the recovery guidance".to_owned(),
+                ))
+            }
         }
         Command::Validate { export } => {
             let validated = validate_export(export)?;

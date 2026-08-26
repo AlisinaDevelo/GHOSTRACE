@@ -72,6 +72,12 @@ pub enum GhostraceError {
     #[error("retention residue report is invalid: {0}")]
     ResidueReportInvalid(String),
 
+    #[error("retention deletion refused: {0}")]
+    RetentionDeletionRefused(String),
+
+    #[error("integrity report is invalid: {0}")]
+    IntegrityReportInvalid(String),
+
     #[error("journal directory permissions are not private (expected no group/world access)")]
     InsecurePermissions(PathBuf),
 

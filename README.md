@@ -74,6 +74,21 @@ cargo +1.88.0 run -- retention-plan \
   --journal "$JOURNAL" \
   --before 2026-01-01T00:00:08Z
 
+# Apply only the exact confirmed scope printed by retention-plan. This is a
+# logical deletion; it does not compact SQLite or remove external copies.
+# Set the three confirmation variables from the matching JSON receipt above.
+cargo +1.88.0 run -- retention-delete \
+  --journal "$JOURNAL" \
+  --before 2026-01-01T00:00:08Z \
+  --confirm-plan "$PLAN_DIGEST" \
+  --confirm-candidate-set "$CANDIDATE_SET_DIGEST" \
+  --confirm-snapshot-boundary "$SNAPSHOT_BOUNDARY"
+
+# Run bounded SQLite integrity and foreign-key checks. A failed check is a
+# recovery stop signal, not an automatic repair request.
+cargo +1.88.0 run -- integrity-check \
+  --journal "$JOURNAL"
+
 # Inventory residue classes without printing journal or backup paths. This is
 # explanatory and read-only; it does not delete or compact anything.
 cargo +1.88.0 run -- residue-report \
@@ -109,7 +124,9 @@ encryption or key-management claim.
 | ghostrace ingest --journal ... --fixture ... | Available; persists a checked-in fixture batch |
 | ghostrace explain --journal ... --event <uuid> | Available; deterministic after reopen |
 | ghostrace retention-plan --journal ... [--before ...] [--source ...] [--root-id ...] [--retain-at-most-events ...] [--retain-at-most-bytes ...] | Available; read-only dry-run with an authenticated snapshot boundary, candidate digest, coverage gaps, key generations, and conservative encrypted-payload byte estimate |
+| ghostrace retention-delete --journal ... [selectors] --confirm-plan ... --confirm-candidate-set ... --confirm-snapshot-boundary ... | Available; transactional logical deletion bound to one retention plan; refuses scope changes and leaves compaction/external copies separate |
 | ghostrace residue-report --journal ... [--backup <path>] | Available; path-free residue inventory and explicit logical/compaction/cryptographic/external-copy guarantees; read-only |
+| ghostrace integrity-check --journal ... | Available; bounded SQLite integrity/foreign-key checks with path-free recovery guidance; read-only |
 | ghostrace demo --fixture ... --event <uuid> | Available |
 | ghostrace preview --journal ... --output ... [--force] | Available; prints the bounded query, field inventory, policy, snapshot, coverage, and destination-class receipt before declassification |
 | ghostrace export --journal ... --output ... --confirm-plan ... --confirm-snapshot ... [--force] | Available; requires the matching preview digests, then decrypts and writes one bounded record at a time before atomically publishing a validated 0600 artifact |

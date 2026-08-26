@@ -451,6 +451,21 @@ regression fixture is `tests/fixtures/fault-schedules-v1.json`. The plan is an
 explicit test capability and is never installed by the normal journal
 constructors or live capture.
 
+### Retention deletion and integrity boundary
+
+The retention planner is read-only until a caller supplies its exact plan
+digest, candidate-set digest, and ingest snapshot boundary to `retention-delete`.
+That command acquires an immediate SQLite transaction, rechecks every candidate,
+rejects scope drift, cursor-tail references, and unselected child events, then
+deletes selected rows in reverse ingest order. Its receipt is explicitly
+logical-only: it does not run `VACUUM`, destroy key material, or remove external
+copies. A failure before commit leaves all rows intact.
+
+`integrity-check` runs SQLite integrity and foreign-key checks on a bounded,
+path-free read snapshot. It provides recovery guidance but never repairs the
+database. A failure requires preserving the original and performing any repair
+on a private verified copy with before-and-after receipts.
+
 The macOS key provider uses only the data-protection Keychain generic-password path:
 non-synchronizable items, `WhenUnlockedThisDeviceOnly` access control, and an explicit
 service/account identity. The default app has no access-group entitlement; a signed

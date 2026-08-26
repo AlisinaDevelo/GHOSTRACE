@@ -149,6 +149,58 @@ if any("journal.sqlite3" in value for value in report.get("notes", [])):
     raise SystemExit("retention residue report leaked a path")
 PY
 
+echo "reproducibility: transactional retention confirmation"
+cargo +1.88.0 run --quiet -- retention-plan \
+  --journal "$journal" \
+  --before 1970-01-01T00:00:00Z \
+  > "$WORK_DIR/empty-retention-plan.json"
+read -r retention_plan_digest retention_candidate_digest retention_boundary < <(
+  python3 - "$WORK_DIR/empty-retention-plan.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    plan = json.load(handle)
+print(plan["plan_digest"], plan["candidate_set_digest"], plan["snapshot_boundary"])
+PY
+)
+cargo +1.88.0 run --quiet -- retention-delete \
+  --journal "$journal" \
+  --before 1970-01-01T00:00:00Z \
+  --confirm-plan "$retention_plan_digest" \
+  --confirm-candidate-set "$retention_candidate_digest" \
+  --confirm-snapshot-boundary "$retention_boundary" \
+  > "$WORK_DIR/empty-retention-receipt.json"
+python3 - "$WORK_DIR/empty-retention-receipt.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    receipt = json.load(handle)
+if receipt["requested_event_count"] != 0 or receipt["deleted_event_count"] != 0:
+    raise SystemExit("empty retention confirmation deleted an unexpected row")
+if receipt["compaction_performed"] or not receipt["external_copies_untouched"]:
+    raise SystemExit("retention deletion receipt boundary drifted")
+PY
+
+echo "reproducibility: integrity check"
+cargo +1.88.0 run --quiet -- integrity-check --journal "$journal" \
+  > "$WORK_DIR/integrity-a.json"
+cargo +1.88.0 run --quiet -- integrity-check --journal "$journal" \
+  > "$WORK_DIR/integrity-b.json"
+cmp -s "$WORK_DIR/integrity-a.json" "$WORK_DIR/integrity-b.json"
+python3 - "$WORK_DIR/integrity-a.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    report = json.load(handle)
+if report["schema_version"] != 1 or not report["integrity_ok"]:
+    raise SystemExit("integrity check did not pass")
+if len(report["recovery_guidance"]) != 4:
+    raise SystemExit("integrity recovery guidance drifted")
+PY
+
 echo "reproducibility: capture refusal"
 if cargo +1.88.0 run --quiet -- capture > "$WORK_DIR/capture.stdout" 2> "$WORK_DIR/capture.stderr"; then
   echo "capture unexpectedly succeeded" >&2

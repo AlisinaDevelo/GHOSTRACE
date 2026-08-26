@@ -1,4 +1,8 @@
-use std::{ffi::OsStr, fs, process::Command};
+use std::{
+    ffi::{OsStr, OsString},
+    fs,
+    process::Command,
+};
 
 use serde_json::Value;
 use tempfile::tempdir;
@@ -164,6 +168,47 @@ fn durable_fixture_cli_path_is_reopenable_deterministic_and_capture_disabled() {
         .iter()
         .any(|item| { item["kind"] == "database" && item["regular_file_count"] == 1 }));
     assert!(!String::from_utf8_lossy(&residue.stdout).contains("journal.sqlite3"));
+
+    let empty_plan = run(&[
+        OsStr::new("retention-plan"),
+        OsStr::new("--journal"),
+        journal.as_os_str(),
+        OsStr::new("--before"),
+        OsStr::new("1970-01-01T00:00:00Z"),
+    ]);
+    assert_success(&empty_plan, "empty retention plan");
+    let empty_plan_json: Value = serde_json::from_slice(&empty_plan.stdout).expect("empty plan");
+    let confirm_plan =
+        OsString::from(empty_plan_json["plan_digest"].as_str().expect("plan digest"));
+    let confirm_candidate_set =
+        OsString::from(empty_plan_json["candidate_set_digest"].as_str().expect("candidate digest"));
+    let confirm_snapshot_boundary =
+        OsString::from(empty_plan_json["snapshot_boundary"].to_string());
+    let delete = run(&[
+        OsStr::new("retention-delete"),
+        OsStr::new("--journal"),
+        journal.as_os_str(),
+        OsStr::new("--before"),
+        OsStr::new("1970-01-01T00:00:00Z"),
+        OsStr::new("--confirm-plan"),
+        confirm_plan.as_os_str(),
+        OsStr::new("--confirm-candidate-set"),
+        confirm_candidate_set.as_os_str(),
+        OsStr::new("--confirm-snapshot-boundary"),
+        confirm_snapshot_boundary.as_os_str(),
+    ]);
+    assert_success(&delete, "empty retention delete");
+    let delete_json: Value = serde_json::from_slice(&delete.stdout).expect("delete receipt");
+    assert_eq!(delete_json["requested_event_count"], 0);
+    assert_eq!(delete_json["deleted_event_count"], 0);
+
+    let integrity =
+        run(&[OsStr::new("integrity-check"), OsStr::new("--journal"), journal.as_os_str()]);
+    assert_success(&integrity, "integrity check");
+    let integrity_json: Value = serde_json::from_slice(&integrity.stdout).expect("integrity JSON");
+    assert_eq!(integrity_json["schema_version"], 1);
+    assert_eq!(integrity_json["integrity_ok"], true);
+    assert_eq!(integrity_json["recovery_guidance"].as_array().expect("guidance").len(), 4);
 
     let capture = run(&[OsStr::new("capture")]);
     assert!(!capture.status.success());
