@@ -30,8 +30,8 @@ use crate::{
     integrity::IntegrityReport,
     model::{
         CollectorInstanceId, EventEnvelope, EventKind, EventPayload, EventSource, Evidence,
-        IngestionOrigin, OriginBinding, PolicyProfileId, ProvenanceVersion, SourceCursor,
-        EVENT_SCHEMA_VERSION,
+        GapPayload, IngestionOrigin, OriginBinding, PolicyProfileId, ProvenanceVersion,
+        SourceCursor, EVENT_SCHEMA_VERSION,
     },
     ordering::compare_event_order,
     policy::PolicyProfile,
@@ -39,6 +39,10 @@ use crate::{
         decode_page_token, make_token, validate_token_request, CoverageGap, CoverageInterval,
         CoverageStatus, CoverageStatusKind, QueryCoverage, QueryOrderKey, QueryPage, QueryRequest,
         QueryTokenPayload, MAX_COVERAGE_MARKERS,
+    },
+    recovery::{
+        self, RepairApplication, RepairInterval, RepairManifest, RepairStateManifest,
+        VerificationCheckpoint, MAX_REPAIR_INTERVALS,
     },
     residue::ResidueReport,
     retention::{
@@ -176,6 +180,7 @@ pub struct Journal {
     path: Option<PathBuf>,
     wal_policy: WalPolicy,
     faults: FaultPlan,
+    integrity_data_version: Arc<Mutex<Option<i64>>>,
 }
 
 impl Journal {
@@ -331,6 +336,7 @@ impl Journal {
             path,
             wal_policy,
             faults,
+            integrity_data_version: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -481,6 +487,12 @@ impl Journal {
         policy: &RetentionPolicy,
     ) -> Result<RetentionPlan, GhostraceError> {
         self.with_read_snapshot(|connection| {
+            let integrity = IntegrityReport::from_connection(connection)?;
+            if !integrity.integrity_ok {
+                return Err(GhostraceError::IntegrityReportInvalid(
+                    "retention planning requires an integrity-clean journal".to_owned(),
+                ));
+            }
             authenticated::require_valid(connection, self.key_provider.as_ref())?;
             plan_from_connection(connection, self.key_provider.as_ref(), policy)
         })
@@ -600,6 +612,243 @@ impl Journal {
     /// Run SQLite integrity and foreign-key checks without attempting repair.
     pub fn integrity_check(&self) -> Result<IntegrityReport, GhostraceError> {
         self.with_read_snapshot(IntegrityReport::from_connection)
+    }
+
+    /// Create a signed, path-free receipt for the currently verified journal.
+    pub fn create_checkpoint(&self) -> Result<VerificationCheckpoint, GhostraceError> {
+        if self.path.is_some() {
+            self.checkpoint(CheckpointMode::Truncate)?;
+        }
+        let integrity = self.integrity_check()?;
+        if !integrity.integrity_ok {
+            return Err(GhostraceError::IntegrityReportInvalid(
+                "checkpoint requires an integrity-clean journal".to_owned(),
+            ));
+        }
+        let state_report = self.authenticated_state_report()?;
+        if !state_report.valid {
+            return Err(GhostraceError::AuthenticatedStateInvalid(state_report.message));
+        }
+        let state = self.authenticated_state()?;
+        let schema_version = self.schema_version()?;
+        if integrity.user_version != schema_version {
+            return Err(GhostraceError::CheckpointInvalid(
+                "integrity and journal schema versions differ".to_owned(),
+            ));
+        }
+        let database_identity =
+            recovery::database_identity(self.path.as_deref(), &integrity, &state)?;
+        let integrity_digest = recovery::digest_json(&integrity)?;
+        let mut checkpoint = VerificationCheckpoint::unsigned(
+            database_identity,
+            schema_version,
+            &state,
+            integrity_digest,
+            Utc::now().to_rfc3339(),
+        );
+        let key = self.key_provider.key_for_generation(state.key_generation)?;
+        checkpoint.sign(&key)?;
+        Ok(checkpoint)
+    }
+
+    /// Verify a previously created checkpoint against the current journal.
+    pub fn verify_checkpoint(
+        &self,
+        checkpoint: &VerificationCheckpoint,
+    ) -> Result<(), GhostraceError> {
+        checkpoint.validate()?;
+        if self.path.is_some() {
+            self.checkpoint(CheckpointMode::Truncate)?;
+        }
+        let integrity = self.integrity_check()?;
+        if !integrity.integrity_ok {
+            return Err(GhostraceError::CheckpointMismatch(
+                "current integrity check is not clean".to_owned(),
+            ));
+        }
+        let report = self.authenticated_state_report()?;
+        if !report.valid {
+            return Err(GhostraceError::CheckpointMismatch(
+                "current authenticated state is not valid".to_owned(),
+            ));
+        }
+        let state = self.authenticated_state()?;
+        let schema_version = self.schema_version()?;
+        let key = self.key_provider.key_for_generation(checkpoint.key_generation)?;
+        checkpoint.verify_signature(&key)?;
+        if checkpoint.key_generation != state.key_generation
+            || checkpoint.journal_schema_version != schema_version
+            || checkpoint.chain_epoch != state.chain_epoch
+            || checkpoint.head_mac != state.head_mac
+            || checkpoint.event_count != state.event_count
+            || checkpoint.max_ingest_seq != state.max_ingest_seq
+            || checkpoint.policy_digest.as_str() != state.policy_digest
+        {
+            return Err(GhostraceError::CheckpointMismatch(
+                "authenticated chain position or policy differs from the checkpoint".to_owned(),
+            ));
+        }
+        let expected_integrity_digest = recovery::digest_json(&integrity)?;
+        if checkpoint.integrity_digest != expected_integrity_digest {
+            return Err(GhostraceError::CheckpointMismatch(
+                "integrity receipt differs from the checkpoint".to_owned(),
+            ));
+        }
+        let expected_identity =
+            recovery::database_identity(self.path.as_deref(), &integrity, &state)?;
+        if checkpoint.database_identity != expected_identity {
+            return Err(GhostraceError::CheckpointMismatch(
+                "database identity differs from the checkpoint".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Alias with an explicit receipt-oriented name.
+    pub fn create_verification_checkpoint(&self) -> Result<VerificationCheckpoint, GhostraceError> {
+        self.create_checkpoint()
+    }
+
+    /// Count repair-origin gap events without exposing their payloads.
+    pub fn gap_event_count(&self) -> Result<u64, GhostraceError> {
+        let connection = self.lock_connection()?;
+        let count = connection.query_row(
+            "SELECT COUNT(*) FROM events WHERE kind = 'gap' AND provenance_version = 'repair-v1'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )?;
+        u64::try_from(count).map_err(|_| {
+            GhostraceError::RepairManifestInvalid("gap count is out of range".to_owned())
+        })
+    }
+
+    /// Copy the verified source, remove bounded intervals from the copy, and
+    /// append one repair-origin gap per interval. The source is verified again
+    /// before returning.
+    pub fn repair_verified_copy<P: AsRef<Path>>(
+        &self,
+        destination: P,
+        intervals: &[RepairInterval],
+    ) -> Result<RepairManifest, GhostraceError> {
+        if self.path.is_none() {
+            return Err(GhostraceError::BackupUnavailable);
+        }
+        if intervals.is_empty() || intervals.len() > MAX_REPAIR_INTERVALS {
+            return Err(GhostraceError::RepairIntervalInvalid(
+                "repair requires 1-64 bounded intervals".to_owned(),
+            ));
+        }
+        validate_repair_interval_set(intervals)?;
+        self.validate_repair_source_scope(intervals)?;
+
+        let before_checkpoint = self.create_checkpoint()?;
+        self.verify_checkpoint(&before_checkpoint)?;
+        self.backup_snapshot(destination.as_ref())?;
+
+        let copy = Journal::open_fixture_with_policy_and_fault_plan(
+            destination.as_ref(),
+            self.key_provider.clone(),
+            self.wal_policy,
+            FaultPlan::none(),
+        )?;
+        copy.verify_checkpoint(&before_checkpoint)?;
+        let before_gap_count = copy.gap_event_count()?;
+        let before_manifest =
+            RepairStateManifest::from_checkpoint(&before_checkpoint, before_gap_count);
+        let application = copy.apply_repair_intervals(intervals)?;
+        let after_checkpoint = copy.create_checkpoint()?;
+        copy.verify_checkpoint(&after_checkpoint)?;
+        let after_gap_count = copy.gap_event_count()?;
+        let after_manifest =
+            RepairStateManifest::from_checkpoint(&after_checkpoint, after_gap_count);
+        let manifest = RepairManifest {
+            schema_version: recovery::REPAIR_MANIFEST_SCHEMA_VERSION,
+            verified_copy: true,
+            before: before_manifest,
+            after: after_manifest,
+            intervals: intervals.to_vec(),
+            dropped_event_count: application.dropped_event_count,
+            reconstructed_event_count: application.reconstructed_event_count,
+            gap_event_count: application.gap_event_count,
+            repaired_at: Utc::now().to_rfc3339(),
+        };
+        manifest.validate()?;
+        copy.shutdown()?;
+        self.verify_checkpoint(&before_checkpoint)?;
+        Ok(manifest)
+    }
+
+    fn validate_repair_source_scope(
+        &self,
+        intervals: &[RepairInterval],
+    ) -> Result<(), GhostraceError> {
+        self.with_read_snapshot(|connection| {
+            for interval in intervals {
+                let start = i64::try_from(interval.start_ingest_seq).map_err(|_| {
+                    GhostraceError::RepairIntervalInvalid("interval start is too large".to_owned())
+                })?;
+                let end = i64::try_from(interval.end_ingest_seq).map_err(|_| {
+                    GhostraceError::RepairIntervalInvalid("interval end is too large".to_owned())
+                })?;
+                let mut ids = Vec::new();
+                let mut statement = connection.prepare(
+                    "SELECT event_id, source FROM events
+                     WHERE ingest_seq BETWEEN ?1 AND ?2 ORDER BY ingest_seq ASC",
+                )?;
+                let mut rows = statement.query(params![start, end])?;
+                while let Some(row) = rows.next()? {
+                    let event_id: String = row.get(0)?;
+                    let source: String = row.get(1)?;
+                    if source != interval.source.to_string() {
+                        return Err(GhostraceError::RepairRefused(
+                            "an interval spans multiple event sources".to_owned(),
+                        ));
+                    }
+                    ids.push(event_id);
+                }
+                if ids.is_empty() {
+                    return Err(GhostraceError::RepairRefused(
+                        "repair interval contains no durable events".to_owned(),
+                    ));
+                }
+                if ids.len() as u64 > recovery::MAX_REPAIR_INTERVAL_EVENTS {
+                    return Err(GhostraceError::RepairRefused(
+                        "repair interval exceeds the bounded event limit".to_owned(),
+                    ));
+                }
+                for event_id in ids {
+                    let child: Option<String> = connection
+                        .query_row(
+                            "SELECT event_id FROM events
+                             WHERE parent_event_id = ?1
+                               AND ingest_seq NOT BETWEEN ?2 AND ?3
+                             LIMIT 1",
+                            params![event_id, start, end],
+                            |row| row.get(0),
+                        )
+                        .optional()?;
+                    if child.is_some() {
+                        return Err(GhostraceError::RepairRefused(
+                            "an interval would orphan an event outside the repair copy scope"
+                                .to_owned(),
+                        ));
+                    }
+                    let cursor_reference: Option<String> = connection
+                        .query_row(
+                            "SELECT source FROM cursors WHERE last_event_id = ?1 LIMIT 1",
+                            params![event_id],
+                            |row| row.get(0),
+                        )
+                        .optional()?;
+                    if cursor_reference.is_some() {
+                        return Err(GhostraceError::RepairRefused(
+                            "an interval includes a durable cursor tail".to_owned(),
+                        ));
+                    }
+                }
+            }
+            Ok(())
+        })
     }
 
     /// Return the durable keyed anchor without exposing key material.
@@ -781,6 +1030,166 @@ impl Journal {
             self.faults.hit(FaultPoint::StorageAfterVerify)?;
         }
         Ok(sequences)
+    }
+
+    pub(crate) fn apply_repair_intervals(
+        &self,
+        intervals: &[RepairInterval],
+    ) -> Result<RepairApplication, GhostraceError> {
+        if intervals.is_empty() || intervals.len() > MAX_REPAIR_INTERVALS {
+            return Err(GhostraceError::RepairIntervalInvalid(
+                "repair requires 1-64 intervals".to_owned(),
+            ));
+        }
+        validate_repair_interval_set(intervals)?;
+
+        let origin = IngestionOrigin::repair("repair-checkpoint")?;
+        let mut policy = PolicyProfile::deny_by_default("repair-v1");
+        for interval in intervals {
+            policy.enable_source(interval.source);
+        }
+        let mut connection = self.lock_connection()?;
+        self.ensure_authenticated_for_write(&mut connection)?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut selected = HashSet::new();
+        let mut counts = Vec::with_capacity(intervals.len());
+        let mut dropped_event_count = 0_u64;
+
+        for interval in intervals {
+            let start = i64::try_from(interval.start_ingest_seq).map_err(|_| {
+                GhostraceError::RepairIntervalInvalid("interval start is too large".to_owned())
+            })?;
+            let end = i64::try_from(interval.end_ingest_seq).map_err(|_| {
+                GhostraceError::RepairIntervalInvalid("interval end is too large".to_owned())
+            })?;
+            let mut candidate_ids = Vec::new();
+            {
+                let mut statement = transaction.prepare(
+                    "SELECT event_id, source FROM events
+                     WHERE ingest_seq BETWEEN ?1 AND ?2 ORDER BY ingest_seq ASC",
+                )?;
+                let mut rows = statement.query(params![start, end])?;
+                while let Some(row) = rows.next()? {
+                    let event_id: String = row.get(0)?;
+                    let source: String = row.get(1)?;
+                    if source != interval.source.to_string() {
+                        return Err(GhostraceError::RepairRefused(
+                            "an interval spans multiple event sources".to_owned(),
+                        ));
+                    }
+                    if !selected.insert(event_id.clone()) {
+                        return Err(GhostraceError::RepairRefused(
+                            "repair intervals overlap".to_owned(),
+                        ));
+                    }
+                    candidate_ids.push(event_id);
+                }
+            }
+            if candidate_ids.is_empty() {
+                return Err(GhostraceError::RepairRefused(
+                    "repair interval contains no durable events".to_owned(),
+                ));
+            }
+            if candidate_ids.len() as u64 > recovery::MAX_REPAIR_INTERVAL_EVENTS {
+                return Err(GhostraceError::RepairRefused(
+                    "repair interval exceeds the bounded event limit".to_owned(),
+                ));
+            }
+            for event_id in &candidate_ids {
+                let child: Option<String> = transaction
+                    .query_row(
+                        "SELECT event_id FROM events
+                         WHERE parent_event_id = ?1
+                           AND ingest_seq NOT BETWEEN ?2 AND ?3
+                         LIMIT 1",
+                        params![event_id, start, end],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                if child.is_some() {
+                    return Err(GhostraceError::RepairRefused(
+                        "an interval would orphan an event outside the repair copy scope"
+                            .to_owned(),
+                    ));
+                }
+                let cursor_reference: Option<String> = transaction
+                    .query_row(
+                        "SELECT source FROM cursors WHERE last_event_id = ?1 LIMIT 1",
+                        params![event_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                if cursor_reference.is_some() {
+                    return Err(GhostraceError::RepairRefused(
+                        "an interval includes a durable cursor tail".to_owned(),
+                    ));
+                }
+            }
+            for event_id in candidate_ids.iter().rev() {
+                if transaction
+                    .execute("DELETE FROM events WHERE event_id = ?1", params![event_id])?
+                    != 1
+                {
+                    return Err(GhostraceError::RepairRefused(
+                        "repair event disappeared before deletion".to_owned(),
+                    ));
+                }
+            }
+            let count = u64::try_from(candidate_ids.len()).map_err(|_| {
+                GhostraceError::RepairRefused("dropped event count is out of range".to_owned())
+            })?;
+            dropped_event_count = dropped_event_count.checked_add(count).ok_or_else(|| {
+                GhostraceError::RepairRefused("dropped event count overflow".to_owned())
+            })?;
+            counts.push(count);
+        }
+
+        record_policy_profile(&transaction, &policy)?;
+        for (interval, dropped_count) in intervals.iter().zip(counts.iter().copied()) {
+            let now = Utc::now();
+            let event = EventEnvelope::new(
+                &origin,
+                Uuid::new_v4(),
+                now,
+                now,
+                interval.source,
+                EventKind::Gap,
+                EventPayload::Gap(GapPayload {
+                    source: interval.source,
+                    reason_code: interval.reason_code.clone(),
+                    dropped_count,
+                    from_cursor: None,
+                    to_cursor: None,
+                    volume_digest: None,
+                    root_ids: Vec::new(),
+                    remediation: None,
+                }),
+                None,
+                policy.id.clone(),
+                policy.version,
+                Evidence::Direct,
+                None,
+            )?;
+            insert_events(
+                &transaction,
+                std::slice::from_ref(&event),
+                self.key_provider.as_ref(),
+                &self.faults,
+                None,
+            )?;
+        }
+        authenticated::refresh_transaction(&transaction, self.key_provider.as_ref(), None)?;
+        transaction.commit()?;
+        if let Some(path) = self.path.as_deref() {
+            storage::verify_database_artifacts(path)?;
+        }
+        Ok(RepairApplication {
+            dropped_event_count,
+            reconstructed_event_count: 0,
+            gap_event_count: u64::try_from(intervals.len()).map_err(|_| {
+                GhostraceError::RepairRefused("gap count is out of range".to_owned())
+            })?,
+        })
     }
 
     /// Read the durable state for one source/collector cursor identity.
@@ -1074,6 +1483,27 @@ impl Journal {
         &self,
         connection: &mut Connection,
     ) -> Result<(), GhostraceError> {
+        let data_version =
+            connection.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))?;
+        let needs_integrity_check = self
+            .integrity_data_version
+            .lock()
+            .map_err(|_| GhostraceError::Migration("journal mutex poisoned".to_owned()))?
+            .is_none_or(|cached| cached != data_version);
+        if needs_integrity_check {
+            let integrity = IntegrityReport::from_connection(connection)?;
+            if !integrity.integrity_ok {
+                return Err(GhostraceError::IntegrityReportInvalid(
+                    "normal writer refuses an integrity-failed journal; repair a verified copy"
+                        .to_owned(),
+                ));
+            }
+            *self
+                .integrity_data_version
+                .lock()
+                .map_err(|_| GhostraceError::Migration("journal mutex poisoned".to_owned()))? =
+                Some(data_version);
+        }
         if self.path.is_none() {
             // An in-memory connection cannot be modified by another process;
             // the first transaction bootstraps its anchor after the event,
@@ -1116,6 +1546,22 @@ fn ensure_retention_references(
             return Err(GhostraceError::RetentionDeletionRefused(
                 "a selected event is the durable cursor tail".to_owned(),
             ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_repair_interval_set(intervals: &[RepairInterval]) -> Result<(), GhostraceError> {
+    for interval in intervals {
+        interval.validate()?;
+    }
+    for (index, left) in intervals.iter().enumerate() {
+        for right in intervals.iter().skip(index + 1) {
+            if left.start_ingest_seq <= right.end_ingest_seq
+                && right.start_ingest_seq <= left.end_ingest_seq
+            {
+                return Err(GhostraceError::RepairRefused("repair intervals overlap".to_owned()));
+            }
         }
     }
     Ok(())

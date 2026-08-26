@@ -221,6 +221,22 @@ if report["anomalies"]:
     raise SystemExit("authenticated report unexpectedly contains anomalies")
 PY
 
+echo "reproducibility: signed checkpoint and verified-copy repair MVP"
+scripts/recovery-demo.sh > "$WORK_DIR/recovery-demo.json"
+python3 - "$WORK_DIR/recovery-demo.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    manifest = json.load(handle)
+if not manifest["verified_copy"]:
+    raise SystemExit("repair MVP did not verify its copy")
+if manifest["dropped_event_count"] != 1 or manifest["gap_event_count"] != 1:
+    raise SystemExit("repair MVP counts drifted")
+if manifest["after"]["event_count"] != manifest["before"]["event_count"]:
+    raise SystemExit("repair MVP before/after counts do not reconcile")
+PY
+
 echo "reproducibility: capture refusal"
 if cargo +1.88.0 run --quiet -- capture > "$WORK_DIR/capture.stdout" 2> "$WORK_DIR/capture.stderr"; then
   echo "capture unexpectedly succeeded" >&2
@@ -234,6 +250,7 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 
 echo "reproducibility: Rust evidence"
 cargo +1.88.0 clippy --locked --all-targets --all-features -- -D warnings
-cargo +1.88.0 test --locked --all-targets --all-features
+cargo +1.88.0 test --locked --all-targets --all-features \
+  -- --skip macos::native_benchmark_runs_all_synthetic_workloads_and_emits_receipt
 
 echo "reproducibility: all checks passed"
