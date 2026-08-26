@@ -171,6 +171,20 @@ crash are represented as explicit gaps with no completion, end time, exit code, 
 success status. This is a test contract only: GHOSTRACE does not ship a shell
 executor, PTY, terminal collector, or command capture path.
 
+### Shell secret-leakage red-team boundary
+
+[`fixtures/shell-secret-leakage-v1.json`](../fixtures/shell-secret-leakage-v1.json)
+and `tests/shell_secret_leakage.rs` are a synthetic, unique-sentinel corpus for the
+future wrapper boundary. The tests inject sentinels into arguments, environment,
+standard input/output/error, executable names, working paths, failure messages,
+prompt text, process titles, diagnostics, crash-report context, and command text.
+Metadata validation, journal ingestion, diagnostics, exports, CLI output, and panic
+output reject or omit every sentinel before GHOSTRACE retention. Process inspection
+and operating-system crash reporting may expose synthetic process state outside the
+application; those rows are documented as `os_visible_not_retained`, not claimed as
+privacy guarantees. This red-team contract adds no event fields and does not ship a
+shell executor or ambient capture path.
+
 ## FSEvents lifecycle boundary
 
 The `fsevents` module is a deliberately small native boundary beneath the selected-root

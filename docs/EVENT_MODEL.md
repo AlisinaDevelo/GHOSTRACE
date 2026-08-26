@@ -246,3 +246,7 @@ The companion [`shell-wrapper-lifecycle-v1.json`](../fixtures/shell-wrapper-life
 fixture tests child status propagation and explicit incomplete-execution gaps for a
 future wrapper. It adds no event fields and does not execute a shipped collector or
 shell executor.
+
+The companion [`shell-secret-leakage-v1.json`](../fixtures/shell-secret-leakage-v1.json)
+red-team corpus exercises denied shell channels and external OS exposure without
+adding event kinds or fields to the versioned model.

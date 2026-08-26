@@ -221,6 +221,15 @@ or terminal bytes. Timeout, cancellation, terminal closure, and wrapper crash pa
 remain explicit outcomes or gaps, and a gap never receives a fabricated completion,
 end time, or success status.
 
+The [`shell-secret-leakage-v1.json`](../fixtures/shell-secret-leakage-v1.json)
+red-team corpus uses deterministic synthetic sentinels to exercise every denied
+shell channel and checks the metadata validator, journal bytes, diagnostics, errors,
+exports, CLI output, and panic output for retention or echo. The process-inspection
+and crash-report rows are intentionally separate: an operating system inspector or
+crash reporter can observe synthetic process state outside GHOSTRACE's retention
+boundary. GHOSTRACE makes no claim to hide those values from the operating system;
+it only verifies that the application does not retain them.
+
 ## Retention and deletion
 
 The fixture headstart has no ambient retention burden. The read-only

@@ -231,6 +231,19 @@ prove process causality. Energy is a value only when the unprivileged
 Hardware and OS are part of the receipt, and results are not cross-machine
 comparable without an explicit normalization study.
 
+## Shell secret-leakage red team (task 0093)
+
+[`fixtures/shell-secret-leakage-v1.json`](../fixtures/shell-secret-leakage-v1.json)
+is a deterministic, synthetic corpus covering arguments, environment, standard
+input/output/error, executable and working-path identity, failure messages, prompt
+text, process titles, diagnostics, crash-report context, and command text. The
+Rust suite runs the sentinels through strict metadata validation, journal writes,
+errors, diagnostics, exports, CLI output, and panic output, asserting rejection or
+absence from retained bytes. `/bin/ps` and crash-report context are tested as
+explicit external operating-system exposure; these rows are recorded as
+`os_visible_not_retained` and are not application privacy passes. No shell executor
+or ambient collector is introduced by this contract.
+
 ## Event-storm backpressure and loss accounting (task 0016)
 
 The selected-root collector exposes the current pending callback count, cumulative
