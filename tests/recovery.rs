@@ -75,7 +75,8 @@ fn checkpoint_binds_state_and_rejects_tampering_or_mutation() {
     assert!(!json.contains("recovery-test-key"));
 
     let mut tampered = checkpoint.clone();
-    tampered.head_mac.replace_range(0..1, "0");
+    let replacement = if tampered.head_mac.starts_with('0') { '1' } else { '0' };
+    tampered.head_mac.replace_range(0..1, &replacement.to_string());
     assert!(matches!(
         journal.verify_checkpoint(&tampered),
         Err(GhostraceError::CheckpointMismatch(_)) | Err(GhostraceError::CheckpointInvalid(_))
