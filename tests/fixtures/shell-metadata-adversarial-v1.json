@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"id":"arguments","field":"arguments","value":["--token=sentinel"]},
+    {"id":"argv","field":"argv","value":["--secret"]},
+    {"id":"environment","field":"environment","value":{"TOKEN":"sentinel"}},
+    {"id":"env","field":"env","value":{"TOKEN":"sentinel"}},
+    {"id":"stdin","field":"stdin","value":"sentinel"},
+    {"id":"stdout","field":"stdout","value":"sentinel"},
+    {"id":"output","field":"output","value":"sentinel"},
+    {"id":"shell_history","field":"shell_history","value":"sentinel"},
+    {"id":"aliases","field":"aliases","value":{"ll":"ls -la"}},
+    {"id":"command_text","field":"command_text","value":"curl --header sentinel"},
+    {"id":"expanded_command","field":"expanded_command","value":"echo sentinel"},
+    {"id":"raw_working_directory","field":"path","value":"/Users/alice/private"},
+    {"id":"path_executable","field":"executable_id","value":"/bin/zsh"},
+    {"id":"credential_executable","field":"executable_id","value":"password-helper"},
+    {"id":"reverse_time","field":"ended_at","value":"2026-08-26T08:59:59Z"},
+    {"id":"signal_without_status","field":"signal","value":9},
+    {"id":"zero_signal","field":"signal","value":0},
+    {"id":"failed_zero","field":"exit_code","value":0}
+  ]
+}

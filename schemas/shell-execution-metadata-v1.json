@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/AlisinaDevelo/GHOSTRACE/schemas/shell-execution-metadata-v1.json",
+  "title": "GHOSTRACE explicit shell execution metadata v1",
+  "description": "Metadata-only record for a command deliberately routed through a future wrapper. Raw command text, arguments, environment, terminal streams, and shell state have no schema representation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "wrapper_session_id", "executable_id", "working_directory", "started_at", "ended_at", "status", "exit_code", "signal"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "wrapper_session_id": {"$ref":"#/$defs/opaque_identifier"},
+    "executable_id": {"$ref":"#/$defs/executable_id"},
+    "working_directory": {"$ref":"#/$defs/working_directory"},
+    "started_at": {"$ref":"#/$defs/utc_timestamp"},
+    "ended_at": {"$ref":"#/$defs/utc_timestamp"},
+    "status": {"enum":["succeeded","failed","signaled","unknown"]},
+    "exit_code": {"oneOf":[{"type":"integer","minimum":-2147483648,"maximum":2147483647},{"type":"null"}]},
+    "signal": {"oneOf":[{"type":"integer","minimum":1,"maximum":64},{"type":"null"}]}
+  },
+  "allOf": [
+    {"if":{"properties":{"status":{"const":"succeeded"}}},"then":{"properties":{"exit_code":{"const":0},"signal":{"const":null}}}},
+    {"if":{"properties":{"status":{"const":"failed"}}},"then":{"properties":{"exit_code":{"type":"integer","not":{"const":0}},"signal":{"const":null}}}},
+    {"if":{"properties":{"status":{"const":"signaled"}}},"then":{"properties":{"exit_code":{"const":null},"signal":{"type":"integer","minimum":1,"maximum":64}}}},
+    {"if":{"properties":{"status":{"const":"unknown"}}},"then":{"properties":{"exit_code":{"const":null},"signal":{"const":null}}}}
+  ],
+  "x-ghostrace-field-classification": [
+    {"name":"schema_version","semantic":"contract_revision","sensitivity":"contract","required":true},
+    {"name":"wrapper_session_id","semantic":"opaque_explicit_wrapper_session","sensitivity":"identifying","required":true},
+    {"name":"executable_id","semantic":"normalized_executable_identity_without_path","sensitivity":"sensitive_metadata","required":true},
+    {"name":"working_directory.path_class","semantic":"sanitized_working_directory_scope","sensitivity":"sensitive_metadata","required":true},
+    {"name":"working_directory.path_digest","semantic":"root_scoped_working_directory_digest","sensitivity":"sensitive_metadata","required":true},
+    {"name":"started_at","semantic":"wrapper_start_time","sensitivity":"timing_evidence","required":true},
+    {"name":"ended_at","semantic":"wrapper_end_time","sensitivity":"timing_evidence","required":true},
+    {"name":"status","semantic":"process_outcome_class","sensitivity":"outcome","required":true},
+    {"name":"exit_code","semantic":"process_exit_status","sensitivity":"outcome","required":true},
+    {"name":"signal","semantic":"process_termination_signal","sensitivity":"outcome","required":true}
+  ],
+  "$defs": {
+    "opaque_identifier": {"type":"string","minLength":1,"maxLength":128,"pattern":"^(?!.*\\.\\.)[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$"},
+    "executable_id": {"type":"string","minLength":1,"maxLength":128,"pattern":"^(?!.*\\.\\.)[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$","not":{"pattern":"password|passwd|secret|credential|authorization|bearer|private-key"}},
+    "working_directory": {
+      "type":"object", "additionalProperties":false, "required":["path_class","path_digest"],
+      "properties": {
+        "path_class":{"enum":["workspace_relative","home_relative","absolute_redacted","unknown"]},
+        "path_digest":{"type":"string","minLength":71,"maxLength":71,"pattern":"^sha256:[0-9a-f]{64}$"}
+      }
+    },
+    "utc_timestamp": {"type":"string","format":"date-time"}
+  }
+}

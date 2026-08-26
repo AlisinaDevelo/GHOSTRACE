@@ -156,6 +156,7 @@ encryption or key-management claim.
 | ghostrace validate --export ... | Available; rejects incomplete, mixed-version, or digest-drifted JSONL before consumption |
 | ghostrace schema | Available |
 | ghostrace parquet-profile | Available; prints and validates the strict v1 profile for a future derived Parquet archive; no archive is created |
+| ghostrace shell-schema | Available; prints the strict v1 metadata-only contract for a future explicit shell wrapper; no shell is executed |
 | ghostrace capture | Refuses by design |
 | Local journal and bounded durable writer | Scaffolded for the fixture path; live ingestion is gated |
 | Selected-root FSEvents collector API | Available only behind explicit consent; no ambient CLI |
@@ -168,6 +169,7 @@ encryption or key-management claim.
 | Explanation determinism and counterexamples | Available as an offline golden/property/mutation matrix; every claim template and evidence level is exercised, ordering/page permutations are compared, and required-observation removal must downgrade or remove a claim |
 | Export schema and manifest registry | Available as six strict v1 contracts with stable IDs, golden examples, version declarations, fail-closed streaming validation for mixed versions, counts, bytes, and body digests, and bounded record/metadata limits |
 | Derived Parquet archive profile | Available as a strict, lossless 23-column v1 contract with explicit gap/provenance/policy mappings, additive-nullable evolution gates, bounded rows/metadata, and privacy-safe storage defaults; a writer remains a later task |
+| Explicit shell metadata schema | Available as a strict v1 contract for wrapper session, executable identity, sanitized working-directory identity, timing, outcome, exit code, and signal; raw command state is structurally rejected |
 | Shell, Git, frontmost-app, or browser collectors | Not shipped |
 | macOS Keychain-backed production encryption | Not shipped |
 | Signed/notarized release artifacts | Not shipped |
@@ -303,6 +305,7 @@ docs/adr/            Immutable architecture decisions
 - [Export schema registry](schemas/export-registry-v1.json) — strict manifest, event, gap, claim, policy, and source-coverage contracts
 - [Export contract goldens](fixtures/export-manifest-v1.golden.json) — manifest example; sibling `*-record-v1.golden.json` files cover every registered record
 - [Parquet archive profile](schemas/parquet-archive-profile-v1.json) — strict derived-archive contract; [golden profile](fixtures/parquet-archive-profile-v1.golden.json)
+- [Explicit shell metadata schema](schemas/shell-execution-metadata-v1.json) — wrapper-only metadata contract; [golden record](fixtures/shell-execution-metadata-v1.golden.json)
 - [Filesystem benchmark corpus](fixtures/filesystem-benchmark-corpus-v1.json) — bounded synthetic trees and native measurement contract
 - [Reproducibility](docs/REPRODUCIBILITY.md) — pinned toolchain, fixture provenance, and clean-machine smoke
 - [Research](docs/RESEARCH.md) — landscape, differentiation, and primary sources

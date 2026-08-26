@@ -33,6 +33,7 @@ pub mod query;
 pub mod recovery;
 pub mod residue;
 pub mod retention;
+pub mod shell_metadata;
 pub(crate) mod storage;
 pub mod volume;
 pub mod wal;
@@ -187,6 +188,13 @@ pub use retention::{
     RetentionConfirmation, RetentionGapSummary, RetentionPlan, RetentionPolicy,
     RetentionSelectionReason, DEFAULT_RETENTION_DAYS, LEGACY_KEY_GENERATION,
     MAX_RETENTION_GAP_SUMMARIES, RETENTION_DELETION_SCHEMA_VERSION, RETENTION_PLAN_SCHEMA_VERSION,
+};
+pub use shell_metadata::{
+    checked_in_shell_metadata, shell_metadata_fields, validate_shell_metadata, ShellExecutableId,
+    ShellExecutionMetadata, ShellMetadataFieldDescriptor, ShellMetadataSensitivity,
+    ShellWorkingDirectory, MAX_SHELL_EXECUTION_DURATION_MS, MAX_SHELL_METADATA_BYTES,
+    MAX_SHELL_SIGNAL, SHELL_METADATA_FIELDS, SHELL_METADATA_GOLDEN_JSON, SHELL_METADATA_SCHEMA_ID,
+    SHELL_METADATA_SCHEMA_JSON, SHELL_METADATA_SCHEMA_VERSION,
 };
 pub use volume::{
     MountState, VolumeIdentity, VolumeIdentityError, VolumeObservation, VolumeTransition,

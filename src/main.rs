@@ -8,7 +8,7 @@ use ghostrace::{
     validate_export, DeterministicKeyProvider, EventEnvelope, EventKind, EventPayload, EventSource,
     Evidence, ExportRequest, GhostraceError, IngestionOrigin, ReasonCode, RepairInterval,
     RetentionConfirmation, RetentionPolicy, RootId, SnapshotDigest, EVENT_SCHEMA_JSON,
-    PARQUET_ARCHIVE_PROFILE_JSON,
+    PARQUET_ARCHIVE_PROFILE_JSON, SHELL_METADATA_SCHEMA_JSON,
 };
 use uuid::Uuid;
 
@@ -168,6 +168,8 @@ enum Command {
     Schema,
     /// Print the checked-in strict v1 profile for a future Parquet-derived archive.
     ParquetProfile,
+    /// Print the strict v1 metadata schema for a future explicit shell wrapper.
+    ShellSchema,
     /// Live capture is intentionally unavailable in this vertical slice.
     Capture,
 }
@@ -432,6 +434,11 @@ fn run(cli: Cli) -> Result<(), GhostraceError> {
         Command::ParquetProfile => {
             checked_in_profile()?;
             println!("{PARQUET_ARCHIVE_PROFILE_JSON}");
+            Ok(())
+        }
+        Command::ShellSchema => {
+            ghostrace::checked_in_shell_metadata()?;
+            println!("{SHELL_METADATA_SCHEMA_JSON}");
             Ok(())
         }
         Command::Capture => capture(),
