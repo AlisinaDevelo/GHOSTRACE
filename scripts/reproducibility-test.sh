@@ -127,6 +127,28 @@ if plan["protected_gap_count"] != 1 or not plan["candidate_set_digest"].startswi
     raise SystemExit("retention coverage binding drifted")
 PY
 
+echo "reproducibility: retention residue report"
+cargo +1.88.0 run --quiet -- residue-report \
+  --journal "$journal" \
+  > "$WORK_DIR/residue-a.json"
+cargo +1.88.0 run --quiet -- residue-report \
+  --journal "$journal" \
+  > "$WORK_DIR/residue-b.json"
+cmp -s "$WORK_DIR/residue-a.json" "$WORK_DIR/residue-b.json"
+python3 - "$WORK_DIR/residue-a.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    report = json.load(handle)
+if report["schema_version"] != 1 or len(report["modes"]) != 4:
+    raise SystemExit("retention residue mode contract drifted")
+if report["external_backup_count"] != 0 or len(report["artifacts"]) != 8:
+    raise SystemExit("retention residue inventory drifted")
+if any("journal.sqlite3" in value for value in report.get("notes", [])):
+    raise SystemExit("retention residue report leaked a path")
+PY
+
 echo "reproducibility: capture refusal"
 if cargo +1.88.0 run --quiet -- capture > "$WORK_DIR/capture.stdout" 2> "$WORK_DIR/capture.stderr"; then
   echo "capture unexpectedly succeeded" >&2

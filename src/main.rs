@@ -93,6 +93,15 @@ enum Command {
         #[arg(long)]
         retain_at_most_bytes: Option<u64>,
     },
+    /// Print a read-only, path-free inventory of retention residue classes.
+    ResidueReport {
+        #[arg(long)]
+        journal: PathBuf,
+        /// Known external backup files; their paths are aggregated and never
+        /// printed in the report.
+        #[arg(long = "backup")]
+        backups: Vec<PathBuf>,
+    },
     /// Validate a JSONL export before consuming its records.
     Validate {
         #[arg(long)]
@@ -198,6 +207,13 @@ fn run(cli: Cli) -> Result<(), GhostraceError> {
             let journal = open_fixture_journal(journal)?;
             let plan = journal.retention_plan(&policy)?;
             println!("{}", serde_json::to_string_pretty(&plan)?);
+            journal.shutdown()?;
+            Ok(())
+        }
+        Command::ResidueReport { journal, backups } => {
+            let journal = open_fixture_journal(journal)?;
+            let report = journal.residue_report(&backups)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
             journal.shutdown()?;
             Ok(())
         }

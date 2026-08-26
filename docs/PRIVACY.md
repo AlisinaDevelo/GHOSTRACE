@@ -204,6 +204,33 @@ an export or backup. Future deletion work must define residue, transactional
 behavior, recovery, and what remains recoverable from external copies before it
 can remove journal rows or related artifacts.
 
+### Residue modes and erasure limits
+
+`residue-report` is a read-only, path-free inventory. It makes four operations
+explicit so a future deletion command cannot present one as another:
+
+- **Logical deletion** removes selected rows from the live SQLite view. It is the
+  least expensive operation, but free pages, WAL frames, virtual-table shadow
+  tables, backups, and filesystem copies can remain.
+- **Compaction** checkpoints and may run `VACUUM` to rewrite the live database.
+  It costs I/O and temporary space, can be refused by readers, and is not a
+  secure-erasure primitive. It does not rewrite external copies or SSD media.
+- **Cryptographic erasure** destroys the journal key generation. Authenticated
+  ciphertext can remain in database, WAL, shadow, or backup bytes, but a keyless
+  reader cannot decrypt it. Plaintext exports and independently encrypted copies
+  are not covered.
+- **External-copy handling** removes known exports/backups only when their owner,
+  permissions, and media allow it. Filesystem snapshots, Time Machine, cloud
+  sync, offline media, wear levelling, and privileged recovery are outside this
+  process's inventory.
+
+SQLite `secure_delete` is reported rather than treated as a guarantee. SQLite
+documents limits around virtual tables and shadow storage; `VACUUM` changes the
+live file layout but cannot promise erasure from WAL/SHM, backups, snapshots, or
+the underlying storage device. The UI/CLI must use the same mode labels and show
+unsupported-media limits instead of displaying a generic "secure delete"
+success.
+
 ## Privacy verification
 
 Privacy changes require tests that:

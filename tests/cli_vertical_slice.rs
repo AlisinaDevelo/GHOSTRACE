@@ -151,6 +151,20 @@ fn durable_fixture_cli_path_is_reopenable_deterministic_and_capture_disabled() {
         item.as_str().is_some_and(|value| value.contains("legal holds are not implemented"))
     }));
 
+    let residue =
+        run(&[OsStr::new("residue-report"), OsStr::new("--journal"), journal.as_os_str()]);
+    assert_success(&residue, "residue report");
+    let residue_json: Value = serde_json::from_slice(&residue.stdout).expect("residue JSON");
+    assert_eq!(residue_json["schema_version"], 1);
+    assert_eq!(residue_json["modes"].as_array().expect("modes").len(), 4);
+    assert_eq!(residue_json["external_backup_count"], 0);
+    assert!(residue_json["artifacts"]
+        .as_array()
+        .expect("artifacts")
+        .iter()
+        .any(|item| { item["kind"] == "database" && item["regular_file_count"] == 1 }));
+    assert!(!String::from_utf8_lossy(&residue.stdout).contains("journal.sqlite3"));
+
     let capture = run(&[OsStr::new("capture")]);
     assert!(!capture.status.success());
     assert!(String::from_utf8_lossy(&capture.stderr).contains("intentionally disabled"));

@@ -27,6 +27,7 @@ pub mod model;
 pub mod ordering;
 pub mod policy;
 pub mod query;
+pub mod residue;
 pub mod retention;
 pub(crate) mod storage;
 pub mod volume;
@@ -150,6 +151,10 @@ pub use query::{
     CoverageGap, CoverageInterval, CoverageStatus, CoverageStatusKind, QueryCoverage, QueryPage,
     QueryRequest, COVERAGE_CONTRACT_VERSION, DEFAULT_QUERY_PAGE_SIZE, MAX_COVERAGE_MARKERS,
     MAX_QUERY_PAGE_SIZE, QUERY_CONTRACT_VERSION, QUERY_TOKEN_TTL_SECONDS,
+};
+pub use residue::{
+    DeletionMode, DeletionModeDescription, ResidueArtifactKind, ResidueArtifactSummary,
+    ResidueReport, RESIDUE_REPORT_SCHEMA_VERSION,
 };
 pub use retention::{
     RetentionConfirmation, RetentionGapSummary, RetentionPlan, RetentionPolicy,

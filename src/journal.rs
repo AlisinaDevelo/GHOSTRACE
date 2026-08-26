@@ -33,6 +33,7 @@ use crate::{
         CoverageStatus, CoverageStatusKind, QueryCoverage, QueryOrderKey, QueryPage, QueryRequest,
         QueryTokenPayload, MAX_COVERAGE_MARKERS,
     },
+    residue::ResidueReport,
     retention::{plan_from_connection, RetentionPlan, RetentionPolicy, RetentionStorageMetadata},
     storage,
     wal::{CheckpointMode, WalCheckpointReport, WalPolicy},
@@ -438,6 +439,15 @@ impl Journal {
         self.with_read_snapshot(|connection| {
             plan_from_connection(connection, self.key_provider.as_ref(), policy)
         })
+    }
+
+    /// Build a path-free, read-only inventory of known SQLite residue classes
+    /// and the explicit deletion modes a future command must distinguish.
+    pub fn residue_report(
+        &self,
+        external_backups: &[PathBuf],
+    ) -> Result<ResidueReport, GhostraceError> {
+        ResidueReport::for_journal(self, external_backups)
     }
 
     /// Checkpoint the active WAL, then copy only the database file. A sidecar
