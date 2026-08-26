@@ -3,8 +3,8 @@ use std::{fs, path::Path, process::Command};
 use chrono::{TimeZone, Utc};
 use ghostrace::{
     AuthenticatedAnomaly, DeterministicKeyProvider, DiagnosticRecord, EventEnvelope, EventKind,
-    EventPayload, EventSource, Evidence, GhostraceError, IngestionOrigin, Journal, PolicyProfile,
-    ReasonCode, RetentionPolicy, SourceCursor,
+    EventPayload, EventSource, Evidence, GhostraceError, IngestionOrigin, Journal, KeyRing,
+    PolicyProfile, ReasonCode, RetentionPolicy, SourceCursor,
 };
 use rusqlite::Connection;
 use tempfile::tempdir;
@@ -142,6 +142,54 @@ fn edits_insertions_deletions_reorder_and_truncation_are_detected() {
         )
         .expect("truncate");
     assert_anomaly(&journal, AuthenticatedAnomaly::ChainTruncated);
+}
+
+#[test]
+fn replayed_event_with_a_new_identity_is_detected() {
+    let (_directory, path) = private_path("replay.sqlite3");
+    let journal = open(&path);
+    journal.ingest(&IngestionOrigin::fixture(), &event(1, "seq-0-1"), &policy()).expect("first");
+    Connection::open(&path)
+        .expect("mutation connection")
+        .execute_batch(
+            "UPDATE cursors SET last_event_id = NULL;
+             INSERT INTO events(
+                 event_id, schema_version, observed_at, ingested_at, source, kind,
+                 collector_instance, source_cursor, provenance_version,
+                 policy_profile_id, policy_profile_version, evidence, parent_event_id,
+                 payload_ciphertext
+             )
+             SELECT
+                 '00000000-0000-4000-8000-000000000099', schema_version, observed_at,
+                 ingested_at, source, kind, collector_instance, source_cursor,
+                 provenance_version, policy_profile_id, policy_profile_version,
+                 evidence, parent_event_id, payload_ciphertext
+             FROM events WHERE ingest_seq = 1",
+        )
+        .expect("replay mutation");
+    assert_anomaly(&journal, AuthenticatedAnomaly::EventReplayed);
+}
+
+#[test]
+fn key_rotation_advances_the_authenticated_chain_boundary() {
+    let (_directory, path) = private_path("rotation.sqlite3");
+    let first_ring = KeyRing::new(1, [0x31; 32]).expect("first key ring");
+    let journal = Journal::open_fixture(&path, first_ring.clone()).expect("journal");
+    journal.ingest(&IngestionOrigin::fixture(), &event(1, "seq-0-1"), &policy()).expect("first");
+    journal.shutdown().expect("first shutdown");
+
+    let mut rotated_ring = first_ring;
+    rotated_ring.stage_generation(2, [0x32; 32]).expect("stage second key");
+    rotated_ring.activate_generation(2).expect("activate second key");
+    let rotated = Journal::open_fixture(&path, rotated_ring).expect("rotated journal");
+    let before = rotated.verify_authenticated_state().expect("old generation verifies");
+    assert_eq!(before.key_generation, 1);
+    rotated
+        .ingest(&IngestionOrigin::fixture(), &event(2, "seq-0-2"), &policy())
+        .expect("post-rotation ingest");
+    let after = rotated.verify_authenticated_state().expect("new generation verifies");
+    assert_eq!(after.key_generation, 2);
+    assert_eq!(after.chain_epoch, 1);
 }
 
 #[test]

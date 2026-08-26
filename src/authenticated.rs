@@ -114,6 +114,7 @@ pub enum AuthenticatedAnomaly {
     EventDeleted,
     EventReordered,
     EventEdited,
+    EventReplayed,
     ChainTruncated,
     CursorRollback,
     PolicySubstitution,
@@ -243,6 +244,7 @@ pub(crate) fn report(
     provider: &dyn KeyProvider,
 ) -> Result<AuthenticatedStateReport, GhostraceError> {
     let snapshot = canonical_snapshot(connection)?;
+    let replayed_event_count = count_replayed_events(connection)?;
     let Some(state) = load_state(connection)? else {
         return report_with_anomalies(None, &snapshot, vec![AuthenticatedAnomaly::AnchorMissing]);
     };
@@ -273,6 +275,9 @@ pub(crate) fn report(
         && snapshot.event_order_digest == state.event_order_digest
     {
         anomalies.push(AuthenticatedAnomaly::EventEdited);
+    }
+    if replayed_event_count > 0 {
+        anomalies.push(AuthenticatedAnomaly::EventReplayed);
     }
     if snapshot.cursor_digest != state.cursor_digest {
         anomalies.push(AuthenticatedAnomaly::CursorRollback);
@@ -561,6 +566,27 @@ fn canonical_snapshot(connection: &Connection) -> Result<CanonicalSnapshot, Ghos
         policy_digest,
         diagnostic_digest,
     })
+}
+
+/// Count copied event rows without putting replay fingerprints on the write
+/// path.  The verifier compares every event field except ingest sequence and
+/// event identity, matching the canonical replay definition above.
+fn count_replayed_events(connection: &Connection) -> Result<u64, GhostraceError> {
+    let count: i64 = connection.query_row(
+        "SELECT COALESCE(SUM(repeated_count), 0)
+         FROM (
+             SELECT COUNT(*) - 1 AS repeated_count
+             FROM events
+             GROUP BY schema_version, observed_at, ingested_at, source, kind,
+                      collector_instance, source_cursor, provenance_version,
+                      policy_profile_id, policy_profile_version, evidence,
+                      parent_event_id, payload_ciphertext
+             HAVING COUNT(*) > 1
+         )",
+        [],
+        |row| row.get(0),
+    )?;
+    to_u64(count, "replayed event count")
 }
 
 fn digest_cursor_table(connection: &Connection) -> Result<String, GhostraceError> {
