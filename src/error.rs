@@ -69,6 +69,9 @@ pub enum GhostraceError {
     #[error("retention plan confirmation does not match the requested scope")]
     RetentionConfirmationMismatch,
 
+    #[error("retention residue report is invalid: {0}")]
+    ResidueReportInvalid(String),
+
     #[error("journal directory permissions are not private (expected no group/world access)")]
     InsecurePermissions(PathBuf),
 

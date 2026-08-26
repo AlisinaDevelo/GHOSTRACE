@@ -290,6 +290,19 @@ without retaining event payloads or paths. Exports, backups, sidecars, and legal
 holds are non-goals, not implicit retention protections. Destructive deletion,
 residue, and recovery remain a separate parent-task gate.
 
+## Retention residue limits (task 0087)
+
+`residue-report` is the read-only boundary for deletion-residue claims. It
+inventories the live database, WAL, SHM, rollback-journal, temporary, and backup
+classes without serializing paths, counts FTS/archive shadow tables from
+`sqlite_master`, and reports the current SQLite `secure_delete` setting. Its
+mode contract distinguishes logical row deletion, checkpoint/VACUUM compaction,
+cryptographic key destruction, and external-copy handling. Each mode states its
+guarantee, cost, SQLite behavior, and unsupported media. The sentinel matrix
+tests database bytes, WAL/SHM/temp/backup artifacts, FTS and archive shadow
+structures, then records the post-delete observation without claiming universal
+filesystem erasure.
+
 ## Time-window queries and stable ordering (task 0018)
 
 `QueryRequest` now covers source, opaque root identity, event kind, and observed
