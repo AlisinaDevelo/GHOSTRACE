@@ -23,7 +23,7 @@ class ReproducibilityContractTests(unittest.TestCase):
         result = self.run_script("scripts/fixture-manifest.py", "check")
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout)
-        self.assertEqual(report["fixtures"], 15)
+        self.assertEqual(report["fixtures"], 16)
         self.assertEqual(report["generator_version"], "ghostrace-fixture-manifest-v1")
         self.assertEqual(report["seed"], "ghostrace-fixture-seed-v1")
         manifest = json.loads((ROOT / "fixtures/manifest.json").read_text())

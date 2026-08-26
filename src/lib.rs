@@ -27,6 +27,7 @@ pub mod key_lifecycle;
 pub mod keychain;
 pub mod model;
 pub mod ordering;
+pub mod parquet_profile;
 pub mod policy;
 pub mod query;
 pub mod recovery;
@@ -154,6 +155,14 @@ pub use ordering::{
     analyze_temporal_observations, compare_event_order, StableOrderKey, TemporalAnalysis,
     TemporalEvidenceBasis, TemporalObservation, TemporalOrderDecision, ORDERING_CONTRACT_VERSION,
     TEMPORAL_DELAY_THRESHOLD_SECONDS, TEMPORAL_OBSERVATION_SCHEMA_VERSION,
+};
+pub use parquet_profile::{
+    checked_in_profile, validate_profile, ParquetArchiveProfile, ParquetBounds, ParquetColumn,
+    ParquetEvolutionPolicy, ParquetGapMapping, ParquetOrdering, ParquetPolicyMapping,
+    ParquetProvenanceMapping, ParquetStoragePolicy, MAX_PARQUET_ARCHIVE_COLUMNS,
+    MAX_PARQUET_ARCHIVE_METADATA_BYTES, MAX_PARQUET_ARCHIVE_ROWS, MAX_PARQUET_ARCHIVE_ROW_BYTES,
+    PARQUET_ARCHIVE_PROFILE_JSON, PARQUET_ARCHIVE_PROFILE_SCHEMA_ID,
+    PARQUET_ARCHIVE_PROFILE_VERSION, PARQUET_ARCHIVE_SOURCE_SCHEMA_ID,
 };
 pub use policy::{
     PolicyChange, PolicyDecision, PolicyDecisionRecord, PolicyDiagnostic, PolicyDocument,

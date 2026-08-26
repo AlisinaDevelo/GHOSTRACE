@@ -155,6 +155,7 @@ encryption or key-management claim.
 | ghostrace preview/export --fixture ... | Available in-memory shortcut with the same explicit confirmation gate |
 | ghostrace validate --export ... | Available; rejects incomplete, mixed-version, or digest-drifted JSONL before consumption |
 | ghostrace schema | Available |
+| ghostrace parquet-profile | Available; prints and validates the strict v1 profile for a future derived Parquet archive; no archive is created |
 | ghostrace capture | Refuses by design |
 | Local journal and bounded durable writer | Scaffolded for the fixture path; live ingestion is gated |
 | Selected-root FSEvents collector API | Available only behind explicit consent; no ambient CLI |
@@ -166,6 +167,7 @@ encryption or key-management claim.
 | Cross-source correlation rule registry | Available as a versioned, policy-bounded adjacency rule; unknown coverage, unsupported scope, and clock skew abstain instead of becoming positive evidence |
 | Explanation determinism and counterexamples | Available as an offline golden/property/mutation matrix; every claim template and evidence level is exercised, ordering/page permutations are compared, and required-observation removal must downgrade or remove a claim |
 | Export schema and manifest registry | Available as six strict v1 contracts with stable IDs, golden examples, version declarations, fail-closed streaming validation for mixed versions, counts, bytes, and body digests, and bounded record/metadata limits |
+| Derived Parquet archive profile | Available as a strict, lossless 23-column v1 contract with explicit gap/provenance/policy mappings, additive-nullable evolution gates, bounded rows/metadata, and privacy-safe storage defaults; a writer remains a later task |
 | Shell, Git, frontmost-app, or browser collectors | Not shipped |
 | macOS Keychain-backed production encryption | Not shipped |
 | Signed/notarized release artifacts | Not shipped |
@@ -300,6 +302,7 @@ docs/adr/            Immutable architecture decisions
 - [Explanation counterexample fixture](fixtures/explanation-counterexamples-v1.json) — claim-template/evidence/gap matrix, conflict outcomes, and required-observation mutations
 - [Export schema registry](schemas/export-registry-v1.json) — strict manifest, event, gap, claim, policy, and source-coverage contracts
 - [Export contract goldens](fixtures/export-manifest-v1.golden.json) — manifest example; sibling `*-record-v1.golden.json` files cover every registered record
+- [Parquet archive profile](schemas/parquet-archive-profile-v1.json) — strict derived-archive contract; [golden profile](fixtures/parquet-archive-profile-v1.golden.json)
 - [Filesystem benchmark corpus](fixtures/filesystem-benchmark-corpus-v1.json) — bounded synthetic trees and native measurement contract
 - [Reproducibility](docs/REPRODUCIBILITY.md) — pinned toolchain, fixture provenance, and clean-machine smoke
 - [Research](docs/RESEARCH.md) — landscape, differentiation, and primary sources

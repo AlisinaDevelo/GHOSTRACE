@@ -3,11 +3,12 @@ use std::path::PathBuf;
 use chrono::{DateTime, TimeZone, Utc};
 use clap::{Parser, Subcommand};
 use ghostrace::{
-    capture, explain, export_journal_with_confirmation, fixture::ingest_fixture, journal::Journal,
-    policy::PolicyProfile, preview_export, validate_export, DeterministicKeyProvider,
-    EventEnvelope, EventKind, EventPayload, EventSource, Evidence, ExportRequest, GhostraceError,
-    IngestionOrigin, ReasonCode, RepairInterval, RetentionConfirmation, RetentionPolicy, RootId,
-    SnapshotDigest, EVENT_SCHEMA_JSON,
+    capture, checked_in_profile, explain, export_journal_with_confirmation,
+    fixture::ingest_fixture, journal::Journal, policy::PolicyProfile, preview_export,
+    validate_export, DeterministicKeyProvider, EventEnvelope, EventKind, EventPayload, EventSource,
+    Evidence, ExportRequest, GhostraceError, IngestionOrigin, ReasonCode, RepairInterval,
+    RetentionConfirmation, RetentionPolicy, RootId, SnapshotDigest, EVENT_SCHEMA_JSON,
+    PARQUET_ARCHIVE_PROFILE_JSON,
 };
 use uuid::Uuid;
 
@@ -165,6 +166,8 @@ enum Command {
     },
     /// Print the checked-in event envelope JSON Schema.
     Schema,
+    /// Print the checked-in strict v1 profile for a future Parquet-derived archive.
+    ParquetProfile,
     /// Live capture is intentionally unavailable in this vertical slice.
     Capture,
 }
@@ -424,6 +427,11 @@ fn run(cli: Cli) -> Result<(), GhostraceError> {
         }
         Command::Schema => {
             println!("{EVENT_SCHEMA_JSON}");
+            Ok(())
+        }
+        Command::ParquetProfile => {
+            checked_in_profile()?;
+            println!("{PARQUET_ARCHIVE_PROFILE_JSON}");
             Ok(())
         }
         Command::Capture => capture(),

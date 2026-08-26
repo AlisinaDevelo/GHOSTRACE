@@ -35,6 +35,17 @@ with open(sys.argv[1], encoding="utf-8") as generated, open(sys.argv[2], encodin
         raise SystemExit("schema output differs from the checked-in contract")
 PY
 
+echo "reproducibility: parquet archive profile"
+cargo +1.88.0 run --quiet -- parquet-profile > "$WORK_DIR/parquet-profile.json"
+python3 - "$WORK_DIR/parquet-profile.json" fixtures/parquet-archive-profile-v1.golden.json <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as generated, open(sys.argv[2], encoding="utf-8") as checked_in:
+    if json.load(generated) != json.load(checked_in):
+        raise SystemExit("Parquet profile output differs from the checked-in contract")
+PY
+
 echo "reproducibility: deterministic demo"
 event_id=00000000-0000-4000-8000-000000000008
 cargo +1.88.0 run --quiet -- demo --fixture fixtures/causal-chain.jsonl --event "$event_id" > "$WORK_DIR/demo-a.json"

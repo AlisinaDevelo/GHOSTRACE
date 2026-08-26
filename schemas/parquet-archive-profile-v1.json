@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/AlisinaDevelo/GHOSTRACE/schemas/parquet-archive-profile-v1.json",
+  "title": "GHOSTRACE strict Parquet archive profile v1",
+  "description": "A versioned, lossless profile for a future derived archive. It is not an archive writer or a canonical journal format.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id", "schema_version", "format", "compatibility", "source_schema_id",
+    "source_schema_version", "columns", "ordering", "gap_mapping", "provenance_mapping",
+    "policy_mapping", "evolution", "storage", "bounds"
+  ],
+  "properties": {
+    "schema_id": {"const":"ghostrace.parquet-archive-profile"},
+    "schema_version": {"const":1},
+    "format": {"const":"parquet"},
+    "compatibility": {"const":"strict"},
+    "source_schema_id": {"const":"ghostrace.event-envelope"},
+    "source_schema_version": {"const":1},
+    "columns": {
+      "type":"array", "minItems":23, "maxItems":23, "uniqueItems":true,
+      "items": {"$ref":"#/$defs/column"}
+    },
+    "ordering": {"$ref":"#/$defs/ordering"},
+    "gap_mapping": {"$ref":"#/$defs/gap_mapping"},
+    "provenance_mapping": {"$ref":"#/$defs/provenance_mapping"},
+    "policy_mapping": {"$ref":"#/$defs/policy_mapping"},
+    "evolution": {"$ref":"#/$defs/evolution"},
+    "storage": {"$ref":"#/$defs/storage"},
+    "bounds": {"$ref":"#/$defs/bounds"}
+  },
+  "$defs": {
+    "column": {
+      "type":"object", "additionalProperties":false,
+      "required":["name","physical_type","nullable","source","semantic","conversion"],
+      "properties": {
+        "name":{"type":"string","minLength":1},
+        "physical_type":{"enum":["utf8","uint32","uint64","int64","timestamp_nanos_utc"]},
+        "nullable":{"type":"boolean"},
+        "source":{"type":"string","minLength":1},
+        "semantic":{"type":"string","minLength":1},
+        "conversion":{"type":"string","minLength":1}
+      }
+    },
+    "ordering": {
+      "type":"object", "additionalProperties":false,
+      "required":["fields","tie_break"],
+      "properties": {
+        "fields":{"const":["observed_at","ingest_seq","event_id"]},
+        "tie_break":{"const":"ingest_seq_then_event_id"}
+      }
+    },
+    "gap_mapping": {
+      "type":"object", "additionalProperties":false,
+      "required":["event_kind","columns","missing_behavior","omission"],
+      "properties": {
+        "event_kind":{"const":"gap"},
+        "columns":{"const":["gap_source","gap_reason_code","gap_dropped_count","gap_from_cursor","gap_to_cursor","gap_volume_digest","gap_root_ids_json","gap_remediation_json"]},
+        "missing_behavior":{"const":"null_for_non_gap_events"},
+        "omission":{"const":"reject"}
+      }
+    },
+    "provenance_mapping": {
+      "type":"object", "additionalProperties":false,
+      "required":["source_column","semantics","unknown_behavior"],
+      "properties": {
+        "source_column":{"const":"provenance_version"},
+        "semantics":{"const":"exact_adapter_version"},
+        "unknown_behavior":{"const":"reject"}
+      }
+    },
+    "policy_mapping": {
+      "type":"object", "additionalProperties":false,
+      "required":["id_column","version_column","semantics","unknown_behavior"],
+      "properties": {
+        "id_column":{"const":"policy_profile_id"},
+        "version_column":{"const":"policy_profile_version"},
+        "semantics":{"const":"exact_policy_identity"},
+        "unknown_behavior":{"const":"reject"}
+      }
+    },
+    "evolution": {
+      "type":"object", "additionalProperties":false,
+      "required":["rule","additions","removals","type_changes","unknown_columns"],
+      "properties": {
+        "rule":{"const":"additive_nullable_only"},
+        "additions":{"const":"new_profile_version_required"},
+        "removals":{"const":"new_profile_version_required"},
+        "type_changes":{"const":"new_profile_version_required"},
+        "unknown_columns":{"const":"reject"}
+      }
+    },
+    "storage": {
+      "type":"object", "additionalProperties":false,
+      "required":["compression","dictionary_encoding","statistics","page_index","encryption","plaintext_boundary","temporary_file_mode","atomic_publish","cleanup_on_failure","source_untouched","automatic_creation","deletion_scope"],
+      "properties": {
+        "compression":{"const":"zstd"},
+        "dictionary_encoding":{"const":"disabled"},
+        "statistics":{"const":"disabled"},
+        "page_index":{"const":"disabled"},
+        "encryption":{"const":"not_assumed"},
+        "plaintext_boundary":{"const":"explicit_derived_archive"},
+        "temporary_file_mode":{"const":"0600"},
+        "atomic_publish":{"const":"required"},
+        "cleanup_on_failure":{"const":"required"},
+        "source_untouched":{"const":"required"},
+        "automatic_creation":{"const":"forbidden"},
+        "deletion_scope":{"const":"external_copy_limits_explicit"}
+      }
+    },
+    "bounds": {
+      "type":"object", "additionalProperties":false,
+      "required":["max_columns","max_row_bytes","max_rows","max_metadata_bytes"],
+      "properties": {
+        "max_columns":{"const":23},
+        "max_row_bytes":{"const":1048576},
+        "max_rows":{"const":10000000},
+        "max_metadata_bytes":{"const":65536}
+      }
+    }
+  }
+}

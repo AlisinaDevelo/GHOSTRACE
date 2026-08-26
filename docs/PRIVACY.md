@@ -177,6 +177,25 @@ destination without --force. An export may contain sensitive plaintext and is th
 user's responsibility once written outside the protected journal directory.
 GHOSTRACE does not upload or fetch a destination.
 
+The optional Parquet archive profile is a contract for a future user-requested
+derived copy, not an automatic export path. `ghostrace parquet-profile` prints the
+checked-in strict v1 profile and never reads a journal or creates an archive. The
+profile keeps the plaintext boundary explicit, requires mode `0600` temporary files
+and atomic publication, and requires cleanup on failure. A writer must disable
+Parquet dictionary encoding, column statistics, and page indexes: compression can
+reduce size but does not provide confidentiality, while statistics and metadata can
+leak values or ranges even when payload columns are encrypted elsewhere. The profile
+records that Parquet encryption is not assumed, so a downstream consumer must treat
+the archive as sensitive plaintext unless it establishes its own encryption boundary.
+Profile validation rejects undeclared columns, lossy conversions, non-canonical JSON,
+oversized rows, and missing essential gap fields rather than silently coercing them.
+
+The archive is a separate external copy. Journal retention and key destruction do
+not erase it, and GHOSTRACE cannot retract copies made by downstream tools or
+backups. Any future deletion feature must identify the copy owner and scope, report
+what remains recoverable, and preserve the source journal when archive publication
+fails.
+
 ## Retention and deletion
 
 The fixture headstart has no ambient retention burden. The read-only
