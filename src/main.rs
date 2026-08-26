@@ -2,9 +2,9 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use ghostrace::{
-    capture, explain, export_fixture, export_journal, fixture::ingest_fixture, journal::Journal,
-    policy::PolicyProfile, validate_export, DeterministicKeyProvider, GhostraceError,
-    EVENT_SCHEMA_JSON,
+    capture, explain, export_journal_with_confirmation, fixture::ingest_fixture, journal::Journal,
+    policy::PolicyProfile, preview_export, validate_export, DeterministicKeyProvider,
+    ExportRequest, GhostraceError, EVENT_SCHEMA_JSON,
 };
 use uuid::Uuid;
 
@@ -45,6 +45,18 @@ enum Command {
         #[arg(long)]
         event: Uuid,
     },
+    /// Preview the exact query, policy, fields, snapshot, and destination class
+    /// that a plaintext export would disclose.
+    Preview {
+        #[arg(long, conflicts_with = "journal", required_unless_present = "journal")]
+        fixture: Option<PathBuf>,
+        #[arg(long, conflicts_with = "fixture", required_unless_present = "fixture")]
+        journal: Option<PathBuf>,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long, default_value_t = false)]
+        force: bool,
+    },
     /// Ingest a fixture and stream a versioned JSONL export.
     Export {
         #[arg(long, conflicts_with = "journal", required_unless_present = "journal")]
@@ -55,6 +67,12 @@ enum Command {
         output: PathBuf,
         #[arg(long, default_value_t = false)]
         force: bool,
+        /// Plan digest printed by the matching `preview` command.
+        #[arg(long)]
+        confirm_plan: Option<String>,
+        /// Journal snapshot digest printed by the matching `preview` command.
+        #[arg(long)]
+        confirm_snapshot: Option<String>,
     },
     /// Validate a JSONL export before consuming its records.
     Validate {
@@ -98,18 +116,43 @@ fn run(cli: Cli) -> Result<(), GhostraceError> {
             println!("{}", explanation.to_pretty_json()?);
             Ok(())
         }
-        Command::Export { fixture, journal, output, force } => {
-            let manifest = match (fixture, journal) {
-                (Some(fixture), None) => export_fixture(fixture, &output, force)?,
-                (None, Some(journal_path)) => {
-                    let journal = open_fixture_journal(journal_path)?;
-                    let manifest = export_journal(&journal, &output, force)?;
-                    journal.shutdown()?;
-                    manifest
-                }
-                _ => unreachable!("clap enforces exactly one export input"),
+        Command::Preview { fixture, journal, output, force } => {
+            let (journal, policy, durable) = open_export_input(fixture, journal)?;
+            let request = ExportRequest { force, ..ExportRequest::default() };
+            let preview = preview_export(&journal, &policy, &request, &output)?;
+            println!("{}", serde_json::to_string_pretty(&preview)?);
+            if durable {
+                journal.shutdown()?;
+            }
+            Ok(())
+        }
+        Command::Export { fixture, journal, output, force, confirm_plan, confirm_snapshot } => {
+            let (journal, policy, durable) = open_export_input(fixture, journal)?;
+            let request = ExportRequest { force, ..ExportRequest::default() };
+            let preview = preview_export(&journal, &policy, &request, &output)?;
+            let Some(confirm_plan) = confirm_plan else {
+                return Err(GhostraceError::ExportConfirmationRequired);
             };
-            println!("exported {} event(s)", manifest.coverage.event_count);
+            let Some(confirm_snapshot) = confirm_snapshot else {
+                return Err(GhostraceError::ExportConfirmationRequired);
+            };
+            if preview.plan_digest().as_str() != confirm_plan
+                || preview.snapshot_digest().as_str() != confirm_snapshot
+            {
+                return Err(GhostraceError::ExportConfirmationMismatch);
+            }
+            let result =
+                export_journal_with_confirmation(&journal, &output, preview.confirm(), &policy)?;
+            if durable {
+                journal.shutdown()?;
+            }
+            println!(
+                "exported {} event(s); plan {}; manifest {}; destination {:?}",
+                result.manifest.coverage.event_count,
+                result.receipt.plan_digest,
+                result.receipt.manifest_digest,
+                result.receipt.destination_class,
+            );
             Ok(())
         }
         Command::Validate { export } => {
@@ -131,6 +174,26 @@ fn fixture_policy() -> PolicyProfile {
 
 fn open_fixture_journal(path: PathBuf) -> Result<Journal, GhostraceError> {
     Journal::open_fixture(path, DeterministicKeyProvider::from_seed(FIXTURE_CLI_KEY_SEED))
+}
+
+fn open_export_input(
+    fixture: Option<PathBuf>,
+    journal: Option<PathBuf>,
+) -> Result<(Journal, PolicyProfile, bool), GhostraceError> {
+    match (fixture, journal) {
+        (Some(fixture), None) => {
+            let journal =
+                Journal::in_memory(DeterministicKeyProvider::from_seed("fixture-export-v1"))?;
+            let policy = fixture_policy();
+            ingest_fixture(fixture, &journal, &policy)?;
+            Ok((journal, policy, false))
+        }
+        (None, Some(journal_path)) => {
+            let policy = fixture_policy();
+            Ok((open_fixture_journal(journal_path)?, policy, true))
+        }
+        _ => unreachable!("clap enforces exactly one export input"),
+    }
 }
 
 fn main() {

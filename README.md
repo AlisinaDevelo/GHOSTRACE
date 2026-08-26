@@ -97,8 +97,9 @@ encryption or key-management claim.
 | ghostrace ingest --journal ... --fixture ... | Available; persists a checked-in fixture batch |
 | ghostrace explain --journal ... --event <uuid> | Available; deterministic after reopen |
 | ghostrace demo --fixture ... --event <uuid> | Available |
-| ghostrace export --journal ... --output ... [--force] | Available; decrypts and writes one bounded record at a time, then atomically publishes a validated 0600 artifact |
-| ghostrace export --fixture ... --output ... [--force] | Available in-memory shortcut |
+| ghostrace preview --journal ... --output ... [--force] | Available; prints the bounded query, field inventory, policy, snapshot, coverage, and destination-class receipt before declassification |
+| ghostrace export --journal ... --output ... --confirm-plan ... --confirm-snapshot ... [--force] | Available; requires the matching preview digests, then decrypts and writes one bounded record at a time before atomically publishing a validated 0600 artifact |
+| ghostrace preview/export --fixture ... | Available in-memory shortcut with the same explicit confirmation gate |
 | ghostrace validate --export ... | Available; rejects incomplete, mixed-version, or digest-drifted JSONL before consumption |
 | ghostrace schema | Available |
 | ghostrace capture | Refuses by design |

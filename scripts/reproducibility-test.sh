@@ -9,6 +9,8 @@ ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT_DIR"
 
 export CARGO_NET_OFFLINE=true
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
+export CARGO_INCREMENTAL=0
 WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/ghostrace-repro.XXXXXX")
 trap 'rm -rf "$WORK_DIR"' EXIT
 
@@ -58,10 +60,38 @@ if len(explanation["chain_event_ids"]) != 8 or explanation["coverage"]["gap_even
 PY
 
 echo "reproducibility: deterministic export"
-cargo +1.88.0 run --quiet -- export --fixture fixtures/causal-chain.jsonl --output "$WORK_DIR/export-a.jsonl"
-cargo +1.88.0 run --quiet -- export --fixture fixtures/causal-chain.jsonl --output "$WORK_DIR/export-b.jsonl"
+export_confirmed() {
+  local input_flag=$1
+  local input_path=$2
+  local output_path=$3
+  local preview_path=$4
+  cargo +1.88.0 run --quiet -- preview "$input_flag" "$input_path" --output "$output_path" > "$preview_path"
+  local plan_digest
+  local snapshot_digest
+  plan_digest=$(python3 - "$preview_path" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    print(json.load(handle)["plan_digest"])
+PY
+  )
+  snapshot_digest=$(python3 - "$preview_path" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    print(json.load(handle)["snapshot_digest"])
+PY
+  )
+  cargo +1.88.0 run --quiet -- export "$input_flag" "$input_path" --output "$output_path" \
+    --confirm-plan "$plan_digest" --confirm-snapshot "$snapshot_digest"
+}
+
+export_confirmed --fixture fixtures/causal-chain.jsonl "$WORK_DIR/export-a.jsonl" "$WORK_DIR/export-a.preview.json"
+export_confirmed --fixture fixtures/causal-chain.jsonl "$WORK_DIR/export-b.jsonl" "$WORK_DIR/export-b.preview.json"
 cmp -s "$WORK_DIR/export-a.jsonl" "$WORK_DIR/export-b.jsonl"
-cargo +1.88.0 run --quiet -- export --journal "$journal" --output "$WORK_DIR/export-journal.jsonl"
+export_confirmed --journal "$journal" "$WORK_DIR/export-journal.jsonl" "$WORK_DIR/export-journal.preview.json"
 cargo +1.88.0 run --quiet -- validate --export "$WORK_DIR/export-journal.jsonl" | grep -F "validated 8 event(s)" >/dev/null
 python3 - "$WORK_DIR/export-journal.jsonl" <<'PY'
 import json

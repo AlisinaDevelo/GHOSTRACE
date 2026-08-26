@@ -11,6 +11,7 @@ use std::{
     path::Path,
 };
 
+use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -228,7 +229,23 @@ pub fn validate_export(path: impl AsRef<Path>) -> Result<ExportValidation, Ghost
             "manifest schema_versions do not match the registry".to_owned(),
         ));
     }
-    if manifest.query_scope.kind != "all_committed" || !manifest.query_scope.include_coverage {
+    let parsed_from =
+        manifest.query_scope.observed_from.as_deref().map(DateTime::parse_from_rfc3339).transpose();
+    let parsed_until = manifest
+        .query_scope
+        .observed_until
+        .as_deref()
+        .map(DateTime::parse_from_rfc3339)
+        .transpose();
+    let valid_query_range = match (parsed_from, parsed_until) {
+        (Ok(Some(from)), Ok(Some(until))) => from <= until,
+        (Ok(Some(_)), Ok(None)) | (Ok(None), Ok(Some(_))) | (Ok(None), Ok(None)) => true,
+        _ => false,
+    };
+    if !matches!(manifest.query_scope.kind.as_str(), "all_committed" | "filtered")
+        || !manifest.query_scope.include_coverage
+        || !valid_query_range
+    {
         return Err(GhostraceError::ExportInvalid("unsupported query scope".to_owned()));
     }
     let mut event_count = 0usize;
