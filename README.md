@@ -95,6 +95,18 @@ cargo +1.88.0 run -- integrity-check \
 cargo +1.88.0 run -- authenticated-check \
   --journal "$JOURNAL"
 
+# Create a signed, path-free local verification checkpoint. It binds the
+# checkpointed database bytes, schema, policy digest, authenticated chain
+# position, key generation, integrity receipt, and verification time.
+cargo +1.88.0 run -- checkpoint \
+  --journal "$JOURNAL"
+
+# The repair command requires a verified source and operates only on a new
+# database copy. Intervals are inclusive ingest sequences and must not orphan
+# children or cursor tails. The synthetic MVP exercises a safe unreferenced
+# interval and prints a before/after manifest without paths or key material.
+cargo +1.88.0 run -- recovery-demo
+
 # Inventory residue classes without printing journal or backup paths. This is
 # explanatory and read-only; it does not delete or compact anything.
 cargo +1.88.0 run -- residue-report \
@@ -134,6 +146,9 @@ encryption or key-management claim.
 | ghostrace residue-report --journal ... [--backup <path>] | Available; path-free residue inventory and explicit logical/compaction/cryptographic/external-copy guarantees; read-only |
 | ghostrace integrity-check --journal ... | Available; bounded SQLite integrity/foreign-key checks with path-free recovery guidance; read-only |
 | ghostrace authenticated-check --journal ... | Available; keyed canonical-state verification for events, cursors, policy history, diagnostics, and explicit deletion boundaries; local-key-only validity |
+| ghostrace checkpoint --journal ... | Available; signs a path-free checkpoint binding database identity, integrity receipt, schema, policy set, key generation, chain position, and verification time |
+| ghostrace repair --journal ... --destination ... --interval source:start:end | Available; copies a verified source, applies bounded unreferenced interval repair, appends one repair gap per interval, and prints a reconciled before/after manifest |
+| ghostrace recovery-demo | Available; device-side MVP of signed checkpoint plus verified-copy repair with privacy and count assertions |
 | ghostrace demo --fixture ... --event <uuid> | Available |
 | ghostrace preview --journal ... --output ... [--force] | Available; prints the bounded query, field inventory, policy, snapshot, coverage, and destination-class receipt before declassification |
 | ghostrace export --journal ... --output ... --confirm-plan ... --confirm-snapshot ... [--force] | Available; requires the matching preview digests, then decrypts and writes one bounded record at a time before atomically publishing a validated 0600 artifact |

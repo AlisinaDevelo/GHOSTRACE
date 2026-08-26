@@ -29,6 +29,7 @@ pub mod model;
 pub mod ordering;
 pub mod policy;
 pub mod query;
+pub mod recovery;
 pub mod residue;
 pub mod retention;
 pub(crate) mod storage;
@@ -163,6 +164,11 @@ pub use query::{
     CoverageGap, CoverageInterval, CoverageStatus, CoverageStatusKind, QueryCoverage, QueryPage,
     QueryRequest, COVERAGE_CONTRACT_VERSION, DEFAULT_QUERY_PAGE_SIZE, MAX_COVERAGE_MARKERS,
     MAX_QUERY_PAGE_SIZE, QUERY_CONTRACT_VERSION, QUERY_TOKEN_TTL_SECONDS,
+};
+pub use recovery::{
+    RepairApplication, RepairInterval, RepairManifest, RepairStateManifest, VerificationCheckpoint,
+    CHECKPOINT_SCHEMA_VERSION, MAX_REPAIR_INTERVALS, MAX_REPAIR_INTERVAL_EVENTS,
+    REPAIR_MANIFEST_SCHEMA_VERSION,
 };
 pub use residue::{
     DeletionMode, DeletionModeDescription, ResidueArtifactKind, ResidueArtifactSummary,

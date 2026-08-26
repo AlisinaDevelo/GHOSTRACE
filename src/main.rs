@@ -1,12 +1,13 @@
 use std::path::PathBuf;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use clap::{Parser, Subcommand};
 use ghostrace::{
     capture, explain, export_journal_with_confirmation, fixture::ingest_fixture, journal::Journal,
     policy::PolicyProfile, preview_export, validate_export, DeterministicKeyProvider,
-    ExportRequest, GhostraceError, RetentionConfirmation, RetentionPolicy, RootId, SnapshotDigest,
-    EVENT_SCHEMA_JSON,
+    EventEnvelope, EventKind, EventPayload, EventSource, Evidence, ExportRequest, GhostraceError,
+    IngestionOrigin, ReasonCode, RepairInterval, RetentionConfirmation, RetentionPolicy, RootId,
+    SnapshotDigest, EVENT_SCHEMA_JSON,
 };
 use uuid::Uuid;
 
@@ -138,6 +139,25 @@ enum Command {
         #[arg(long)]
         journal: PathBuf,
     },
+    /// Create and print a signed, path-free verification checkpoint.
+    Checkpoint {
+        #[arg(long)]
+        journal: PathBuf,
+    },
+    /// Repair bounded ingest intervals on a verified database copy.
+    Repair {
+        #[arg(long)]
+        journal: PathBuf,
+        #[arg(long)]
+        destination: PathBuf,
+        /// Inclusive interval in source:start:end form; repeat for multiple
+        /// intervals. The source must not be fixture.
+        #[arg(long = "interval", required = true)]
+        intervals: Vec<String>,
+    },
+    /// Run the bounded checkpoint/repair MVP against two synthetic,
+    /// unreferenced filesystem gaps and print the path-free manifest.
+    RecoveryDemo,
     /// Validate a JSONL export before consuming its records.
     Validate {
         #[arg(long)]
@@ -318,6 +338,85 @@ fn run(cli: Cli) -> Result<(), GhostraceError> {
                 Err(GhostraceError::AuthenticatedStateInvalid(report.message))
             }
         }
+        Command::Checkpoint { journal } => {
+            let journal = open_fixture_journal(journal)?;
+            let checkpoint = journal.create_checkpoint()?;
+            println!("{}", serde_json::to_string_pretty(&checkpoint)?);
+            journal.shutdown()?;
+            Ok(())
+        }
+        Command::Repair { journal, destination, intervals } => {
+            let journal = open_fixture_journal(journal)?;
+            let intervals = intervals
+                .iter()
+                .map(|value| parse_repair_interval(value))
+                .collect::<Result<Vec<_>, _>>()?;
+            let manifest = journal.repair_verified_copy(destination, &intervals)?;
+            println!("{}", serde_json::to_string_pretty(&manifest)?);
+            journal.shutdown()?;
+            Ok(())
+        }
+        Command::RecoveryDemo => {
+            let directory = tempfile::tempdir()
+                .map_err(|source| GhostraceError::Io { path: std::env::temp_dir(), source })?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))
+                    .map_err(|source| GhostraceError::Io {
+                        path: directory.path().to_path_buf(),
+                        source,
+                    })?;
+            }
+            let source = directory.path().join("recovery-demo.sqlite3");
+            let destination = directory.path().join("recovery-demo-repaired.sqlite3");
+            let journal = Journal::open_fixture(
+                &source,
+                DeterministicKeyProvider::from_seed("recovery-demo-v1"),
+            )?;
+            let policy = {
+                let mut policy = PolicyProfile::deny_by_default("recovery-demo-policy");
+                policy.enable_source(EventSource::Filesystem);
+                policy
+            };
+            let origin = IngestionOrigin::fixture_instance("fixture-recovery-demo")
+                .map_err(|_| GhostraceError::FixtureProvenance)?;
+            for number in 1_u128..=2 {
+                let timestamp = Utc
+                    .timestamp_opt(1_735_700_100 + number as i64, 0)
+                    .single()
+                    .expect("fixed demo timestamp");
+                let event = EventEnvelope::new(
+                    &origin,
+                    Uuid::from_u128(number + 100),
+                    timestamp,
+                    timestamp,
+                    EventSource::Filesystem,
+                    EventKind::Gap,
+                    EventPayload::Gap(ghostrace::GapPayload {
+                        source: EventSource::Filesystem,
+                        reason_code: ReasonCode::try_from("recovery_demo").expect("reason"),
+                        dropped_count: number as u64,
+                        from_cursor: None,
+                        to_cursor: None,
+                        volume_digest: None,
+                        root_ids: Vec::new(),
+                        remediation: None,
+                    }),
+                    None,
+                    policy.id.clone(),
+                    policy.version,
+                    Evidence::Direct,
+                    None,
+                )?;
+                journal.ingest(&origin, &event, &policy)?;
+            }
+            let interval = RepairInterval::new(EventSource::Filesystem, 1, 1)?;
+            let manifest = journal.repair_verified_copy(&destination, &[interval])?;
+            println!("{}", serde_json::to_string_pretty(&manifest)?);
+            journal.shutdown()?;
+            Ok(())
+        }
         Command::Validate { export } => {
             let validated = validate_export(export)?;
             println!("validated {} event(s)", validated.event_count);
@@ -355,6 +454,39 @@ fn parse_source(value: &str) -> Result<ghostrace::EventSource, GhostraceError> {
                 .to_owned(),
         )),
     }
+}
+
+fn parse_repair_interval(value: &str) -> Result<RepairInterval, GhostraceError> {
+    let mut parts = value.split(':');
+    let source = parts.next().ok_or_else(|| {
+        GhostraceError::RepairIntervalInvalid("interval requires source:start:end".to_owned())
+    })?;
+    let start = parts
+        .next()
+        .ok_or_else(|| {
+            GhostraceError::RepairIntervalInvalid("interval start is missing".to_owned())
+        })?
+        .parse::<u64>()
+        .map_err(|_| {
+            GhostraceError::RepairIntervalInvalid("interval start is invalid".to_owned())
+        })?;
+    let end = parts
+        .next()
+        .ok_or_else(|| GhostraceError::RepairIntervalInvalid("interval end is missing".to_owned()))?
+        .parse::<u64>()
+        .map_err(|_| GhostraceError::RepairIntervalInvalid("interval end is invalid".to_owned()))?;
+    if parts.next().is_some() {
+        return Err(GhostraceError::RepairIntervalInvalid(
+            "interval requires source:start:end".to_owned(),
+        ));
+    }
+    RepairInterval::new(
+        parse_source(source).map_err(|_| {
+            GhostraceError::RepairIntervalInvalid("interval source is invalid".to_owned())
+        })?,
+        start,
+        end,
+    )
 }
 
 fn open_fixture_journal(path: PathBuf) -> Result<Journal, GhostraceError> {

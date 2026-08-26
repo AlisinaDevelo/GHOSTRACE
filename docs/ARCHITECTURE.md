@@ -34,7 +34,8 @@ bounded single-writer SQLite WAL journal
         ├─ deterministic query
         ├─ evidence-backed explanation
         ├─ policy-bounded correlation rules
-        └─ explicit JSONL export
+        ├─ explicit JSONL export
+        └─ signed checkpoint → verified-copy repair → explicit gap manifest
 ~~~
 
 The arrows are trust and ownership boundaries. A source does not write directly to
@@ -72,6 +73,26 @@ the destination class and artifact digests, never the destination path.
 The key is intentionally deterministic only for the synthetic headstart; it is not
 the production Keychain design. `capture` remains an explicit refusal, and no CLI
 command enables a live collector or network path.
+
+## Checkpoint and repair boundary
+
+The checkpoint command performs a bounded SQLite integrity/foreign-key check,
+verifies the local authenticated anchor, checkpoints the WAL, and signs a
+path-free receipt with the configured local key. The receipt binds database
+bytes, journal schema, policy-table digest, chain epoch/head, event count and
+maximum sequence, key generation, the integrity-report digest, and RFC3339
+verification time. It is a local-integrity receipt, not remote attestation or a
+legal chain-of-custody claim.
+
+The repair command never rewrites its source. It requires a clean checkpoint,
+copies only the checkpointed database file, re-verifies the copy, and then
+removes only bounded ingest-sequence intervals that have no child or cursor-tail
+references. Each removed interval is replaced by a repair-origin gap event in
+one transaction. A path-free manifest records before/after identities and
+integrity digests, dropped and reconstructed counts, interval bounds, and gap
+count. The normal writer refuses to ingest when the SQLite data version
+indicates an external change until a fresh integrity check succeeds. The
+recovery-demo command exercises this workflow on synthetic unreferenced events.
 
 ## Export schema and manifest boundary
 

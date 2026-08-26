@@ -78,6 +78,21 @@ pub enum GhostraceError {
     #[error("integrity report is invalid: {0}")]
     IntegrityReportInvalid(String),
 
+    #[error("verification checkpoint is invalid: {0}")]
+    CheckpointInvalid(String),
+
+    #[error("verification checkpoint does not match the journal: {0}")]
+    CheckpointMismatch(String),
+
+    #[error("repair interval is invalid: {0}")]
+    RepairIntervalInvalid(String),
+
+    #[error("repair refused: {0}")]
+    RepairRefused(String),
+
+    #[error("repair manifest is invalid: {0}")]
+    RepairManifestInvalid(String),
+
     #[error("authenticated journal state is invalid: {0}")]
     AuthenticatedStateInvalid(String),
 
