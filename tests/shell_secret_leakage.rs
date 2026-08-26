@@ -333,6 +333,7 @@ mod unix {
         );
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn process_inspection_exposure_is_external_and_not_retained() {
         let channel = fixture()
@@ -373,6 +374,12 @@ mod unix {
             &channel.sentinel,
             retained_summary.to_string(),
         );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn process_inspection_requires_the_macos_os_contract() {
+        eprintln!("explicit no-go: macOS process inspection is unavailable on this runner");
     }
 }
 
