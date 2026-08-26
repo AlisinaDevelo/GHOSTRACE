@@ -95,7 +95,7 @@ relaxed.
 | `/tmp/ghostrace-0093-merged-repro.log` | merged-main deterministic pipe, exit 0 | `de61994c352264b7a535f0fdc9c70f43838f96e3ab041b6e0467266b2dc17e99` | 40704 |
 | `/tmp/ghostrace-0093-merged-release-build.log` | optimized release build, exit 0 | `da8b5fa2bfff898291a3104b9431e7497d8100c2edaed86ee56c03a33dc6a15d` | 3430 |
 | `/tmp/ghostrace-0093-merged-release-secret-exact.log` | optimized leakage suite, 6/6, exit 0 | `efe500d4c5d13cc18654f33f9beec3048db811a3cc8fe67c656cf8d6805606b0` | 697 |
-| `/tmp/ghostrace-0093-merged-rustdoc.log` | rustdoc, exit 0 | `955ac5f46ccf44744d35eb9b53ecd5987702d0800327360ab427b6effac0fd52` | 630 |
+| `/tmp/ghostrace-0093-merged-rustdoc-warnings.log` | rustdoc with `RUSTDOCFLAGS=-D warnings`, exit 0 | `729fbc5253973f68857b16c970b3f1497552de230fdc76c14cc9dc19365225ca` | 237 |
 | `/tmp/ghostrace-0093-merged-release-all.log` | optimized all-target/all-feature matrix excluding benchmark, exit 0 | `891382d111ef29b07f506524d098d7f1d7dde2fb262f3f90e7a90913088d2b20` | 30231 |
 | `/tmp/ghostrace-0093-merged-process-inspection.log` | macOS process exposure assertion, 1/1, exit 0 | `318d9e77866ea0be766867647848af5e1d502bfee37a32f8564e329aa6acaa62` | 352 |
 | `/tmp/ghostrace-0093-merged-contracts.log` | manifest, reproducibility, roadmap, Python tests, rustfmt, exit 0 | `8dd8528b91522338cc920bb870dfcc77af0aa98bed199a1ebb7154d3549d5389` | 1281 |
