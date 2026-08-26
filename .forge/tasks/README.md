@@ -24,7 +24,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0018 | Implement time-window queries and stable ordering | M3 | done | explain-export | maintainer | — | 0010, 0012, 0077, 0078, 0079 |
 | 0019 | Implement deterministic evidence-backed explain | M3 | done | explain-export | maintainer | — | 0017, 0018, 0080, 0081, 0082 |
 | 0020 | Define and ship JSONL export v1 with manifest | M3 | done | explain-export | maintainer | — | 0018, 0019, 0083, 0084, 0085 |
-| 0021 | Add retention, deletion, and integrity-check commands | M3 | backlog | explain-export | maintainer | — | 0009, 0018, 0020, 0086, 0087 |
+| 0021 | Add retention, deletion, and integrity-check commands | M3 | done | explain-export | maintainer | — | 0009, 0018, 0020, 0086, 0087 |
 | 0022 | Add optional Parquet cold-archive export | M3 | backlog | explain-export | maintainer | — | 0020, 0021, 0090 |
 | 0023 | Add tamper-evident event chain and verifier | M3 | backlog | explain-export | maintainer | — | 0008, 0009, 0020, 0088, 0089 |
 | 0024 | Add explicit shell-wrapper metadata capture | M4 | backlog | shell-git | maintainer | — | 0007, 0018, 0091, 0092, 0093 |
