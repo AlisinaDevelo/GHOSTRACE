@@ -90,7 +90,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0084 | Stream exports through an atomic bounded writer | M3 | done | explain-export | implementation-engineer | 0020 | 0083 |
 | 0085 | Add export redaction preview and policy receipts | M3 | done | explain-export | privacy-engineer | 0020 | 0007, 0083 |
 | 0086 | Implement retention planning and dry-run | M3 | done | explain-export | database-expert | 0021 | 0009, 0018, 0020 |
-| 0087 | Document and test deletion residue limits | M3 | backlog | explain-export | security-auditor | 0021 | 0086 |
+| 0087 | Document and test deletion residue limits | M3 | done | explain-export | security-auditor | 0021 | 0086 |
 | 0088 | Authenticate sequence, cursor, policy, and diagnostic state | M3 | backlog | explain-export | security-auditor | 0023 | 0008, 0009, 0020 |
 | 0089 | Add signed checkpoints and bounded repair workflows | M3 | backlog | explain-export | incident-responder | 0023 | 0088 |
 | 0090 | Specify and validate the Parquet archive profile | M3 | backlog | explain-export | data-engineer | 0022 | 0084, 0087 |
