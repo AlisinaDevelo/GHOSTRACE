@@ -261,6 +261,26 @@ future adapter must resolve the common object database and worktree metadata,
 discard all remote/config/reflog/path strings, and provide equivalent stable
 filesystem identity fields before these semantics can be used for live evidence.
 
+## Metadata-only Git snapshot (task 0095)
+
+[`docs/GIT_SNAPSHOT.md`](GIT_SNAPSHOT.md) and
+[`fixtures/git-snapshot-metadata-v1.golden.json`](../fixtures/git-snapshot-metadata-v1.golden.json)
+define the input contract for the next explicit Git adapter. The Rust
+`GitSnapshotMetadata` type accepts only normalized metadata: algorithm-aware
+SHA-1/SHA-256 HEAD/tree/index IDs, opaque repository kind, branch and operation
+classes, bounded status counts, and explicit source limitations. It has no
+object reader or path/command parameter, so construction cannot read object
+content. Strict deserialization rejects ref names, messages, authors, remotes,
+config, reflogs, filenames, diffs, patches, and paths.
+
+`tests/git_snapshot_privacy.rs` checks the golden schema and digest, malformed
+and algorithm-mismatched IDs, excluded/unknown-field rejection without input
+echo, clean/dirty/untracked/conflicted and bare-state bounds, all operation
+classes, every limitation state, oversized metadata, and deterministic
+serialization. The fixture and focused suite are included in the reproducibility
+smoke. This is a metadata contract only; live Git invocation, consent, event
+projection, and gap handling remain task 0025/0096 work.
+
 ## Event-storm backpressure and loss accounting (task 0016)
 
 The selected-root collector exposes the current pending callback count, cumulative

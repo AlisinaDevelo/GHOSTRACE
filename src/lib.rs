@@ -21,6 +21,7 @@ pub mod fsevents;
 pub mod fsevents_collector;
 pub mod fsevents_flags;
 pub mod git_identity;
+pub mod git_snapshot;
 pub mod integrity;
 pub mod journal;
 pub mod key_lifecycle;
@@ -127,6 +128,14 @@ pub use git_identity::{
     GitContinuity, GitFilesystemIdentity, GitIdentity, GitIdentityError, GitRepositoryKind,
     GitSourceScope, GIT_IDENTITY_CONTRACT_VERSION, GIT_IDENTITY_SCHEMA_ID,
     GIT_IDENTITY_SCHEMA_JSON,
+};
+pub use git_snapshot::{
+    GitAlternateObjectDatabaseState, GitBranchClass, GitObjectFormat, GitObjectIdRef, GitOperation,
+    GitPartialCloneState, GitReplaceRefsState, GitShallowHistoryState, GitSnapshotError,
+    GitSnapshotMetadata, GitSourceLimitations, GitStatusCounts, GitSubmoduleState,
+    GitWorktreeState, GIT_OBJECT_READ_POLICY, GIT_SNAPSHOT_GOLDEN_JSON, GIT_SNAPSHOT_SCHEMA_ID,
+    GIT_SNAPSHOT_SCHEMA_JSON, GIT_SNAPSHOT_SCHEMA_VERSION, MAX_GIT_SNAPSHOT_BYTES,
+    MAX_GIT_STATUS_COUNT, MAX_GIT_STATUS_TOTAL,
 };
 pub use integrity::{
     IntegrityForeignKeyViolation, IntegrityReport, INTEGRITY_REPORT_SCHEMA_VERSION,

@@ -244,6 +244,16 @@ is deliberately retained; clone and reinitialization break repository continuity
 This contract does not run Git, fetch remotes, or claim authorship, intent, or source
 completeness.
 
+The companion [`GitSnapshotMetadata`](GIT_SNAPSHOT.md) contract is the baseline
+for any future explicit snapshot. It retains only an opaque repository identity,
+algorithm-tagged optional HEAD/tree/index IDs, branch and operation classes,
+bounded status counts, and required limitation states for partial clones,
+replace refs, shallow history, submodules, and alternate object databases.
+Ref names, messages, authors, remotes, config, reflogs, diffs, patches,
+filenames, untracked content, and paths have no representation. The constructor
+accepts normalized values only and performs no object or filesystem reads;
+unknown source conditions remain explicit `unknown` limitations.
+
 ## Retention and deletion
 
 The fixture headstart has no ambient retention burden. The read-only

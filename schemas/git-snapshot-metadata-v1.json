@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ghostrace.dev/schemas/git-snapshot-metadata-v1.json",
+  "title": "GHOSTRACE metadata-only Git snapshot",
+  "description": "A bounded Git snapshot contract. It contains no refs, messages, authors, remotes, paths, diffs, patches, or object content and performs no object reads.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "repository_id", "repository_kind", "object_format",
+    "head", "tree", "index", "worktree_state", "branch_class", "operation",
+    "status", "limitations", "snapshot_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "repository_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*[a-z0-9]$", "maxLength": 128},
+    "repository_kind": {"enum": ["standard", "bare", "submodule"]},
+    "object_format": {"enum": ["sha1", "sha256"]},
+    "head": {"anyOf": [{"$ref": "#/$defs/object_id"}, {"type": "null"}]},
+    "tree": {"anyOf": [{"$ref": "#/$defs/object_id"}, {"type": "null"}]},
+    "index": {"anyOf": [{"$ref": "#/$defs/object_id"}, {"type": "null"}]},
+    "worktree_state": {"enum": ["clean", "modified", "untracked_only", "conflicted", "not_applicable", "unknown"]},
+    "branch_class": {"enum": ["local", "remote_tracking", "detached_head", "tag", "unborn", "no_worktree", "unknown"]},
+    "operation": {"enum": ["idle", "merge", "rebase", "cherry_pick", "revert", "bisect", "apply", "sequencer", "unknown"]},
+    "status": {"$ref": "#/$defs/status"},
+    "limitations": {"$ref": "#/$defs/limitations"},
+    "snapshot_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  },
+  "$defs": {
+    "object_id": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "hex"],
+      "properties": {
+        "algorithm": {"enum": ["sha1", "sha256"]},
+        "hex": {"type": "string", "pattern": "^[0-9a-f]+$"}
+      },
+      "allOf": [
+        {"if": {"properties": {"algorithm": {"const": "sha1"}}}, "then": {"properties": {"hex": {"pattern": "^[0-9a-f]{40}$"}}}},
+        {"if": {"properties": {"algorithm": {"const": "sha256"}}}, "then": {"properties": {"hex": {"pattern": "^[0-9a-f]{64}$"}}}}
+      ]
+    },
+    "status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["staged", "unstaged", "untracked", "conflicted"],
+      "properties": {
+        "staged": {"type": "integer", "minimum": 0, "maximum": 1000000},
+        "unstaged": {"type": "integer", "minimum": 0, "maximum": 1000000},
+        "untracked": {"type": "integer", "minimum": 0, "maximum": 1000000},
+        "conflicted": {"type": "integer", "minimum": 0, "maximum": 1000000}
+      }
+    },
+    "limitations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["partial_clone", "replace_refs", "shallow_history", "submodules", "alternate_object_database"],
+      "properties": {
+        "partial_clone": {"enum": ["full", "partial", "unknown"]},
+        "replace_refs": {"enum": ["none", "active", "unknown"]},
+        "shallow_history": {"enum": ["complete", "shallow", "unknown"]},
+        "submodules": {"enum": ["none", "present", "unknown"]},
+        "alternate_object_database": {"enum": ["none", "present", "unknown"]}
+      }
+    }
+  }
+}

@@ -159,6 +159,23 @@ unknown fields and never echoed. This is not live Git integration: a future
 adapter must provide equivalent stable metadata and separately test its command
 parsing and remote/config exclusion.
 
+## Metadata-only Git snapshot
+
+Run the focused privacy and schema matrix:
+
+```sh
+cargo +1.88.0 test --locked --test git_snapshot_privacy -- --nocapture
+```
+
+The test validates the checked-in schema and golden digest, algorithm-tagged
+SHA-1/SHA-256 IDs, status/operation and bare-repository bounds, all explicit
+source-limitations states, deterministic serialization, unknown/excluded field
+rejection, digest drift, and oversized input. `GitSnapshotMetadata` accepts
+normalized values only and has no path or object-reader parameter; therefore the
+constructor cannot read Git object contents. This is a metadata contract, not a
+live Git command or network test. Task 0025 must add its own consent, parser,
+failure/gap, and device evidence before any live snapshot is claimed.
+
 ## Clean-machine smoke
 
 After installing the pinned inputs, run the complete local reproduction lane:

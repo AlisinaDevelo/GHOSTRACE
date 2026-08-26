@@ -163,7 +163,11 @@ messages, remote credentials, and raw paths. Task 0094 defines the companion
 path-free identity contract: object-database and worktree device/file identities
 become digests, selected-root and source-scope bindings stay explicit, and move,
 clone, linked-worktree, submodule, bare, and repository-reinitialization continuity
-outcomes are tested offline before any live adapter exists. Frontmost-application evidence excludes
+outcomes are tested offline before any live adapter exists. Task 0095 adds the
+metadata-only snapshot boundary: algorithm-tagged object IDs, bounded status and
+operation classes, branch classes instead of ref names, and explicit limitations
+for partial clones, replace refs, shallow history, submodules, and alternate object
+databases. Its constructors perform no object reads. Frontmost-application evidence excludes
 titles and documents and remains contextual rather than actor attribution. A
 ground-truth workflow corpus evaluates the combined claims.
 
