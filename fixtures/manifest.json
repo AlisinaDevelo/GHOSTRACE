@@ -150,6 +150,14 @@
       "seed": "ghostrace-fixture-seed-v1",
       "sha256": "c2f59848c0d7d3918a53218721ac5246a6b6df865a6ea762942bf20550c8a1a9",
       "bytes": 1268
+    },
+    {
+      "path": "fixtures/shell-wrapper-lifecycle-v1.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "0a7574897299f8e3af5cc258c7f13b2dab0ecd9146924ba54d0c9f9dacbdc827",
+      "bytes": 1931
     }
   ],
   "privacy": {

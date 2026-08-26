@@ -170,6 +170,7 @@ encryption or key-management claim.
 | Export schema and manifest registry | Available as six strict v1 contracts with stable IDs, golden examples, version declarations, fail-closed streaming validation for mixed versions, counts, bytes, and body digests, and bounded record/metadata limits |
 | Derived Parquet archive profile | Available as a strict, lossless 23-column v1 contract with explicit gap/provenance/policy mappings, additive-nullable evolution gates, bounded rows/metadata, and privacy-safe storage defaults; a writer remains a later task |
 | Explicit shell metadata schema | Available as a strict v1 contract for wrapper session, executable identity, sanitized working-directory identity, timing, outcome, exit code, and signal; raw command state is structurally rejected |
+| Shell wrapper lifecycle contract | Available as synthetic reference tests for child status propagation and explicit incomplete-execution gaps; no shell executor is shipped |
 | Shell, Git, frontmost-app, or browser collectors | Not shipped |
 | macOS Keychain-backed production encryption | Not shipped |
 | Signed/notarized release artifacts | Not shipped |
@@ -306,6 +307,7 @@ docs/adr/            Immutable architecture decisions
 - [Export contract goldens](fixtures/export-manifest-v1.golden.json) — manifest example; sibling `*-record-v1.golden.json` files cover every registered record
 - [Parquet archive profile](schemas/parquet-archive-profile-v1.json) — strict derived-archive contract; [golden profile](fixtures/parquet-archive-profile-v1.golden.json)
 - [Explicit shell metadata schema](schemas/shell-execution-metadata-v1.json) — wrapper-only metadata contract; [golden record](fixtures/shell-execution-metadata-v1.golden.json)
+- [Shell wrapper lifecycle fixture](fixtures/shell-wrapper-lifecycle-v1.json) — synthetic status, timeout, cancellation, and explicit gap contract
 - [Filesystem benchmark corpus](fixtures/filesystem-benchmark-corpus-v1.json) — bounded synthetic trees and native measurement contract
 - [Reproducibility](docs/REPRODUCIBILITY.md) — pinned toolchain, fixture provenance, and clean-machine smoke
 - [Research](docs/RESEARCH.md) — landscape, differentiation, and primary sources

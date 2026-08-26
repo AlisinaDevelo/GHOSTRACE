@@ -159,6 +159,18 @@ validation, and its field registry records the semantic and sensitivity class of
 every retained field. This is a data contract, not a shell executor or ambient
 collector; a later wrapper must remain explicit and policy-gated.
 
+### Shell-wrapper lifecycle reference harness
+
+[`fixtures/shell-wrapper-lifecycle-v1.json`](../fixtures/shell-wrapper-lifecycle-v1.json)
+and `tests/shell_wrapper_lifecycle.rs` specify the lifecycle behavior a future
+explicit wrapper must preserve. The device-safe harness invokes `/bin/sh -c` with
+cleared environment and null standard streams, then returns the native child exit
+code or signal unchanged. It exercises normal and non-zero exits, shell built-ins,
+pipelines, timeout, cancellation, and exec failure. Terminal closure and wrapper
+crash are represented as explicit gaps with no completion, end time, exit code, or
+success status. This is a test contract only: GHOSTRACE does not ship a shell
+executor, PTY, terminal collector, or command capture path.
+
 ## FSEvents lifecycle boundary
 
 The `fsevents` module is a deliberately small native boundary beneath the selected-root
