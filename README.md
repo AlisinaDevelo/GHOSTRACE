@@ -145,7 +145,7 @@ encryption or key-management claim.
 | ghostrace retention-delete --journal ... [selectors] --confirm-plan ... --confirm-candidate-set ... --confirm-snapshot-boundary ... | Available; transactional logical deletion bound to one retention plan; refuses scope changes and leaves compaction/external copies separate |
 | ghostrace residue-report --journal ... [--backup <path>] | Available; path-free residue inventory and explicit logical/compaction/cryptographic/external-copy guarantees; read-only |
 | ghostrace integrity-check --journal ... | Available; bounded SQLite integrity/foreign-key checks with path-free recovery guidance; read-only |
-| ghostrace authenticated-check --journal ... | Available; keyed canonical-state verification for events, cursors, policy history, diagnostics, and explicit deletion boundaries; local-key-only validity |
+| ghostrace authenticated-check --journal ... | Available; keyed canonical-state verification for events, replay detection, cursors, policy history, diagnostics, and explicit deletion boundaries; local-key-only validity |
 | ghostrace checkpoint --journal ... | Available; signs a path-free checkpoint binding database identity, integrity receipt, schema, policy set, key generation, chain position, and verification time |
 | ghostrace repair --journal ... --destination ... --interval source:start:end | Available; copies a verified source, applies bounded unreferenced interval repair, appends one repair gap per interval, and prints a reconciled before/after manifest |
 | ghostrace recovery-demo | Available; device-side MVP of signed checkpoint plus verified-copy repair with privacy and count assertions |

@@ -501,10 +501,20 @@ Every event/cursor/policy/diagnostic transaction refreshes the anchor before
 commit. A confirmed retention delete advances the chain epoch and records only
 the plan/candidate digests, snapshot boundary, and counts. After bootstrap, a
 missing anchor is a failure and is never silently reseeded. `authenticated-check`
-reports bounded insertion, deletion, reorder, edit, truncation, cursor rollback,
-policy substitution, diagnostic tampering, anchor, and key anomalies. A valid
-report authenticates only the configured local key; it is not origin attestation
-or a legal chain-of-custody claim.
+reports bounded insertion, deletion, reorder, edit, replay, truncation, cursor
+rollback, policy substitution, diagnostic tampering, anchor, and key anomalies.
+Replay is a verifier-only field match over event fields excluding ingest
+sequence and event identity; it makes a copied row observable without claiming
+that two legitimate identical observations are impossible. A valid report
+authenticates only the configured local key; it is not origin attestation or a
+legal chain-of-custody claim.
+
+Key rotation is a chain boundary. A provider retains the previous generation
+while an existing journal is opened and its old state is verified; the next
+authenticated write re-anchors at the boundary, increments `chain_epoch`, and
+binds the new generation into `chain_start_mac`. Older generations are retired
+only after every state and ciphertext that names them has been independently
+verified.
 
 The macOS key provider uses only the data-protection Keychain generic-password path:
 non-synchronizable items, `WhenUnlockedThisDeviceOnly` access control, and an explicit

@@ -360,7 +360,11 @@ impl KeyRing {
         Ok(CiphertextEnvelope::encrypt_with_key(generation, key, associated_data, plaintext)?)
     }
 
-    fn activate_generation(&mut self, generation: u32) -> Result<(), KeyLifecycleError> {
+    /// Switch the active generation while retaining older generations for a
+    /// journal re-anchor or resumable payload migration. Retire an older
+    /// generation only after every authenticated state and ciphertext that
+    /// still names it has been independently verified.
+    pub fn activate_generation(&mut self, generation: u32) -> Result<(), KeyLifecycleError> {
         if !self.keys.contains_key(&generation) {
             return Err(KeyLifecycleError::GenerationMissing(generation));
         }
