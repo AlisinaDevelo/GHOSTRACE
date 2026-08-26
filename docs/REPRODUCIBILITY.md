@@ -43,6 +43,10 @@ The tests use only the checked-in synthetic fixture and bounded local SQLite
 operations. They retain no paths or contents. The file-backed cases verify that
 new ingest is excluded by the snapshot upper bound, rows deleted after page one
 are not resurrected, and a changed storage schema invalidates a token. Token
+root-filter cases add matching and non-matching opaque roots, exercise page-token
+continuation across filtered rows, and confirm policy-blocked summaries are
+reported through coverage rather than returned as query events. The ordering and
+clock matrix uses the same stable key as export.
 forgery, cross-profile reuse, changed filters/page size, and expiry are negative
 cases; no hosted runner is needed to substitute for this local contract.
 

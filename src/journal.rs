@@ -1444,7 +1444,7 @@ fn read_query_page(
             .and_then(|value| u64::try_from(value).map_err(|_| GhostraceError::QueryInvalid))?,
     };
     let boundary = i64::try_from(snapshot_boundary).map_err(|_| GhostraceError::QueryInvalid)?;
-    let current_match_count = count_query_events(connection, request, boundary)?;
+    let current_match_count = count_query_events(connection, provider, request, boundary)?;
     let snapshot_match_count =
         token.map(|value| value.snapshot_match_count).unwrap_or(current_match_count);
     let retention_deletion_detected = token.is_some() && current_match_count < snapshot_match_count;
@@ -1460,8 +1460,6 @@ fn read_query_page(
         .transpose()?;
     let last_event_id =
         token.and_then(|value| value.last_order.as_ref().map(|order| order.event_id.to_string()));
-    let limit = i64::try_from(request.page_size.saturating_add(1))
-        .map_err(|_| GhostraceError::QueryInvalid)?;
     let mut statement = connection.prepare(
         "SELECT ingest_seq, event_id, schema_version, observed_at, ingested_at, source,
                 kind, collector_instance, source_cursor, provenance_version,
@@ -1475,14 +1473,15 @@ fn read_query_page(
            AND (?5 IS NULL OR kind = ?5)
            AND (?6 IS NULL OR observed_at >= ?6)
            AND (?7 IS NULL OR observed_at <= ?7)
+           AND kind <> 'policy_blocked_summary'
            AND (
                 ?8 IS NULL
                 OR observed_at > ?8
                 OR (observed_at = ?8 AND ingest_seq > ?9)
                 OR (observed_at = ?8 AND ingest_seq = ?9 AND event_id > ?10)
-           )
+         )
          ORDER BY observed_at ASC, ingest_seq ASC, event_id ASC
-         LIMIT ?11",
+         ",
     )?;
     let mut rows = statement.query(params![
         boundary,
@@ -1495,11 +1494,16 @@ fn read_query_page(
         last_observed,
         last_sequence.unwrap_or(0),
         last_event_id,
-        limit,
     ])?;
     let mut events = Vec::with_capacity(request.page_size);
     while let Some(row) = rows.next()? {
-        events.push(decode_stored(row_to_stored(row)?, provider)?);
+        let stored = decode_stored(row_to_stored(row)?, provider)?;
+        if request.matches_event(&stored.event) {
+            events.push(stored);
+            if events.len() > request.page_size {
+                break;
+            }
+        }
     }
     let has_more = events.len() > request.page_size;
     if has_more {
@@ -1544,6 +1548,7 @@ fn read_query_page(
 
 fn count_query_events(
     connection: &Connection,
+    provider: &dyn KeyProvider,
     request: &QueryRequest,
     boundary: i64,
 ) -> Result<u64, GhostraceError> {
@@ -1551,27 +1556,38 @@ fn count_query_events(
     let kind = request.kind.map(|value| value.to_string());
     let observed_from = request.observed_from.map(|value| value.to_rfc3339());
     let observed_until = request.observed_until.map(|value| value.to_rfc3339());
-    let count = connection.query_row(
-        "SELECT COUNT(*) FROM events
+    let mut statement = connection.prepare(
+        "SELECT ingest_seq, event_id, schema_version, observed_at, ingested_at, source,
+                kind, collector_instance, source_cursor, provenance_version,
+                policy_profile_id, policy_profile_version, evidence, parent_event_id,
+                payload_ciphertext
+         FROM events
          WHERE ingest_seq <= ?1
            AND policy_profile_id = ?2
            AND policy_profile_version = ?3
            AND (?4 IS NULL OR source = ?4)
            AND (?5 IS NULL OR kind = ?5)
            AND (?6 IS NULL OR observed_at >= ?6)
-           AND (?7 IS NULL OR observed_at <= ?7)",
-        params![
-            boundary,
-            request.policy_profile_id.as_str(),
-            request.policy_profile_version,
-            source,
-            kind,
-            observed_from,
-            observed_until,
-        ],
-        |row| row.get::<_, i64>(0),
+           AND (?7 IS NULL OR observed_at <= ?7)
+         AND kind <> 'policy_blocked_summary'",
     )?;
-    u64::try_from(count).map_err(|_| GhostraceError::QueryInvalid)
+    let mut count = 0_u64;
+    let mut rows = statement.query(params![
+        boundary,
+        request.policy_profile_id.as_str(),
+        request.policy_profile_version,
+        source,
+        kind,
+        observed_from,
+        observed_until,
+    ])?;
+    while let Some(row) = rows.next()? {
+        let stored = decode_stored(row_to_stored(row)?, provider)?;
+        if request.matches_event(&stored.event) {
+            count = count.checked_add(1).ok_or(GhostraceError::QueryInvalid)?;
+        }
+    }
+    Ok(count)
 }
 
 fn build_query_coverage(
@@ -1630,6 +1646,9 @@ fn build_query_coverage(
     let mut gaps = Vec::new();
     let mut recognized_marker = false;
     for stored in markers {
+        if !coverage_marker_matches_root(&stored.event, request.root_id.as_ref()) {
+            continue;
+        }
         let Some(source) = coverage_marker_source(&stored.event) else {
             continue;
         };
@@ -1735,6 +1754,28 @@ fn coverage_marker_source(event: &EventEnvelope) -> Option<EventSource> {
         }
         EventPayload::SourceError(payload) => Some(payload.source),
         _ => None,
+    }
+}
+
+fn coverage_marker_matches_root(
+    event: &EventEnvelope,
+    root_id: Option<&crate::model::RootId>,
+) -> bool {
+    let Some(root_id) = root_id else {
+        return true;
+    };
+    match &event.payload {
+        EventPayload::FilesystemChanged(payload) => payload.root_id == *root_id,
+        EventPayload::Gap(payload) => payload.root_ids.iter().any(|candidate| candidate == root_id),
+        // These markers describe source-level coverage rather than one
+        // filesystem root. Preserve them for a root-scoped query so a root
+        // filter cannot hide a policy denial, collector stop, or source
+        // error that makes the result incomplete.
+        EventPayload::PolicyBlockedSummary(_)
+        | EventPayload::CollectorStarted(_)
+        | EventPayload::CollectorStopped(_)
+        | EventPayload::SourceError(_) => true,
+        _ => false,
     }
 }
 

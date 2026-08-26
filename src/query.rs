@@ -19,13 +19,16 @@ use crate::{
     error::GhostraceError,
     journal::StoredEvent,
     model::{
-        EventKind, EventSource, PolicyProfileId, SnapshotDigest, SourceCursor, EVENT_SCHEMA_VERSION,
+        EventEnvelope, EventKind, EventSource, PolicyProfileId, RootId, SnapshotDigest,
+        SourceCursor, EVENT_SCHEMA_VERSION,
     },
     ordering::ORDERING_CONTRACT_VERSION,
     policy::PolicyProfile,
 };
 
-pub const QUERY_CONTRACT_VERSION: u32 = 2;
+// Incremented for the root-scoped request shape and the policy-blocked event
+// exclusion. Existing encrypted page tokens must fail closed as stale.
+pub const QUERY_CONTRACT_VERSION: u32 = 3;
 pub const COVERAGE_CONTRACT_VERSION: u32 = 1;
 pub const DEFAULT_QUERY_PAGE_SIZE: usize = 50;
 pub const MAX_QUERY_PAGE_SIZE: usize = 256;
@@ -155,6 +158,7 @@ pub struct QueryRequest {
     pub policy_profile_version: u32,
     pub scope_digest: SnapshotDigest,
     pub source: Option<EventSource>,
+    pub root_id: Option<RootId>,
     pub kind: Option<EventKind>,
     pub observed_from: Option<DateTime<Utc>>,
     pub observed_until: Option<DateTime<Utc>>,
@@ -180,6 +184,7 @@ impl QueryRequest {
             policy_profile_version: policy.version,
             scope_digest,
             source: None,
+            root_id: None,
             kind: None,
             observed_from: None,
             observed_until: None,
@@ -196,6 +201,17 @@ impl QueryRequest {
             return Err(GhostraceError::QueryInvalid);
         }
         Ok(())
+    }
+
+    pub(crate) fn matches_event(&self, event: &EventEnvelope) -> bool {
+        event.kind != EventKind::PolicyBlockedSummary
+            && self.source.is_none_or(|source| source == event.source)
+            && self.kind.is_none_or(|kind| kind == event.kind)
+            && self.root_id.as_ref().is_none_or(|root_id| {
+                event.payload.root_id().is_some_and(|event_root| event_root == root_id.as_str())
+            })
+            && self.observed_from.is_none_or(|from| event.observed_at >= from)
+            && self.observed_until.is_none_or(|until| event.observed_at <= until)
     }
 }
 

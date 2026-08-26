@@ -277,6 +277,19 @@ This contract deliberately does not turn deletion into a tombstone and does not
 claim that the logical snapshot survives a destructive retention policy. A
 future retention task must add its own residue and recovery evidence.
 
+## Time-window queries and stable ordering (task 0018)
+
+`QueryRequest` now covers source, opaque root identity, event kind, and observed
+time bounds while retaining the policy profile and scope digest in the
+authenticated query shape. Root filtering is performed after candidate payload
+decryption within the bounded snapshot because event payloads are encrypted at rest; pagination still uses
+the shared `(observed_at, ingest_seq, event_id)` cursor, so unmatched roots do
+not create skips or duplicates. `policy_blocked_summary` records are excluded
+from query events and remain available only through coverage statuses. The
+query matrix covers root-filter pagination, policy-blocked exclusion, clock
+ordering, gap-aware coverage, snapshot deletion, concurrent ingest, and token
+negative cases.
+
 ## Test layers
 
 1. **Unit tests:** model validation, URL sanitization, policy decisions, evidence

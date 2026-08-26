@@ -375,7 +375,10 @@ fn property_permutations_equal_times_irrelevant_events_and_page_boundaries_prese
     let events = sorted_matrix_events();
     let policy = PolicyProfile::fixture_default();
     let request = QueryRequest::for_policy(&policy).expect("query request");
-    let baseline = claim_projection(events.clone(), false);
+    let baseline = claim_projection(
+        events.clone().into_iter().filter(|event| event.kind != EventKind::PolicyBlockedSummary),
+        false,
+    );
 
     let mut indexes = [0usize, 1, 2, 3];
     let mut orders = Vec::new();
@@ -399,7 +402,13 @@ fn property_permutations_equal_times_irrelevant_events_and_page_boundaries_prese
             event
         })
         .collect::<Vec<_>>();
-    let equal_baseline = claim_projection(equal_time_events.clone(), false);
+    let equal_baseline = claim_projection(
+        equal_time_events
+            .clone()
+            .into_iter()
+            .filter(|event| event.kind != EventKind::PolicyBlockedSummary),
+        false,
+    );
     for (variant_index, order) in orders.iter().take(8).enumerate() {
         let mut permuted = Vec::with_capacity(equal_time_events.len());
         permuted.extend(order.iter().map(|index| equal_time_events[*index].clone()));
