@@ -244,6 +244,23 @@ explicit external operating-system exposure; these rows are recorded as
 `os_visible_not_retained` and are not application privacy passes. No shell executor
 or ambient collector is introduced by this contract.
 
+## Git repository and worktree identity (task 0094)
+
+[`fixtures/git-repository-worktree-identity-v1.json`](../fixtures/git-repository-worktree-identity-v1.json)
+is a deterministic, offline transition matrix for the future explicit Git
+adapter. `tests/git_identity.rs` validates the strict schema, exercises move,
+clone, linked-worktree, submodule, bare, source-scope rebinding, and repository
+reinitialization cases, and checks stable event `repository_id` derivation. The
+real-directory test moves a synthetic repository shape and confirms that
+device/file identity digests remain continuous without serializing the source
+path. Unknown remote URL, credential-helper, config, reflog, and path fields are
+rejected without echoing their values.
+
+The contract records no Git command output and performs no network operation. A
+future adapter must resolve the common object database and worktree metadata,
+discard all remote/config/reflog/path strings, and provide equivalent stable
+filesystem identity fields before these semantics can be used for live evidence.
+
 ## Event-storm backpressure and loss accounting (task 0016)
 
 The selected-root collector exposes the current pending callback count, cumulative

@@ -140,6 +140,25 @@ replay is a fixture-contract check, not a claim of native coverage. Native macOS
 evidence must come from the selected-root integration test and must state the exact
 device, run count, counters, retained receipt, and any no-go transition.
 
+## Git repository and worktree identity
+
+The Git identity fixture is a deterministic, offline matrix for the explicit
+adapter boundary:
+
+```sh
+cargo +1.88.0 test --locked --test git_identity -- --nocapture
+```
+
+It validates path-free object-database/worktree digests, selected-root and
+source-scope binding, stable repository IDs, and continuity outcomes for move,
+clone, linked worktree, submodule, bare, scope rebinding, and repository
+reinitialization. The Unix test moves a synthetic repository shape and reads
+only directory device/file identity before and after the move. Remote URLs,
+credential helpers, config values, reflog messages, and paths are rejected as
+unknown fields and never echoed. This is not live Git integration: a future
+adapter must provide equivalent stable metadata and separately test its command
+parsing and remote/config exclusion.
+
 ## Clean-machine smoke
 
 After installing the pinned inputs, run the complete local reproduction lane:

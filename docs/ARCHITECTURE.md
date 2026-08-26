@@ -159,6 +159,28 @@ validation, and its field registry records the semantic and sensitivity class of
 every retained field. This is a data contract, not a shell executor or ambient
 collector; a later wrapper must remain explicit and policy-gated.
 
+### Git repository and worktree identity
+
+[`git-repository-worktree-identity-v1.json`](../schemas/git-repository-worktree-identity-v1.json)
+defines the path-free identity boundary for the future explicit Git adapter. The
+adapter resolves Git's common object database and worktree metadata, then passes
+only device/file identity values to `GitIdentity::from_stable_parts` (or
+`from_paths`, which reads and immediately discards directory metadata). The
+serializable result contains a domain-separated SHA-256 digest for the object
+database, an optional worktree digest, the caller-owned opaque selected-root ID,
+an explicit source scope, and a repository-kind enum. Remote URLs, credential
+helpers, config values, reflog messages, and raw paths are not accepted fields.
+
+`GitIdentity::continuity_from` compares repository identity first, then worktree
+identity and source scope. A moved directory is continuous when the selected-root
+binding is retained; a clone or repository reinitialization is
+`repository_changed`; `git worktree add` is `worktree_changed`; and a changed
+selected-root/source binding is `scope_changed`. Bare repositories explicitly
+omit a worktree digest, while submodules use a distinct source scope and kind.
+These are identity and continuity semantics only: the adapter must supply stable
+filesystem metadata and must not turn a path, remote, reflog, or Git command
+output into retained evidence.
+
 ### Shell-wrapper lifecycle reference harness
 
 [`fixtures/shell-wrapper-lifecycle-v1.json`](../fixtures/shell-wrapper-lifecycle-v1.json)

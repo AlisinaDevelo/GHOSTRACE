@@ -20,6 +20,7 @@ pub mod fixture;
 pub mod fsevents;
 pub mod fsevents_collector;
 pub mod fsevents_flags;
+pub mod git_identity;
 pub mod integrity;
 pub mod journal;
 pub mod key_lifecycle;
@@ -121,6 +122,11 @@ pub use fsevents_flags::{
     EVENT_FLAG_MOUNT, EVENT_FLAG_MUST_SCAN_SUB_DIRS, EVENT_FLAG_NONE, EVENT_FLAG_OWN_EVENT,
     EVENT_FLAG_ROOT_CHANGED, EVENT_FLAG_UNMOUNT, EVENT_FLAG_USER_DROPPED,
     FSEVENTS_NORMALIZED_SCHEMA_VERSION,
+};
+pub use git_identity::{
+    GitContinuity, GitFilesystemIdentity, GitIdentity, GitIdentityError, GitRepositoryKind,
+    GitSourceScope, GIT_IDENTITY_CONTRACT_VERSION, GIT_IDENTITY_SCHEMA_ID,
+    GIT_IDENTITY_SCHEMA_JSON,
 };
 pub use integrity::{
     IntegrityForeignKeyViolation, IntegrityReport, INTEGRITY_REPORT_SCHEMA_VERSION,

@@ -166,6 +166,14 @@
       "seed": "ghostrace-fixture-seed-v1",
       "sha256": "a86e12ca24c01e9cb08bad0c8f2b25a50c750fdc08d7113d6ace83f5f3b6a512",
       "bytes": 3441
+    },
+    {
+      "path": "fixtures/git-repository-worktree-identity-v1.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "e5d1d9f2b132ab97e73a502092499e183f077410fc34699aabb62b6abba0d18e",
+      "bytes": 5045
     }
   ],
   "privacy": {
