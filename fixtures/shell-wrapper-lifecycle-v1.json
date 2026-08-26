@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "program": "ghostrace-shell-wrapper-lifecycle-v1",
+  "generator": {
+    "version": "ghostrace-shell-lifecycle-v1",
+    "seed": "ghostrace-shell-lifecycle-seed-v1",
+    "algorithm": "fixed scenario identifiers and expected terminal outcomes; no runtime randomness",
+    "command": "cargo +1.88.0 test --locked --test shell_wrapper_lifecycle"
+  },
+  "privacy": {
+    "synthetic_only": true,
+    "user_data_included": false,
+    "network_required": false,
+    "captures_stdio": false,
+    "captures_environment": false,
+    "retains_command_text": false
+  },
+  "resource_limits": {
+    "max_scenarios": 9,
+    "max_scenario_ms": 5000,
+    "max_total_ms": 15000
+  },
+  "scenarios": [
+    {
+      "id": "normal_exit",
+      "terminal_kind": "completion",
+      "expected": {"status": "succeeded", "exit_code": 0, "signal": null}
+    },
+    {
+      "id": "signal",
+      "terminal_kind": "completion",
+      "expected": {"status": "signaled", "exit_code": null, "signal": 15}
+    },
+    {
+      "id": "exec_failure",
+      "terminal_kind": "gap",
+      "gap_reason": "exec_failed"
+    },
+    {
+      "id": "shell_builtin",
+      "terminal_kind": "completion",
+      "expected": {"status": "failed", "exit_code": 17, "signal": null}
+    },
+    {
+      "id": "pipeline",
+      "terminal_kind": "completion",
+      "expected": {"status": "succeeded", "exit_code": 0, "signal": null}
+    },
+    {
+      "id": "timeout",
+      "terminal_kind": "completion",
+      "expected": {"status": "signaled", "exit_code": null, "signal": 9}
+    },
+    {
+      "id": "cancellation",
+      "terminal_kind": "completion",
+      "expected": {"status": "signaled", "exit_code": null, "signal": 9}
+    },
+    {
+      "id": "terminal_close",
+      "terminal_kind": "gap",
+      "gap_reason": "terminal_closed"
+    },
+    {
+      "id": "wrapper_crash",
+      "terminal_kind": "gap",
+      "gap_reason": "wrapper_crashed"
+    }
+  ]
+}

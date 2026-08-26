@@ -241,3 +241,8 @@ sanitized working-directory class/digest, start/end time, outcome, exit code, an
 signal. It has no field for arguments, environment, terminal streams, history,
 aliases, or command text; see
 [`schemas/shell-execution-metadata-v1.json`](../schemas/shell-execution-metadata-v1.json).
+
+The companion [`shell-wrapper-lifecycle-v1.json`](../fixtures/shell-wrapper-lifecycle-v1.json)
+fixture tests child status propagation and explicit incomplete-execution gaps for a
+future wrapper. It adds no event fields and does not execute a shipped collector or
+shell executor.

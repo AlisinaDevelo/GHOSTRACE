@@ -214,6 +214,13 @@ exit/signal combinations, and oversized metadata fail closed without echoing the
 untrusted value. This contract does not authorize ambient shell capture; an
 explicit wrapper and a later policy/consent gate remain required.
 
+The lifecycle contract is tested only with fixed synthetic scripts in an offline
+reference harness. The tests clear the child environment and connect standard input,
+output, and error to null; they retain no command text, arguments, environment values,
+or terminal bytes. Timeout, cancellation, terminal closure, and wrapper crash paths
+remain explicit outcomes or gaps, and a gap never receives a fabricated completion,
+end time, or success status.
+
 ## Retention and deletion
 
 The fixture headstart has no ambient retention burden. The read-only
