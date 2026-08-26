@@ -139,8 +139,10 @@ checks the durable JSONL export manifest and record count. Every export first
 renders a declassification preview and then passes both the plan and journal
 snapshot digests back as explicit confirmation; the lane also exports the
 in-memory fixture twice and requires byte-identical JSONL. It verifies that
-ambient capture refuses, validates the roadmap, runs all Python tests, and runs
-locked Clippy and Rust tests. Temporary outputs are created outside the repository and
+ambient capture refuses, runs the retention dry-run twice with an explicit UTC
+cutoff and requires byte-identical plans, validates its snapshot/candidate/gap
+counts, validates the roadmap, runs all Python tests, and runs locked Clippy and
+Rust tests. Temporary outputs are created outside the repository and
 removed on exit. The durable journal path is created below a mode-0700 temporary
 directory; the CLI refuses broader parent directories rather than weakening the
 path boundary.

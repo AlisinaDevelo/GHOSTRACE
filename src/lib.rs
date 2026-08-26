@@ -27,6 +27,7 @@ pub mod model;
 pub mod ordering;
 pub mod policy;
 pub mod query;
+pub mod retention;
 pub(crate) mod storage;
 pub mod volume;
 pub mod wal;
@@ -149,6 +150,11 @@ pub use query::{
     CoverageGap, CoverageInterval, CoverageStatus, CoverageStatusKind, QueryCoverage, QueryPage,
     QueryRequest, COVERAGE_CONTRACT_VERSION, DEFAULT_QUERY_PAGE_SIZE, MAX_COVERAGE_MARKERS,
     MAX_QUERY_PAGE_SIZE, QUERY_CONTRACT_VERSION, QUERY_TOKEN_TTL_SECONDS,
+};
+pub use retention::{
+    RetentionConfirmation, RetentionGapSummary, RetentionPlan, RetentionPolicy,
+    RetentionSelectionReason, DEFAULT_RETENTION_DAYS, LEGACY_KEY_GENERATION,
+    MAX_RETENTION_GAP_SUMMARIES, RETENTION_PLAN_SCHEMA_VERSION,
 };
 pub use volume::{
     MountState, VolumeIdentity, VolumeIdentityError, VolumeObservation, VolumeTransition,

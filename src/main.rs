@@ -1,10 +1,11 @@
 use std::path::PathBuf;
 
+use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
 use ghostrace::{
     capture, explain, export_journal_with_confirmation, fixture::ingest_fixture, journal::Journal,
     policy::PolicyProfile, preview_export, validate_export, DeterministicKeyProvider,
-    ExportRequest, GhostraceError, EVENT_SCHEMA_JSON,
+    ExportRequest, GhostraceError, RetentionPolicy, RootId, EVENT_SCHEMA_JSON,
 };
 use uuid::Uuid;
 
@@ -73,6 +74,24 @@ enum Command {
         /// Journal snapshot digest printed by the matching `preview` command.
         #[arg(long)]
         confirm_snapshot: Option<String>,
+    },
+    /// Print a deterministic, read-only retention plan for the journal.
+    RetentionPlan {
+        #[arg(long)]
+        journal: PathBuf,
+        /// RFC3339 cutoff; observations before it are selected. Without this
+        /// flag and without a size/count limit, the documented 90-day default
+        /// is anchored at the current UTC time.
+        #[arg(long)]
+        before: Option<String>,
+        #[arg(long)]
+        source: Option<String>,
+        #[arg(long)]
+        root_id: Option<String>,
+        #[arg(long)]
+        retain_at_most_events: Option<u64>,
+        #[arg(long)]
+        retain_at_most_bytes: Option<u64>,
     },
     /// Validate a JSONL export before consuming its records.
     Validate {
@@ -155,6 +174,33 @@ fn run(cli: Cli) -> Result<(), GhostraceError> {
             );
             Ok(())
         }
+        Command::RetentionPlan {
+            journal,
+            before,
+            source,
+            root_id,
+            retain_at_most_events,
+            retain_at_most_bytes,
+        } => {
+            let mut policy = if let Some(before) = before {
+                RetentionPolicy::before(parse_timestamp(&before)?)
+            } else if retain_at_most_events.is_some() || retain_at_most_bytes.is_some() {
+                RetentionPolicy::default()
+            } else {
+                RetentionPolicy::default_at(Utc::now())
+            };
+            policy.source = source.map(|value| parse_source(&value)).transpose()?;
+            policy.root_id = root_id.map(RootId::try_from).transpose().map_err(|_| {
+                GhostraceError::RetentionPolicyInvalid("root ID is invalid".to_owned())
+            })?;
+            policy.retain_at_most_events = retain_at_most_events;
+            policy.retain_at_most_bytes = retain_at_most_bytes;
+            let journal = open_fixture_journal(journal)?;
+            let plan = journal.retention_plan(&policy)?;
+            println!("{}", serde_json::to_string_pretty(&plan)?);
+            journal.shutdown()?;
+            Ok(())
+        }
         Command::Validate { export } => {
             let validated = validate_export(export)?;
             println!("validated {} event(s)", validated.event_count);
@@ -170,6 +216,28 @@ fn run(cli: Cli) -> Result<(), GhostraceError> {
 
 fn fixture_policy() -> PolicyProfile {
     PolicyProfile::fixture_default()
+}
+
+fn parse_timestamp(value: &str) -> Result<DateTime<Utc>, GhostraceError> {
+    value.parse::<DateTime<Utc>>().map_err(|_| {
+        GhostraceError::RetentionPolicyInvalid("timestamp must be RFC3339 UTC".to_owned())
+    })
+}
+
+fn parse_source(value: &str) -> Result<ghostrace::EventSource, GhostraceError> {
+    match value {
+        "filesystem" => Ok(ghostrace::EventSource::Filesystem),
+        "frontmost_app" => Ok(ghostrace::EventSource::FrontmostApp),
+        "shell" => Ok(ghostrace::EventSource::Shell),
+        "git" => Ok(ghostrace::EventSource::Git),
+        "browser" => Ok(ghostrace::EventSource::Browser),
+        "lifecycle" => Ok(ghostrace::EventSource::Lifecycle),
+        "fixture" => Ok(ghostrace::EventSource::Fixture),
+        _ => Err(GhostraceError::RetentionPolicyInvalid(
+            "source must be filesystem, frontmost_app, shell, git, browser, lifecycle, or fixture"
+                .to_owned(),
+        )),
+    }
 }
 
 fn open_fixture_journal(path: PathBuf) -> Result<Journal, GhostraceError> {

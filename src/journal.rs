@@ -15,7 +15,9 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
-    crypto::{decrypt_payload, encrypt_payload, KeyProvider, SharedKeyProvider},
+    crypto::{
+        decrypt_payload, encrypt_payload, CiphertextEnvelope, KeyProvider, SharedKeyProvider,
+    },
     cursor::{CursorIdentity, CursorKind, CursorState, CursorStatus, CursorToken, ReplayBoundary},
     error::GhostraceError,
     fault::{FaultPlan, FaultPoint},
@@ -31,6 +33,7 @@ use crate::{
         CoverageStatus, CoverageStatusKind, QueryCoverage, QueryOrderKey, QueryPage, QueryRequest,
         QueryTokenPayload, MAX_COVERAGE_MARKERS,
     },
+    retention::{plan_from_connection, RetentionPlan, RetentionPolicy, RetentionStorageMetadata},
     storage,
     wal::{CheckpointMode, WalCheckpointReport, WalPolicy},
 };
@@ -423,6 +426,18 @@ impl Journal {
 
         let connection = self.lock_connection()?;
         run_read_snapshot(&connection, self.wal_policy, reader)
+    }
+
+    /// Build a deterministic, read-only retention plan on one SQLite
+    /// snapshot. The plan binds its committed ingest boundary and candidate
+    /// digest; no rows, exports, or sidecars are changed by this method.
+    pub fn retention_plan(
+        &self,
+        policy: &RetentionPolicy,
+    ) -> Result<RetentionPlan, GhostraceError> {
+        self.with_read_snapshot(|connection| {
+            plan_from_connection(connection, self.key_provider.as_ref(), policy)
+        })
     }
 
     /// Checkpoint the active WAL, then copy only the database file. A sidecar
@@ -844,6 +859,48 @@ impl Journal {
     fn lock_connection(&self) -> Result<std::sync::MutexGuard<'_, Connection>, GhostraceError> {
         self.conn.lock().map_err(|_| GhostraceError::Migration("journal mutex poisoned".to_owned()))
     }
+}
+
+/// Visit raw journal rows in the same stable order used by query and export.
+/// Retention uses the raw ciphertext length and self-describing key generation
+/// while decoding one event at a time for source/root/gap scope checks.
+pub(crate) fn for_each_retention_row<F>(
+    connection: &Connection,
+    provider: &dyn KeyProvider,
+    snapshot_boundary: u64,
+    mut visitor: F,
+) -> Result<(), GhostraceError>
+where
+    F: FnMut(StoredEvent, RetentionStorageMetadata) -> Result<(), GhostraceError>,
+{
+    let boundary = i64::try_from(snapshot_boundary).map_err(|_| {
+        GhostraceError::RetentionPolicyInvalid("snapshot boundary is too large".to_owned())
+    })?;
+    let mut statement = connection.prepare(
+        "SELECT ingest_seq, event_id, schema_version, observed_at, ingested_at, source,
+                kind, collector_instance, source_cursor, provenance_version,
+                policy_profile_id, policy_profile_version, evidence, parent_event_id,
+                payload_ciphertext
+         FROM events
+         WHERE ingest_seq <= ?1
+         ORDER BY observed_at ASC, ingest_seq ASC, event_id ASC",
+    )?;
+    let mut rows = statement.query(params![boundary])?;
+    while let Some(row) = rows.next()? {
+        let raw = row_to_stored(row)?;
+        let payload_bytes = u64::try_from(raw.payload_ciphertext.len()).map_err(|_| {
+            GhostraceError::RetentionPolicyInvalid("payload length is too large".to_owned())
+        })?;
+        let key_generation = if raw.payload_ciphertext.starts_with(b"GRCE") {
+            CiphertextEnvelope::decode(&raw.payload_ciphertext)?.key_generation
+        } else {
+            crate::retention::LEGACY_KEY_GENERATION
+        };
+        let ingest_seq = raw.ingest_seq;
+        let stored = decode_stored(raw, provider)?;
+        visitor(stored, RetentionStorageMetadata { ingest_seq, payload_bytes, key_generation })?;
+    }
+    Ok(())
 }
 
 fn record_policy_profile(

@@ -63,6 +63,12 @@ pub enum GhostraceError {
     #[error("export redaction plan is invalid: {0}")]
     ExportPlanInvalid(String),
 
+    #[error("retention policy is invalid: {0}")]
+    RetentionPolicyInvalid(String),
+
+    #[error("retention plan confirmation does not match the requested scope")]
+    RetentionConfirmationMismatch,
+
     #[error("journal directory permissions are not private (expected no group/world access)")]
     InsecurePermissions(PathBuf),
 

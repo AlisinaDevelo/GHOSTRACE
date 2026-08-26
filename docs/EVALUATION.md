@@ -277,6 +277,19 @@ This contract deliberately does not turn deletion into a tombstone and does not
 claim that the logical snapshot survives a destructive retention policy. A
 future retention task must add its own residue and recovery evidence.
 
+## Retention planning (task 0086)
+
+`Journal::retention_plan` is a read-only dry-run over one SQLite snapshot. The
+policy intersects optional source and opaque-root scope, protects gap records by
+default, and then applies the explicit time cutoff, newest-event-count, and
+newest-byte limits. The plan reports affected ranges, source and ciphertext key
+generation counts, bounded gap summaries, and a conservative encrypted-payload
+byte estimate. It binds the committed `ingest_seq` upper bound and a digest of
+the exact candidate identities; `RetentionConfirmation` carries those values
+without retaining event payloads or paths. Exports, backups, sidecars, and legal
+holds are non-goals, not implicit retention protections. Destructive deletion,
+residue, and recovery remain a separate parent-task gate.
+
 ## Time-window queries and stable ordering (task 0018)
 
 `QueryRequest` now covers source, opaque root identity, event kind, and observed

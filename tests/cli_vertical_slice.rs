@@ -131,6 +131,26 @@ fn durable_fixture_cli_path_is_reopenable_deterministic_and_capture_disabled() {
     assert_success(&validate, "validate export");
     assert!(String::from_utf8_lossy(&validate.stdout).contains("validated 8 event(s)"));
 
+    let retention = run(&[
+        OsStr::new("retention-plan"),
+        OsStr::new("--journal"),
+        journal.as_os_str(),
+        OsStr::new("--before"),
+        OsStr::new("2026-01-01T00:00:08Z"),
+        OsStr::new("--source"),
+        OsStr::new("filesystem"),
+        OsStr::new("--root-id"),
+        OsStr::new("workspace-demo"),
+    ]);
+    assert_success(&retention, "retention plan");
+    let retention_json: Value = serde_json::from_slice(&retention.stdout).expect("retention JSON");
+    assert_eq!(retention_json["snapshot_event_count"], 8);
+    assert_eq!(retention_json["affected_event_count"], 1);
+    assert!(retention_json["candidate_set_digest"].as_str().is_some());
+    assert!(retention_json["non_goals"].as_array().expect("non-goals").iter().any(|item| {
+        item.as_str().is_some_and(|value| value.contains("legal holds are not implemented"))
+    }));
+
     let capture = run(&[OsStr::new("capture")]);
     assert!(!capture.status.success());
     assert!(String::from_utf8_lossy(&capture.stderr).contains("intentionally disabled"));
