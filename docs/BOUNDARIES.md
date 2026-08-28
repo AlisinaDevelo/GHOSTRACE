@@ -28,20 +28,18 @@ the remaining path-policy, recovery, writer, encryption, and release gates pass.
 | --- | --- | --- | --- | --- |
 | **GHOSTRACE** | Event observations and provenance | Across an observation window | What happened, and which observations support the sequence? | This project owns the bounded journal and explanation contract. |
 | **LOOM** | User-selected source artifacts, versions, and passages | At and across source versions | Where is the exact source evidence? | GHOSTRACE does not index documents, run OCR, or provide passage retrieval. |
-| **STRATA** | TypeScript source and committed revisions | Between code revisions | What architectural behavior changed? | GHOSTRACE does not statically analyze source or produce architecture diffs. |
 | **CARTOGRAPH** | TypeScript graph snapshots and revision diffs | Between code revisions | Which graph nodes and relationships changed? | GHOSTRACE does not build source graphs, enforce architecture policy, or render code-change reports. |
 
-The public descriptions of STRATA and CARTOGRAPH may evolve independently. That is
-a sibling-project identity decision, not a reason to merge either analyzer into
-GHOSTRACE. This repository refers to both as source-code architecture analysis and
-does not present them as event-journal components.
+The source-code architecture-analysis boundary is owned by CARTOGRAPH. It is a
+separate tool from GHOSTRACE, not an event-journal component, and any exchange
+between them must use an explicit, user-requested artifact.
 
-The four repositories share only vocabulary and explicit artifact boundaries
+The remaining repositories share only vocabulary and explicit artifact boundaries
 (versioning, provenance, evidence quality, digests, and test-vector conventions).
 They remain separate implementations with no runtime or database dependency:
-LOOM owns exact document evidence, STRATA owns compiler-backed semantic change
-analysis, CARTOGRAPH owns broader architecture graph and reconciliation, and
-GHOSTRACE owns local runtime observations and evidence-linked explanations.
+LOOM owns exact document evidence, CARTOGRAPH owns architecture graph and
+reconciliation, and GHOSTRACE owns local runtime observations and evidence-linked
+explanations.
 
 ## Allowed relationship
 
@@ -60,6 +58,6 @@ intent from event order, or treat an export as legal chain-of-custody evidence.
 - If the task is **finding text or image evidence in selected files**, it belongs to
   a retrieval/indexing tool such as LOOM.
 - If the task is **comparing TypeScript architecture across Git revisions**, it
-  belongs to an architecture analyzer such as STRATA or CARTOGRAPH.
+  belongs to CARTOGRAPH.
 - If the task requires ambient capture, content indexing, or source-code execution,
   it is outside the current GHOSTRACE contract.

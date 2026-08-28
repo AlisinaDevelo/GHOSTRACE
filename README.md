@@ -26,9 +26,8 @@ Within the surrounding project portfolio, the boundaries are deliberate:
 
 - **LOOM** retrieves exact passages and visual evidence from user-selected files. It
   does not replace GHOSTRACE's event journal or evidence-linked change explanation.
-- **STRATA** and **CARTOGRAPH** analyze TypeScript source and Git revisions to report
-  architecture changes. They do not collect macOS events or establish runtime
-  causality.
+- **CARTOGRAPH** analyzes TypeScript source and Git revisions to report architecture
+  changes. It does not collect macOS events or establish runtime causality.
 
 These tools may eventually exchange explicit, user-requested artifacts, but GHOSTRACE
 does not silently index their inputs, execute their analyzers, or depend on their
