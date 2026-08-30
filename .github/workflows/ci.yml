@@ -31,6 +31,20 @@ jobs:
           python3 scripts/roadmap.py index > /tmp/ghostrace-roadmap-index.md
           diff -u .forge/tasks/README.md /tmp/ghostrace-roadmap-index.md
 
+  reproducibility:
+    name: reproducibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify pinned inputs
+        run: python3 scripts/reproducibility.py check
+      - name: Test reproducibility contract
+        run: python3 -m unittest discover -s tests -p 'test_reproducibility.py' -v
+
   fmt:
     name: rustfmt
     runs-on: ubuntu-latest
