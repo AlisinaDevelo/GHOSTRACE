@@ -34,7 +34,7 @@ url = "2.5"
 uuid = { version = "1.10", features = ["serde", "v4"] }
 
 [dev-dependencies]
-jsonschema = { version = "0.50", default-features = false }
+jsonschema = { version = "0.52", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
