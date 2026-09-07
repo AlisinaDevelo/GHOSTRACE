@@ -11,7 +11,7 @@
     },
     "cargo_lock": {
       "path": "Cargo.lock",
-      "sha256": "79c563b813b2178e259b1fc805211ed3dc4f592ced8d0fa16edc354d668e0344"
+      "sha256": "b2f0ef7d5283c96bdb2f5344188cde91b31f26f5e6d62a68bf6ac4dd400c1c92"
     },
     "commands": {
       "install": "rustup toolchain install --profile minimal --component clippy --component rustfmt 1.88.0",
