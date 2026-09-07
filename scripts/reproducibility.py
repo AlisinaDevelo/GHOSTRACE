@@ -15,6 +15,23 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "toolchain" / "manifest.json"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+CI_JOB_RE = re.compile(r"^  (?P<name>[A-Za-z0-9_-]+):\s*$")
+CI_RUN_RE = re.compile(r"^ {8}run:\s*(?P<command>\S.*)$")
+CI_STEP_RE = re.compile(r"^ {6}-\s")
+CI_USES_RE = re.compile(r"^ {8}uses:\s*(?P<action>[^\s#]+)(?:\s+#.*)?$")
+CI_BLOCK_SCALAR_RE = re.compile(
+    r"^(?P<indent>\s*)(?:-\s+)?[A-Za-z0-9_-]+:\s*[|>][0-9+-]*\s*(?:#.*)?$"
+)
+CI_TOOLCHAIN_RE = re.compile(
+    r"^\s+(?:-\s+)?toolchain:\s*(?P<value>.+?)(?:\s+#.*)?$"
+)
+CI_PERSIST_CREDENTIALS_RE = re.compile(
+    r"^ {10}persist-credentials:\s*false(?:\s+#.*)?$"
+)
+REQUIRED_CI_REPRODUCIBILITY_COMMANDS = (
+    "python3 scripts/reproducibility.py check",
+    "python3 -m unittest discover -s tests -p 'test_reproducibility.py' -v",
+)
 
 
 class ReproducibilityError(ValueError):
@@ -54,6 +71,122 @@ def _check_file_digest(document: dict[str, Any], field: str) -> None:
         raise ReproducibilityError(f"{field}.sha256 is not a lowercase SHA-256 digest")
     if _sha256(path) != digest:
         raise ReproducibilityError(f"{field}.sha256 does not match {path_value}")
+
+
+def _active_ci_lines(workflow: str) -> list[str]:
+    active: list[str] = []
+    block_indent: int | None = None
+    for line in workflow.splitlines():
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip())
+        if block_indent is not None:
+            if indent > block_indent:
+                continue
+            block_indent = None
+        if line.lstrip().startswith("#"):
+            continue
+        active.append(line)
+        match = CI_BLOCK_SCALAR_RE.fullmatch(line)
+        if match is not None:
+            block_indent = len(match.group("indent"))
+    return active
+
+
+def _active_ci_action_refs(workflow: str) -> set[str]:
+    lines = _active_ci_lines(workflow)
+    action_refs: set[str] = set()
+    step_start: int | None = None
+    for index, line in enumerate(lines):
+        if CI_STEP_RE.match(line):
+            step_start = index
+        match = CI_USES_RE.fullmatch(line)
+        if (
+            match is not None
+            and step_start is not None
+            and lines[step_start].startswith("      - name:")
+        ):
+            action_refs.add(match.group("action"))
+    return action_refs
+
+
+def _active_ci_toolchain_values(workflow: str) -> list[str]:
+    values: list[str] = []
+    for line in _active_ci_lines(workflow):
+        match = CI_TOOLCHAIN_RE.fullmatch(line)
+        if match is None:
+            continue
+        value = match.group("value").strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        values.append(value)
+    return values
+
+
+def _check_ci_reproducibility_contract(workflow: str) -> str:
+    lines = _active_ci_lines(workflow)
+    start = next(
+        (index for index, line in enumerate(lines) if line == "  reproducibility:"),
+        None,
+    )
+    if start is None:
+        raise ReproducibilityError("CI reproducibility job is missing")
+
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        if CI_JOB_RE.fullmatch(lines[index]):
+            end = index
+            break
+    job_lines = lines[start:end]
+    if any(re.match(r"^ {4,}(?:if|continue-on-error):", line) for line in job_lines):
+        raise ReproducibilityError("CI reproducibility job must run unconditionally")
+
+    run_commands = {
+        match.group("command").strip()
+        for line in job_lines
+        if (match := CI_RUN_RE.fullmatch(line)) is not None
+    }
+    for command in REQUIRED_CI_REPRODUCIBILITY_COMMANDS:
+        if command not in run_commands:
+            raise ReproducibilityError(f"CI reproducibility command is missing: {command}")
+
+    checkout_uses = [
+        (index, match.group("action"))
+        for index, line in enumerate(job_lines)
+        if (match := CI_USES_RE.fullmatch(line)) is not None
+        and match.group("action").startswith("actions/checkout@")
+    ]
+    if len(checkout_uses) != 1:
+        raise ReproducibilityError("CI reproducibility job must use exactly one active checkout step")
+    checkout_index, checkout_action = checkout_uses[0]
+    step_start = next(
+        (
+            index
+            for index in range(checkout_index, -1, -1)
+            if CI_STEP_RE.match(job_lines[index])
+        ),
+        None,
+    )
+    if step_start is None:
+        raise ReproducibilityError("CI reproducibility checkout step is malformed")
+    step_end = next(
+        (
+            index
+            for index in range(checkout_index + 1, len(job_lines))
+            if CI_STEP_RE.match(job_lines[index])
+        ),
+        len(job_lines),
+    )
+    checkout_step = job_lines[step_start:step_end]
+    credentials_disabled = any(
+        line == "        with:"
+        and index + 1 < len(checkout_step)
+        and CI_PERSIST_CREDENTIALS_RE.fullmatch(checkout_step[index + 1])
+        for index, line in enumerate(checkout_step)
+    )
+    if not credentials_disabled:
+        raise ReproducibilityError("CI reproducibility checkout retains credentials")
+    return checkout_action
 
 
 def validate() -> dict[str, Any]:
@@ -102,14 +235,19 @@ def validate() -> dict[str, Any]:
     if type(actions) is not dict or actions.get("workflow_toolchain") != "1.88.0":
         raise ReproducibilityError("workflow toolchain is not pinned")
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    if "toolchain: stable" in workflow or "toolchain: 'stable'" in workflow:
+    toolchain_values = _active_ci_toolchain_values(workflow)
+    if "stable" in toolchain_values:
         raise ReproducibilityError("CI still requests the floating stable toolchain")
-    if workflow.count("toolchain: 1.88.0") < 3:
+    if toolchain_values.count("1.88.0") < 3:
         raise ReproducibilityError("CI does not pin every Rust test matrix entry")
+    active_action_refs = _active_ci_action_refs(workflow)
     for action_field in ("checkout", "rust_toolchain"):
         action_ref = actions.get(action_field)
-        if type(action_ref) is not str or action_ref not in workflow:
-            raise ReproducibilityError(f"CI action pin {action_field} is not present")
+        if type(action_ref) is not str or action_ref not in active_action_refs:
+            raise ReproducibilityError(f"CI action pin {action_field} is not active")
+    checkout_action = _check_ci_reproducibility_contract(workflow)
+    if actions["checkout"] != checkout_action:
+        raise ReproducibilityError("CI reproducibility job does not use the pinned checkout action")
 
     fixture_check = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "fixture-manifest.py"), "check"],
