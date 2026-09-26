@@ -819,6 +819,7 @@ fn published_json_schema_compiles_and_matches_fixture_envelopes() {
                 status: ShellStatus::Succeeded,
                 exit_code: Some(0),
                 duration_ms: 10,
+                signal: None,
             }),
         ),
         fixture_event(

@@ -20,6 +20,7 @@ pub mod fixture;
 pub mod fsevents;
 pub mod fsevents_collector;
 pub mod fsevents_flags;
+pub mod git_history;
 pub mod git_identity;
 pub mod git_snapshot;
 pub mod integrity;
@@ -36,6 +37,7 @@ pub mod recovery;
 pub mod residue;
 pub mod retention;
 pub mod shell_metadata;
+pub mod shell_wrapper;
 pub(crate) mod storage;
 pub mod volume;
 pub mod wal;
@@ -124,6 +126,11 @@ pub use fsevents_flags::{
     EVENT_FLAG_ROOT_CHANGED, EVENT_FLAG_UNMOUNT, EVENT_FLAG_USER_DROPPED,
     FSEVENTS_NORMALIZED_SCHEMA_VERSION,
 };
+pub use git_history::{
+    GitAncestryInference, GitAncestryProbe, GitHistoryError, GitHistoryGap, GitHistoryGapReason,
+    GitHistoryState, GitHistoryTransition, GitRefMovement, GIT_HISTORY_TRANSITIONS_JSON,
+    GIT_HISTORY_TRANSITION_SCHEMA_VERSION,
+};
 pub use git_identity::{
     GitContinuity, GitFilesystemIdentity, GitIdentity, GitIdentityError, GitRepositoryKind,
     GitSourceScope, GIT_IDENTITY_CONTRACT_VERSION, GIT_IDENTITY_SCHEMA_ID,
@@ -210,6 +217,11 @@ pub use shell_metadata::{
     ShellWorkingDirectory, MAX_SHELL_EXECUTION_DURATION_MS, MAX_SHELL_METADATA_BYTES,
     MAX_SHELL_SIGNAL, SHELL_METADATA_FIELDS, SHELL_METADATA_GOLDEN_JSON, SHELL_METADATA_SCHEMA_ID,
     SHELL_METADATA_SCHEMA_JSON, SHELL_METADATA_SCHEMA_VERSION,
+};
+pub use shell_wrapper::{
+    normalize_executable, ShellRunEvidence, ShellRunReport, ShellWorkspaceRoot, ShellWrapper,
+    ShellWrapperConfig, SHELL_EXEC_FAILED_REASON, SHELL_WAIT_FAILED_REASON, SHELL_WRAPPER_KIND,
+    UNCLASSIFIED_EXECUTABLE_ID,
 };
 pub use volume::{
     MountState, VolumeIdentity, VolumeIdentityError, VolumeObservation, VolumeTransition,
