@@ -176,6 +176,7 @@ encryption or key-management claim.
 | Explicit shell run wrapper | Available as a consent-gated library adapter; records executable basename token, working-directory class/digest, timing, and outcome for one deliberately wrapped command; arguments, environment, and terminal streams are never retained; no CLI command yet |
 | Frontmost-app identity and session contract | Available as a strict normalization boundary for bundle ID, signing class, app kind/location, salted launch instance, and session dwell/transient semantics; titles, documents, URLs, accessibility, menus, and screen content are structurally absent; no NSWorkspace collector is shipped |
 | Ambient shell, Git, frontmost-app, or browser collectors | Not shipped |
+| Permission drift gate | Available as a reviewed manifest of entitlements, linked libraries, privacy-sensitive APIs, and network capability, checked against the signed release binary in macOS CI; new or broadened permissions fail until review evidence is updated |
 | macOS Keychain-backed production encryption | Not shipped |
 | Signed/notarized release artifacts | Not shipped |
 

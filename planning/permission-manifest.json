@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "forbidden_entitlements": [
+    "com.apple.security.get-task-allow",
+    "com.apple.security.cs.disable-library-validation",
+    "com.apple.security.cs.allow-dyld-environment-variables",
+    "com.apple.security.cs.allow-unsigned-executable-memory",
+    "com.apple.security.cs.allow-jit",
+    "com.apple.security.cs.debugger",
+    "com.apple.security.network.client",
+    "com.apple.security.network.server",
+    "com.apple.security.temporary-exception.files.absolute-path.read-only",
+    "com.apple.security.temporary-exception.files.absolute-path.read-write",
+    "com.apple.security.temporary-exception.files.home-relative-path.read-only",
+    "com.apple.security.temporary-exception.files.home-relative-path.read-write",
+    "com.apple.security.temporary-exception.mach-lookup.global-name"
+  ],
+  "network_linkage_markers": [
+    "CFNetwork.framework",
+    "Network.framework",
+    "libcurl"
+  ],
+  "artifacts": [
+    {
+      "id": "ghostrace-cli",
+      "kind": "cli_binary",
+      "path": "target/release/ghostrace",
+      "bundle_identifier": null,
+      "helpers": [],
+      "extensions": [],
+      "code_signature": "adhoc_linker",
+      "hardened_runtime": false,
+      "sandboxed": false,
+      "entitlements": {},
+      "linked_libraries": [
+        "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+        "/System/Library/Frameworks/CoreServices.framework/Versions/A/CoreServices",
+        "/System/Library/Frameworks/Security.framework/Versions/A/Security",
+        "/usr/lib/libSystem.B.dylib",
+        "/usr/lib/libiconv.2.dylib"
+      ],
+      "privacy_sensitive_apis": [
+        {
+          "api": "fsevents",
+          "framework": "CoreServices",
+          "use": "selected-root filesystem metadata after explicit consent"
+        },
+        {
+          "api": "keychain_data_protection",
+          "framework": "Security",
+          "use": "journal data-encryption key custody"
+        }
+      ],
+      "filesystem_rights": "user-selected roots and the journal path; no Full Disk Access requested",
+      "network_capability": "none"
+    }
+  ],
+  "review": {
+    "approved_permission_digest": "3bbefd69a4db64b70a6908ac78ff96d59acb67be85999f72588fa76941b72447",
+    "privacy": "docs/PRIVACY.md",
+    "threat_model": "docs/THREAT_MODEL.md",
+    "tests": ["tests/test_permissions.py", "tests/offline_network_canary.rs"],
+    "migration": "none: first reviewed permission baseline"
+  }
+}
