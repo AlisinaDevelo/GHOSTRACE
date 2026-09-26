@@ -182,6 +182,14 @@
       "seed": "ghostrace-fixture-seed-v1",
       "sha256": "8b36de1231a08e82ebde44e7052de56d65cde6106169969173b6713b5b890289",
       "bytes": 781
+    },
+    {
+      "path": "fixtures/git-history-transitions-v1.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "62013e92a6350603a882dcccafd2f51f44d9e66351c6afb821993e8839625062",
+      "bytes": 9072
     }
   ],
   "privacy": {
