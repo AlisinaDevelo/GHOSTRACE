@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/AlisinaDevelo/GHOSTRACE/schemas/frontmost-observation-v1.json",
+  "title": "GHOSTRACE frontmost application observation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "transition", "observed_at", "app", "dwell_ms", "transient"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "transition": { "enum": ["activated", "deactivated", "terminated"] },
+    "observed_at": { "type": "string", "format": "date-time" },
+    "app": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["identity", "bundle_id", "signing", "kind", "location", "launch_instance"],
+          "properties": {
+            "identity": { "const": "known" },
+            "bundle_id": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$"
+                },
+                { "type": "null" }
+              ]
+            },
+            "signing": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["class", "team_id"],
+                  "properties": {
+                    "class": { "const": "developer" },
+                    "team_id": { "type": "string", "pattern": "^[A-Z0-9]{10}$" }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["class"],
+                  "properties": {
+                    "class": { "enum": ["platform", "ad_hoc", "unsigned", "unknown"] }
+                  }
+                }
+              ]
+            },
+            "kind": { "enum": ["regular", "helper", "command_line", "unknown"] },
+            "location": { "enum": ["installed", "translocated"] },
+            "launch_instance": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["identity", "reason"],
+          "properties": {
+            "identity": { "const": "unknown" },
+            "reason": { "enum": ["no_identity", "no_process"] }
+          }
+        }
+      ]
+    },
+    "dwell_ms": {
+      "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }]
+    },
+    "transient": { "type": "boolean" }
+  }
+}

@@ -1,0 +1,769 @@
+{
+  "schema_version": 1,
+  "program": "ghostrace-frontmost-identity-v1",
+  "privacy": {
+    "synthetic_only": true,
+    "user_data_included": false,
+    "network_required": false,
+    "retains_titles_or_documents": false,
+    "retains_process_ids": false
+  },
+  "salt_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+  "transient_dwell_ms": 500,
+  "identity_cases": [
+    {
+      "id": "developer_signed_app",
+      "raw": {
+        "transition": "activated",
+        "observed_at": "2026-01-01T09:00:00.000Z",
+        "bundle_identifier": "com.example.editor",
+        "bundled": true,
+        "activation_policy": "regular",
+        "translocated": false,
+        "signing": {
+          "valid": true,
+          "ad_hoc": false,
+          "platform_binary": false,
+          "team_identifier": "ABCDE12345"
+        },
+        "process_id": 501,
+        "process_started_micros": 1767254400000000
+      },
+      "expected": {
+        "identity": "known",
+        "bundle_id": "com.example.editor",
+        "signing_class": "developer",
+        "team_id": "ABCDE12345",
+        "kind": "regular",
+        "location": "installed"
+      }
+    },
+    {
+      "id": "platform_app",
+      "raw": {
+        "transition": "activated",
+        "observed_at": "2026-01-01T09:00:00.000Z",
+        "bundle_identifier": "com.apple.finder",
+        "bundled": true,
+        "activation_policy": "regular",
+        "translocated": false,
+        "signing": {
+          "valid": true,
+          "ad_hoc": false,
+          "platform_binary": true,
+          "team_identifier": null
+        },
+        "process_id": 501,
+        "process_started_micros": 1767254400000000
+      },
+      "expected": {
+        "identity": "known",
+        "bundle_id": "com.apple.finder",
+        "signing_class": "platform",
+        "team_id": null,
+        "kind": "regular",
+        "location": "installed"
+      }
+    },
+    {
+      "id": "mixed_case_bundle_is_lowercased",
+      "raw": {
+        "transition": "activated",
+        "observed_at": "2026-01-01T09:00:00.000Z",
+        "bundle_identifier": "com.Example.Editor",
+        "bundled": true,
+        "activation_policy": "regular",
+        "translocated": false,
+        "signing": {
+          "valid": true,
+          "ad_hoc": false,
+          "platform_binary": false,
+          "team_identifier": "ABCDE12345"
+        },
+        "process_id": 501,
+        "process_started_micros": 1767254400000000
+      },
+      "expected": {
+        "identity": "known",
+        "bundle_id": "com.example.editor",
+        "signing_class": "developer",
+        "team_id": "ABCDE12345",
+        "kind": "regular",
+        "location": "installed"
+      }
+    },
+    {
+      "id": "unsigned_bundle",
+      "raw": {
+        "transition": "activated",
+        "observed_at": "2026-01-01T09:00:00.000Z",
+        "bundle_identifier": "org.example.tool",
+        "bundled": true,
+        "activation_policy": "regular",
+        "translocated": false,
+        "signing": null,
+        "process_id": 501,
+        "process_started_micros": 1767254400000000
+      },
+      "expected": {
+        "identity": "known",
+        "bundle_id": "org.example.tool",
+        "signing_class": "unsigned",
+        "team_id": null,
+        "kind": "regular",
+        "location": "installed"
+      }
+    },
+    {
+      "id": "ad_hoc_signed",
+      "raw": {
+        "transition": "activated",
+        "observed_at": "2026-01-01T09:00:00.000Z",
+        "bundle_identifier": "dev.example.local-build",
+        "bundled": true,
+        "activation_policy": "regular",
+        "translocated": false,
+        "signing": {
+          "valid": true,
+          "ad_hoc": true,
+          "platform_binary": false,
+          "team_identifier": null
+        },
+        "process_id": 501,
+        "process_started_micros": 1767254400000000
+      },
+      "expected": {
+        "identity": "known",
+        "bundle_id": "dev.example.local-build",
+        "signing_class": "ad_hoc",
+        "team_id": null,
+        "kind": "regular",
+        "location": "installed"
+      }
+    },
+    {
+      "id": "translocated_download",
+      "raw": {
+        "transition": "activated",
+        "observed_at": "2026-01-01T09:00:00.000Z",
+        "bundle_identifier": "com.example.editor",
+        "bundled": true,
+        "activation_policy": "regular",
+        "translocated": true,
+        "signing": {
+          "valid": true,
+          "ad_hoc": false,
+          "platform_binary": false,
+          "team_identifier": "ABCDE12345"
+        },
+        "process_id": 501,
+        "process_started_micros": 1767254400000000
+      },
+      "expected": {
+        "identity": "known",
+        "bundle_id": "com.example.editor",
+        "signing_class": "developer",
+        "team_id": "ABCDE12345",
+        "kind": "regular",
+        "location": "translocated"
+      }
+    },
+    {
+      "id": "helper_accessory",
+      "raw": {
+        "transition": "activated",
+        "observed_at": "2026-01-01T09:00:00.000Z",
+        "bundle_identifier": "com.example.editor.helper",
+        "bundled": true,
+        "activation_policy": "accessory",
+        "translocated": false,
+        "signing": {
+          "valid": true,
+          "ad_hoc": false,
+          "platform_binary": false,
+          "team_identifier": "ABCDE12345"
+        },
+        "process_id": 501,
+        "process_started_micros": 1767254400000000
+      },
+      "expected": {
+        "identity": "known",
+        "bundle_id": "com.example.editor.helper",
+        "signing_class": "developer",
+        "team_id": "ABCDE12345",
+        "kind": "helper",
+        "location": "installed"
+      }
+    },
+    {
+      "id": "helper_prohibited",
+      "raw": {
+        "transition": "activated",
+        "observed_at": "2026-01-01T09:00:00.000Z",
+        "bundle_identifier": "com.example.agent",
+        "bundled": true,
+        "activation_policy": "prohibited",
+        "translocated": false,
+        "signing": {
+          "valid": true,
+          "ad_hoc": false,
+          "platform_binary": false,
+          "team_identifier": "ABCDE12345"
+        },
+        "process_id": 501,
+        "process_started_micros": 1767254400000000
+      },
+      "expected": {
+        "identity": "known",
+        "bundle_id": "com.example.agent",
+        "signing_class": "developer",
+        "team_id": "ABCDE12345",
+        "kind": "helper",
+        "location": "installed"
+      }
+    },
+    {
+      "id": "command_line_tool",
+      "raw": {
+        "transition": "activated",
+        "observed_at": "2026-01-01T09:00:00.000Z",
+        "bundle_identifier": null,
+        "bundled": false,
+        "activation_policy": "unknown",
+        "translocated": false,
+        "signing": null,
+        "process_id": 501,
+        "process_started_micros": 1767254400000000
+      },
+      "expected": {
+        "identity": "known",
+        "bundle_id": null,
+        "signing_class": "unsigned",
+        "team_id": null,
+        "kind": "command_line",
+        "location": "installed"
+      }
+    },
+    {
+      "id": "invalid_signature",
+      "raw": {
+        "transition": "activated",
+        "observed_at": "2026-01-01T09:00:00.000Z",
+        "bundle_identifier": "com.example.editor",
+        "bundled": true,
+        "activation_policy": "regular",
+        "translocated": false,
+        "signing": {
+          "valid": false,
+          "ad_hoc": false,
+          "platform_binary": false,
+          "team_identifier": "ABCDE12345"
+        },
+        "process_id": 501,
+        "process_started_micros": 1767254400000000
+      },
+      "expected": {
+        "identity": "known",
+        "bundle_id": "com.example.editor",
+        "signing_class": "unknown",
+        "team_id": null,
+        "kind": "regular",
+        "location": "installed"
+      }
+    },
+    {
+      "id": "malformed_team_identifier",
+      "raw": {
+        "transition": "activated",
+        "observed_at": "2026-01-01T09:00:00.000Z",
+        "bundle_identifier": "com.example.editor",
+        "bundled": true,
+        "activation_policy": "regular",
+        "translocated": false,
+        "signing": {
+          "valid": true,
+          "ad_hoc": false,
+          "platform_binary": false,
+          "team_identifier": "abc"
+        },
+        "process_id": 501,
+        "process_started_micros": 1767254400000000
+      },
+      "expected": {
+        "identity": "known",
+        "bundle_id": "com.example.editor",
+        "signing_class": "unknown",
+        "team_id": null,
+        "kind": "regular",
+        "location": "installed"
+      }
+    },
+    {
+      "id": "bundle_without_identity",
+      "raw": {
+        "transition": "activated",
+        "observed_at": "2026-01-01T09:00:00.000Z",
+        "bundle_identifier": "café.example",
+        "bundled": true,
+        "activation_policy": "regular",
+        "translocated": false,
+        "signing": {
+          "valid": false,
+          "ad_hoc": false,
+          "platform_binary": false,
+          "team_identifier": "ABCDE12345"
+        },
+        "process_id": 501,
+        "process_started_micros": 1767254400000000
+      },
+      "expected": {
+        "identity": "unknown",
+        "reason": "no_identity"
+      }
+    },
+    {
+      "id": "unknown_activation_policy",
+      "raw": {
+        "transition": "activated",
+        "observed_at": "2026-01-01T09:00:00.000Z",
+        "bundle_identifier": "com.example.editor",
+        "bundled": true,
+        "activation_policy": "unknown",
+        "translocated": false,
+        "signing": {
+          "valid": true,
+          "ad_hoc": false,
+          "platform_binary": false,
+          "team_identifier": "ABCDE12345"
+        },
+        "process_id": 501,
+        "process_started_micros": 1767254400000000
+      },
+      "expected": {
+        "identity": "known",
+        "bundle_id": "com.example.editor",
+        "signing_class": "developer",
+        "team_id": "ABCDE12345",
+        "kind": "unknown",
+        "location": "installed"
+      }
+    },
+    {
+      "id": "no_process",
+      "raw": {
+        "transition": "activated",
+        "observed_at": "2026-01-01T09:00:00.000Z",
+        "bundle_identifier": "com.example.editor",
+        "bundled": true,
+        "activation_policy": "regular",
+        "translocated": false,
+        "signing": {
+          "valid": true,
+          "ad_hoc": false,
+          "platform_binary": false,
+          "team_identifier": "ABCDE12345"
+        },
+        "process_id": 0,
+        "process_started_micros": 1767254400000000
+      },
+      "expected": {
+        "identity": "unknown",
+        "reason": "no_process"
+      }
+    }
+  ],
+  "session_sequences": [
+    {
+      "id": "rapid_switching",
+      "steps": [
+        [
+          {
+            "transition": "activated",
+            "observed_at": "2026-01-01T09:00:00.000Z",
+            "bundle_identifier": "com.example.editor",
+            "bundled": true,
+            "activation_policy": "regular",
+            "translocated": false,
+            "signing": {
+              "valid": true,
+              "ad_hoc": false,
+              "platform_binary": false,
+              "team_identifier": "ABCDE12345"
+            },
+            "process_id": 501,
+            "process_started_micros": 1767254400000000
+          },
+          {
+            "emitted": true,
+            "dwell_ms": null,
+            "transient": false
+          }
+        ],
+        [
+          {
+            "transition": "deactivated",
+            "observed_at": "2026-01-01T09:00:00.120Z",
+            "bundle_identifier": "com.example.editor",
+            "bundled": true,
+            "activation_policy": "regular",
+            "translocated": false,
+            "signing": {
+              "valid": true,
+              "ad_hoc": false,
+              "platform_binary": false,
+              "team_identifier": "ABCDE12345"
+            },
+            "process_id": 501,
+            "process_started_micros": 1767254400000000
+          },
+          {
+            "emitted": true,
+            "dwell_ms": 120,
+            "transient": true
+          }
+        ],
+        [
+          {
+            "transition": "activated",
+            "observed_at": "2026-01-01T09:00:00.120Z",
+            "bundle_identifier": "com.example.terminal",
+            "bundled": true,
+            "activation_policy": "regular",
+            "translocated": false,
+            "signing": {
+              "valid": true,
+              "ad_hoc": false,
+              "platform_binary": false,
+              "team_identifier": "ABCDE12345"
+            },
+            "process_id": 777,
+            "process_started_micros": 1767254400500000
+          },
+          {
+            "emitted": true,
+            "dwell_ms": null,
+            "transient": false
+          }
+        ],
+        [
+          {
+            "transition": "deactivated",
+            "observed_at": "2026-01-01T09:00:02.120Z",
+            "bundle_identifier": "com.example.terminal",
+            "bundled": true,
+            "activation_policy": "regular",
+            "translocated": false,
+            "signing": {
+              "valid": true,
+              "ad_hoc": false,
+              "platform_binary": false,
+              "team_identifier": "ABCDE12345"
+            },
+            "process_id": 777,
+            "process_started_micros": 1767254400500000
+          },
+          {
+            "emitted": true,
+            "dwell_ms": 2000,
+            "transient": false
+          }
+        ],
+        [
+          {
+            "transition": "activated",
+            "observed_at": "2026-01-01T09:00:02.120Z",
+            "bundle_identifier": "com.example.editor",
+            "bundled": true,
+            "activation_policy": "regular",
+            "translocated": false,
+            "signing": {
+              "valid": true,
+              "ad_hoc": false,
+              "platform_binary": false,
+              "team_identifier": "ABCDE12345"
+            },
+            "process_id": 501,
+            "process_started_micros": 1767254400000000
+          },
+          {
+            "emitted": true,
+            "dwell_ms": null,
+            "transient": false
+          }
+        ],
+        [
+          {
+            "transition": "activated",
+            "observed_at": "2026-01-01T09:00:02.300Z",
+            "bundle_identifier": "com.example.editor",
+            "bundled": true,
+            "activation_policy": "regular",
+            "translocated": false,
+            "signing": {
+              "valid": true,
+              "ad_hoc": false,
+              "platform_binary": false,
+              "team_identifier": "ABCDE12345"
+            },
+            "process_id": 501,
+            "process_started_micros": 1767254400000000
+          },
+          {
+            "emitted": false
+          }
+        ],
+        [
+          {
+            "transition": "terminated",
+            "observed_at": "2026-01-01T09:00:03.000Z",
+            "bundle_identifier": "com.example.editor",
+            "bundled": true,
+            "activation_policy": "regular",
+            "translocated": false,
+            "signing": {
+              "valid": true,
+              "ad_hoc": false,
+              "platform_binary": false,
+              "team_identifier": "ABCDE12345"
+            },
+            "process_id": 501,
+            "process_started_micros": 1767254400000000
+          },
+          {
+            "emitted": true,
+            "dwell_ms": 880,
+            "transient": false
+          }
+        ]
+      ]
+    },
+    {
+      "id": "deactivation_without_activation",
+      "steps": [
+        [
+          {
+            "transition": "deactivated",
+            "observed_at": "2026-01-01T09:00:05.000Z",
+            "bundle_identifier": "com.example.terminal",
+            "bundled": true,
+            "activation_policy": "regular",
+            "translocated": false,
+            "signing": {
+              "valid": true,
+              "ad_hoc": false,
+              "platform_binary": false,
+              "team_identifier": "ABCDE12345"
+            },
+            "process_id": 777,
+            "process_started_micros": 1767254400500000
+          },
+          {
+            "emitted": true,
+            "dwell_ms": null,
+            "transient": false
+          }
+        ]
+      ]
+    },
+    {
+      "id": "out_of_order_clock",
+      "steps": [
+        [
+          {
+            "transition": "activated",
+            "observed_at": "2026-01-01T09:00:10.000Z",
+            "bundle_identifier": "com.example.editor",
+            "bundled": true,
+            "activation_policy": "regular",
+            "translocated": false,
+            "signing": {
+              "valid": true,
+              "ad_hoc": false,
+              "platform_binary": false,
+              "team_identifier": "ABCDE12345"
+            },
+            "process_id": 501,
+            "process_started_micros": 1767254400000000
+          },
+          {
+            "emitted": true,
+            "dwell_ms": null,
+            "transient": false
+          }
+        ],
+        [
+          {
+            "transition": "deactivated",
+            "observed_at": "2026-01-01T09:00:09.500Z",
+            "bundle_identifier": "com.example.editor",
+            "bundled": true,
+            "activation_policy": "regular",
+            "translocated": false,
+            "signing": {
+              "valid": true,
+              "ad_hoc": false,
+              "platform_binary": false,
+              "team_identifier": "ABCDE12345"
+            },
+            "process_id": 501,
+            "process_started_micros": 1767254400000000
+          },
+          {
+            "emitted": true,
+            "dwell_ms": 0,
+            "transient": true
+          }
+        ]
+      ]
+    }
+  ],
+  "rejected_inputs": [
+    {
+      "id": "rejects_window_title",
+      "raw": {
+        "transition": "activated",
+        "observed_at": "2026-01-01T09:00:00.000Z",
+        "bundle_identifier": "com.example.editor",
+        "bundled": true,
+        "activation_policy": "regular",
+        "translocated": false,
+        "signing": {
+          "valid": true,
+          "ad_hoc": false,
+          "platform_binary": false,
+          "team_identifier": "ABCDE12345"
+        },
+        "process_id": 501,
+        "process_started_micros": 1767254400000000,
+        "window_title": "Quarterly plan - Confidential"
+      },
+      "sentinel": "Quarterly plan - Confidential"
+    },
+    {
+      "id": "rejects_document_name",
+      "raw": {
+        "transition": "activated",
+        "observed_at": "2026-01-01T09:00:00.000Z",
+        "bundle_identifier": "com.example.editor",
+        "bundled": true,
+        "activation_policy": "regular",
+        "translocated": false,
+        "signing": {
+          "valid": true,
+          "ad_hoc": false,
+          "platform_binary": false,
+          "team_identifier": "ABCDE12345"
+        },
+        "process_id": 501,
+        "process_started_micros": 1767254400000000,
+        "document_name": "secret-plan.txt"
+      },
+      "sentinel": "secret-plan.txt"
+    },
+    {
+      "id": "rejects_url",
+      "raw": {
+        "transition": "activated",
+        "observed_at": "2026-01-01T09:00:00.000Z",
+        "bundle_identifier": "com.example.editor",
+        "bundled": true,
+        "activation_policy": "regular",
+        "translocated": false,
+        "signing": {
+          "valid": true,
+          "ad_hoc": false,
+          "platform_binary": false,
+          "team_identifier": "ABCDE12345"
+        },
+        "process_id": 501,
+        "process_started_micros": 1767254400000000,
+        "url": "https://example.invalid/private?token=1"
+      },
+      "sentinel": "https://example.invalid/private?token=1"
+    },
+    {
+      "id": "rejects_accessibility_value",
+      "raw": {
+        "transition": "activated",
+        "observed_at": "2026-01-01T09:00:00.000Z",
+        "bundle_identifier": "com.example.editor",
+        "bundled": true,
+        "activation_policy": "regular",
+        "translocated": false,
+        "signing": {
+          "valid": true,
+          "ad_hoc": false,
+          "platform_binary": false,
+          "team_identifier": "ABCDE12345"
+        },
+        "process_id": 501,
+        "process_started_micros": 1767254400000000,
+        "accessibility_value": "focused text"
+      },
+      "sentinel": "focused text"
+    },
+    {
+      "id": "rejects_menu_state",
+      "raw": {
+        "transition": "activated",
+        "observed_at": "2026-01-01T09:00:00.000Z",
+        "bundle_identifier": "com.example.editor",
+        "bundled": true,
+        "activation_policy": "regular",
+        "translocated": false,
+        "signing": {
+          "valid": true,
+          "ad_hoc": false,
+          "platform_binary": false,
+          "team_identifier": "ABCDE12345"
+        },
+        "process_id": 501,
+        "process_started_micros": 1767254400000000,
+        "menu_state": "File > Export"
+      },
+      "sentinel": "File > Export"
+    },
+    {
+      "id": "rejects_screen_capture",
+      "raw": {
+        "transition": "activated",
+        "observed_at": "2026-01-01T09:00:00.000Z",
+        "bundle_identifier": "com.example.editor",
+        "bundled": true,
+        "activation_policy": "regular",
+        "translocated": false,
+        "signing": {
+          "valid": true,
+          "ad_hoc": false,
+          "platform_binary": false,
+          "team_identifier": "ABCDE12345"
+        },
+        "process_id": 501,
+        "process_started_micros": 1767254400000000,
+        "screen_capture": "iVBORw0KGgo="
+      },
+      "sentinel": "iVBORw0KGgo="
+    },
+    {
+      "id": "rejects_localized_name",
+      "raw": {
+        "transition": "activated",
+        "observed_at": "2026-01-01T09:00:00.000Z",
+        "bundle_identifier": "com.example.editor",
+        "bundled": true,
+        "activation_policy": "regular",
+        "translocated": false,
+        "signing": {
+          "valid": true,
+          "ad_hoc": false,
+          "platform_binary": false,
+          "team_identifier": "ABCDE12345"
+        },
+        "process_id": 501,
+        "process_started_micros": 1767254400000000,
+        "localized_name": "Editor"
+      },
+      "sentinel": "Editor"
+    }
+  ]
+}

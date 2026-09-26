@@ -253,6 +253,34 @@ application; those rows are documented as `os_visible_not_retained`, not claimed
 privacy guarantees. This red-team contract adds no event fields and does not ship a
 shell executor or ambient capture path.
 
+### Frontmost-application identity boundary
+
+`src/frontmost.rs` is the normalization contract for a future NSWorkspace
+activation adapter; no collector is shipped. `FrontmostRawObservation` is the only
+input an adapter may pass: the transition (activated, deactivated, terminated),
+time, bundle identifier, whether the executable is bundled, activation policy,
+translocation flag, code-signing validity/ad-hoc/platform/team facts, and the
+process ID and start time. It has no field for window titles, document names,
+URLs, accessibility data, menu state, localized names, or screen content, and
+strict deserialization rejects them without echoing their values.
+
+`FrontmostNormalizer` keeps a lowercase bundle identifier (dropped if unsafe), a
+signing class (`developer` with a validated team ID, `platform`, `ad_hoc`,
+`unsigned`, or `unknown`), a kind (`regular`, `helper`, `command_line`, `unknown`),
+a location (`installed` or `translocated`), and a launch-instance digest salted per
+journal in place of the process ID and start time. A bundle with no usable
+identifier and no verifiable signature, or an invalid process, becomes an explicit
+unknown app.
+
+`FrontmostSessionTracker` suppresses repeated activations of the frontmost
+instance, puts the dwell time on the event that ends a session, marks sessions
+shorter than 500 ms as transient, gives no dwell to a deactivation it did not see
+start, and clamps backwards clocks to zero. Activation is contextual evidence and
+never establishes that an application caused a filesystem change. The corpus
+[`fixtures/frontmost-identity-v1.json`](../fixtures/frontmost-identity-v1.json) and
+schema [`schemas/frontmost-observation-v1.json`](../schemas/frontmost-observation-v1.json)
+are exercised by `tests/frontmost_identity.rs`.
+
 ## FSEvents lifecycle boundary
 
 The `fsevents` module is a deliberately small native boundary beneath the selected-root
