@@ -200,7 +200,7 @@ fails.
 
 The shell metadata contract is intentionally narrower than a terminal transcript.
 `ghostrace shell-schema` only prints the checked-in v1 contract and never executes
-a shell. A future wrapper may retain the opaque wrapper session, normalized
+a shell. The explicit `ShellWrapper` adapter may retain the opaque wrapper session, normalized
 executable identity, sanitized working-directory class/digest, start/end timing,
 outcome, exit code, and termination signal. These fields are identifying,
 sensitive metadata, timing evidence, or outcome evidence as declared by the field

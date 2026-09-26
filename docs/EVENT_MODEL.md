@@ -274,6 +274,13 @@ signal. It has no field for arguments, environment, terminal streams, history,
 aliases, or command text; see
 [`schemas/shell-execution-metadata-v1.json`](../schemas/shell-execution-metadata-v1.json).
 
+The shipped `ShellWrapper` projects that record into the event envelope through
+three optional v1 payload fields: `shell_started.executable_id`,
+`shell_started.working_directory` (class and digest only), and
+`shell_finished.signal`. They are omitted when absent, so existing envelopes and
+fixtures serialize byte-for-byte as before. A reader built before these fields
+existed rejects an envelope that carries them; no such reader has been released.
+
 The companion [`shell-wrapper-lifecycle-v1.json`](../fixtures/shell-wrapper-lifecycle-v1.json)
 fixture tests child status propagation and explicit incomplete-execution gaps for a
 future wrapper. It adds no event fields and does not execute a shipped collector or

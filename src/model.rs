@@ -601,6 +601,12 @@ pub struct FrontmostAppChangedPayload {
 pub struct ShellStartedPayload {
     pub session_id: SessionId,
     pub shell_kind: ShellKind,
+    /// Normalized executable basename token recorded by the explicit wrapper.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executable_id: Option<crate::shell_metadata::ShellExecutableId>,
+    /// Working-directory scope class and anchored digest; never a raw path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_directory: Option<crate::shell_metadata::ShellWorkingDirectory>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -611,6 +617,9 @@ pub struct ShellFinishedPayload {
     #[serde(default)]
     pub exit_code: Option<i32>,
     pub duration_ms: u64,
+    /// Terminating signal for a `signaled` outcome, when it is known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signal: Option<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -864,6 +873,17 @@ impl EventPayload {
             }
             Self::ShellFinished(payload) => {
                 validate_identifier("session_id", payload.session_id.as_str())?;
+                if let Some(signal) = payload.signal {
+                    if payload.status != ShellStatus::Signaled
+                        || payload.exit_code.is_some()
+                        || signal == 0
+                        || signal > crate::shell_metadata::MAX_SHELL_SIGNAL
+                    {
+                        return Err(GhostraceError::InvalidEvent(
+                            "shell_finished signal is inconsistent with its outcome".to_owned(),
+                        ));
+                    }
+                }
             }
             Self::GitSnapshot(payload) => {
                 validate_identifier("repository_id", payload.repository_id.as_str())?;
