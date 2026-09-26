@@ -20,6 +20,7 @@ pub mod fixture;
 pub mod fsevents;
 pub mod fsevents_collector;
 pub mod fsevents_flags;
+pub mod git_history;
 pub mod git_identity;
 pub mod git_snapshot;
 pub mod integrity;
@@ -124,6 +125,11 @@ pub use fsevents_flags::{
     EVENT_FLAG_MOUNT, EVENT_FLAG_MUST_SCAN_SUB_DIRS, EVENT_FLAG_NONE, EVENT_FLAG_OWN_EVENT,
     EVENT_FLAG_ROOT_CHANGED, EVENT_FLAG_UNMOUNT, EVENT_FLAG_USER_DROPPED,
     FSEVENTS_NORMALIZED_SCHEMA_VERSION,
+};
+pub use git_history::{
+    GitAncestryInference, GitAncestryProbe, GitHistoryError, GitHistoryGap, GitHistoryGapReason,
+    GitHistoryState, GitHistoryTransition, GitRefMovement, GIT_HISTORY_TRANSITIONS_JSON,
+    GIT_HISTORY_TRANSITION_SCHEMA_VERSION,
 };
 pub use git_identity::{
     GitContinuity, GitFilesystemIdentity, GitIdentity, GitIdentityError, GitRepositoryKind,
