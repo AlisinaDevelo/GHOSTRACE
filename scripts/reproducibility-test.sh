@@ -75,6 +75,9 @@ cargo +1.88.0 test --quiet --locked --test git_history_gaps -- --nocapture
 echo "reproducibility: frontmost identity and session semantics"
 cargo +1.88.0 test --quiet --locked --test frontmost_identity -- --nocapture
 
+echo "reproducibility: frontmost coverage transitions"
+cargo +1.88.0 test --quiet --locked --test frontmost_coverage -- --nocapture
+
 echo "reproducibility: deterministic demo"
 event_id=00000000-0000-4000-8000-000000000008
 cargo +1.88.0 run --quiet -- demo --fixture fixtures/causal-chain.jsonl --event "$event_id" > "$WORK_DIR/demo-a.json"

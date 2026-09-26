@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/AlisinaDevelo/GHOSTRACE/schemas/frontmost-coverage-v1.json",
+  "title": "GHOSTRACE frontmost coverage boundary v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "event", "state", "observed_at", "gap_started_at"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "event": {
+      "enum": [
+        "observer_started",
+        "observer_stopped",
+        "will_sleep",
+        "did_wake",
+        "screen_locked",
+        "screen_unlocked",
+        "session_resigned_active",
+        "session_became_active"
+      ]
+    },
+    "state": { "enum": ["started", "suspended", "resumed", "interrupted"] },
+    "observed_at": { "type": "string", "format": "date-time" },
+    "gap_started_at": {
+      "oneOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }]
+    }
+  }
+}

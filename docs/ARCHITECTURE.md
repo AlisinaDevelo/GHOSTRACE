@@ -281,6 +281,23 @@ never establishes that an application caused a filesystem change. The corpus
 schema [`schemas/frontmost-observation-v1.json`](../schemas/frontmost-observation-v1.json)
 are exercised by `tests/frontmost_identity.rs`.
 
+Coverage is bounded as well as identity. Every app record carries a `basis`:
+`direct` when a notification reported it, or `inferred_closure` when the tracker
+ended a session because the notification that should have ended it was not seen.
+An activation while another session is open closes that session at the
+activation time. Sleep, screen lock, fast user switching, and observer stops close
+the open session at the boundary and emit a `suspended` coverage record; the
+matching wake, unlock, session return, or observer start emits `resumed` with the
+time coverage was lost. An observer start without a clean stop emits
+`interrupted`, drops the open session without a dwell, and reports the interval
+since the last observation as a gap, so no session is ever extended across
+downtime. Private applications and user exclusions are replaced by an `excluded`
+unknown app before any record exists. The transition table and sequences in
+[`fixtures/frontmost-coverage-v1.json`](../fixtures/frontmost-coverage-v1.json)
+cover startup, login, fast user switching, lock, sleep and wake, Mission Control,
+termination, missed deactivations, and observer restarts; `tests/frontmost_coverage.rs`
+also checks that no dwell interval contains a suspension or interruption.
+
 ## FSEvents lifecycle boundary
 
 The `fsevents` module is a deliberately small native boundary beneath the selected-root
