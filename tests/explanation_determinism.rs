@@ -152,6 +152,7 @@ fn matrix_events() -> Vec<EventEnvelope> {
                 status: ShellStatus::Succeeded,
                 exit_code: Some(0),
                 duration_ms: 42,
+                signal: None,
             }),
             Evidence::Direct,
         ),
