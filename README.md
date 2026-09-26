@@ -174,6 +174,7 @@ encryption or key-management claim.
 | Git repository/worktree identity contract | Available as a path-free metadata contract with object-database/worktree digests, selected-root/source-scope binding, and move/clone/linked-worktree/submodule/bare/reinitialization continuity tests; no Git command runner or remote access is shipped |
 | Metadata-only Git snapshot contract | Available as a strict algorithm-aware SHA-1/SHA-256 snapshot boundary with bounded status/operation facts and explicit partial-history, replace-ref, shallow, submodule, and alternate-object-database limitations; no object content is read |
 | Explicit shell run wrapper | Available as a consent-gated library adapter; records executable basename token, working-directory class/digest, timing, and outcome for one deliberately wrapped command; arguments, environment, and terminal streams are never retained; no CLI command yet |
+| Frontmost-app identity and session contract | Available as a strict normalization boundary for bundle ID, signing class, app kind/location, salted launch instance, and session dwell/transient semantics; titles, documents, URLs, accessibility, menus, and screen content are structurally absent; no NSWorkspace collector is shipped |
 | Ambient shell, Git, frontmost-app, or browser collectors | Not shipped |
 | macOS Keychain-backed production encryption | Not shipped |
 | Signed/notarized release artifacts | Not shipped |
