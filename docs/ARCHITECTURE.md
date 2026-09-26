@@ -231,12 +231,18 @@ it exits, both under a live ingestion origin with the started event as parent:
   terminating signal for a signaled child. The wrapper returns the child's exit
   code, or `128 + signal`, unchanged to its caller.
 - A program that cannot be started produces a `gap` (`shell_exec_failed`) with no
-  end status and exit code 127. A wrapper killed before the child exits leaves an
-  unmatched `shell_started`, which is an incomplete run, not a success.
+  end status and exit code 127.
+- A wrapper killed before the child exits leaves an unmatched `shell_started`.
+  Explanations report such a run as having no terminal observation, and
+  `recover_incomplete_runs(older_than)` later closes each one with a
+  `shell_run_incomplete` gap parented to the start, never with an end time or
+  status. The age bound keeps a run that is still live in another process open.
 
-The wrapper ignores SIGINT and SIGQUIT only while it waits, after the child has been
-spawned with default dispositions, so terminal interrupts reach the command and the
-wrapper can still record the outcome. `executable_id`, `working_directory`, and
+While it waits, and only after the child has been spawned with default
+dispositions, the wrapper ignores SIGINT and SIGQUIT (the terminal already delivers
+them to the command) and forwards SIGTERM and SIGHUP to the child, so a terminal
+close or a kill of the wrapper still ends in a recorded outcome. Runs are serialized
+within one process because these dispositions are process-global. `executable_id`, `working_directory`, and
 `signal` are optional v1 payload fields; envelopes without them are unchanged.
 
 ### Shell secret-leakage red-team boundary
