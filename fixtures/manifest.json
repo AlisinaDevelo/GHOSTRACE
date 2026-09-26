@@ -190,6 +190,14 @@
       "seed": "ghostrace-fixture-seed-v1",
       "sha256": "62013e92a6350603a882dcccafd2f51f44d9e66351c6afb821993e8839625062",
       "bytes": 9072
+    },
+    {
+      "path": "fixtures/frontmost-identity-v1.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "d19fd1805ae2591a9ac6b83afc0087abd748a65c6e4a2b15042e23d11f4d9491",
+      "bytes": 22131
     }
   ],
   "privacy": {
