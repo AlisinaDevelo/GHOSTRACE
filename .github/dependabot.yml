@@ -1,12 +1,20 @@
 version: 2
 updates:
+  # Grouped so one PR refreshes the pinned Cargo.lock digest in
+  # toolchain/manifest.json instead of every bump failing separately.
   - package-ecosystem: cargo
     directory: "/"
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    groups:
+      cargo:
+        patterns: ["*"]
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    groups:
+      actions:
+        patterns: ["*"]

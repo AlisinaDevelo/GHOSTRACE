@@ -11,7 +11,7 @@
     },
     "cargo_lock": {
       "path": "Cargo.lock",
-      "sha256": "b2f0ef7d5283c96bdb2f5344188cde91b31f26f5e6d62a68bf6ac4dd400c1c92"
+      "sha256": "017a6b1e7586dc6b9c5abf49226004b4ded33e9d8a12a12edef76a8f050ea798"
     },
     "commands": {
       "install": "rustup toolchain install --profile minimal --component clippy --component rustfmt 1.88.0",
@@ -32,7 +32,7 @@
   },
   "github_actions": {
     "checkout": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-    "rust_toolchain": "actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659",
+    "rust_toolchain": "actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f",
     "workflow_toolchain": "1.88.0"
   },
   "fixtures": {
