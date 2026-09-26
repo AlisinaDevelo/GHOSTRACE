@@ -54,7 +54,7 @@ authorization. It must normalize the small field set above, discard all other
 strings and command output, and call `GitSnapshotMetadata::from_identity`. The
 constructor performs no filesystem, Git, network, or object-database I/O, so
 the default read policy is `metadata_only`. A later task may define an explicit
-adapter, consent, event projection, and failure/gap semantics; this contract
+adapter, consent, and event projection; this contract
 does not ship one.
 
 The checked-in schema and golden example are
@@ -63,3 +63,34 @@ and [`fixtures/git-snapshot-metadata-v1.golden.json`](../fixtures/git-snapshot-m
 The focused tests cover algorithm mismatch, malformed IDs, unknown/excluded
 fields, status and bare-repository bounds, all operation classes, limitation
 states, digest drift, oversized input, and deterministic serialization.
+
+## History transitions and gaps
+
+Local Git history is mutable, so a later graph cannot prove what an earlier
+snapshot could see. `GitHistoryTransition::classify` (`src/git_history.rs`)
+compares two validated snapshots of the same repository and object format with
+one bounded ancestry probe: whether the previous HEAD is an ancestor of the
+current HEAD, reported only as `previous_is_ancestor`, `previous_not_ancestor`,
+`previous_object_missing`, `shallow_boundary_reached`, or `not_probed`.
+
+The result keeps three facts apart:
+
+| Field | Source | Values |
+|---|---|---|
+| `ref_movement` | The two snapshots only | `unchanged`, `head_moved`, `detached`, `attached`, `became_unborn`, `first_commit`, `unknown` |
+| `ancestry` | The probe, when no limitation could substitute the answer | `not_applicable`, `descendant`, `not_descendant`, `unknown` |
+| `gap` | Any condition that loses or hides history | `history_rewritten`, `object_missing`, `shallow_boundary`, `replaced_objects`, `ancestry_not_probed` |
+
+A gap carries the last known and current bounded state: HEAD object ID, branch
+class, shallow, replace-ref, and partial-clone states. Ancestry is never inferred
+from a missing object, a shallow boundary, an unprobed move, or an answer given
+while replace refs are active. A moved shallow boundary or a missing previous
+object is a gap even when HEAD did not move.
+
+[`fixtures/git-history-transitions-v1.json`](../fixtures/git-history-transitions-v1.json)
+defines the expected outcome for fast-forward, rebase, reset, force update, amend,
+gc, object loss, shallow deepen, shallow-boundary walks, worktree detach, replaced
+objects, unprobed moves, and a first commit. `tests/git_history_gaps.rs` also runs a
+reference probe against throwaway repositories (fast-forward, amend, reset, gc
+after reflog expiry, detach) using only `cat-file -e` and `merge-base
+--is-ancestor` exit status with a cleared environment.

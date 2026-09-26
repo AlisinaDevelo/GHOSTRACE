@@ -1,0 +1,301 @@
+{
+  "schema_version": 1,
+  "program": "ghostrace-git-history-transitions-v1",
+  "privacy": {
+    "synthetic_only": true,
+    "user_data_included": false,
+    "network_required": false,
+    "retains_ref_names": false,
+    "reads_object_content": false
+  },
+  "object_format": "sha1",
+  "repository_id": "git-demo",
+  "cases": [
+    {
+      "id": "fast_forward",
+      "description": "New commit on the checked-out branch.",
+      "previous": {
+        "head": "1111111111111111111111111111111111111111",
+        "branch_class": "local",
+        "shallow_history": "complete",
+        "replace_refs": "none"
+      },
+      "current": {
+        "head": "2222222222222222222222222222222222222222",
+        "branch_class": "local",
+        "shallow_history": "complete",
+        "replace_refs": "none"
+      },
+      "probe": "previous_is_ancestor",
+      "expected": {
+        "ref_movement": "head_moved",
+        "ancestry": "descendant",
+        "gap": null
+      }
+    },
+    {
+      "id": "rebase",
+      "description": "Branch rebased onto a new base; old tip is not in the new history.",
+      "previous": {
+        "head": "1111111111111111111111111111111111111111",
+        "branch_class": "local",
+        "shallow_history": "complete",
+        "replace_refs": "none"
+      },
+      "current": {
+        "head": "2222222222222222222222222222222222222222",
+        "branch_class": "local",
+        "shallow_history": "complete",
+        "replace_refs": "none"
+      },
+      "probe": "previous_not_ancestor",
+      "expected": {
+        "ref_movement": "head_moved",
+        "ancestry": "not_descendant",
+        "gap": "history_rewritten"
+      }
+    },
+    {
+      "id": "reset",
+      "description": "Hard reset to an earlier commit drops the old tip from the branch.",
+      "previous": {
+        "head": "2222222222222222222222222222222222222222",
+        "branch_class": "local",
+        "shallow_history": "complete",
+        "replace_refs": "none"
+      },
+      "current": {
+        "head": "1111111111111111111111111111111111111111",
+        "branch_class": "local",
+        "shallow_history": "complete",
+        "replace_refs": "none"
+      },
+      "probe": "previous_not_ancestor",
+      "expected": {
+        "ref_movement": "head_moved",
+        "ancestry": "not_descendant",
+        "gap": "history_rewritten"
+      }
+    },
+    {
+      "id": "force_update",
+      "description": "Remote-tracking ref force-updated by a fetch.",
+      "previous": {
+        "head": "1111111111111111111111111111111111111111",
+        "branch_class": "remote_tracking",
+        "shallow_history": "complete",
+        "replace_refs": "none"
+      },
+      "current": {
+        "head": "3333333333333333333333333333333333333333",
+        "branch_class": "remote_tracking",
+        "shallow_history": "complete",
+        "replace_refs": "none"
+      },
+      "probe": "previous_not_ancestor",
+      "expected": {
+        "ref_movement": "head_moved",
+        "ancestry": "not_descendant",
+        "gap": "history_rewritten"
+      }
+    },
+    {
+      "id": "amend",
+      "description": "Last commit amended; the replaced commit is not an ancestor.",
+      "previous": {
+        "head": "1111111111111111111111111111111111111111",
+        "branch_class": "local",
+        "shallow_history": "complete",
+        "replace_refs": "none"
+      },
+      "current": {
+        "head": "2222222222222222222222222222222222222222",
+        "branch_class": "local",
+        "shallow_history": "complete",
+        "replace_refs": "none"
+      },
+      "probe": "previous_not_ancestor",
+      "expected": {
+        "ref_movement": "head_moved",
+        "ancestry": "not_descendant",
+        "gap": "history_rewritten"
+      }
+    },
+    {
+      "id": "gc",
+      "description": "Amended-away commit pruned by gc before the probe ran.",
+      "previous": {
+        "head": "1111111111111111111111111111111111111111",
+        "branch_class": "local",
+        "shallow_history": "complete",
+        "replace_refs": "none"
+      },
+      "current": {
+        "head": "2222222222222222222222222222222222222222",
+        "branch_class": "local",
+        "shallow_history": "complete",
+        "replace_refs": "none"
+      },
+      "probe": "previous_object_missing",
+      "expected": {
+        "ref_movement": "head_moved",
+        "ancestry": "unknown",
+        "gap": "object_missing"
+      }
+    },
+    {
+      "id": "object_loss",
+      "description": "HEAD unchanged but its object is gone from the object database.",
+      "previous": {
+        "head": "1111111111111111111111111111111111111111",
+        "branch_class": "local",
+        "shallow_history": "complete",
+        "replace_refs": "none"
+      },
+      "current": {
+        "head": "1111111111111111111111111111111111111111",
+        "branch_class": "local",
+        "shallow_history": "complete",
+        "replace_refs": "none"
+      },
+      "probe": "previous_object_missing",
+      "expected": {
+        "ref_movement": "unchanged",
+        "ancestry": "not_applicable",
+        "gap": "object_missing"
+      }
+    },
+    {
+      "id": "shallow_deepen",
+      "description": "Shallow clone deepened; visible history grew without a HEAD move.",
+      "previous": {
+        "head": "1111111111111111111111111111111111111111",
+        "branch_class": "local",
+        "shallow_history": "shallow",
+        "replace_refs": "none"
+      },
+      "current": {
+        "head": "1111111111111111111111111111111111111111",
+        "branch_class": "local",
+        "shallow_history": "complete",
+        "replace_refs": "none"
+      },
+      "probe": "not_probed",
+      "expected": {
+        "ref_movement": "unchanged",
+        "ancestry": "not_applicable",
+        "gap": "shallow_boundary"
+      }
+    },
+    {
+      "id": "shallow_boundary_reached",
+      "description": "HEAD moved but the ancestry walk stopped at the shallow boundary.",
+      "previous": {
+        "head": "1111111111111111111111111111111111111111",
+        "branch_class": "local",
+        "shallow_history": "shallow",
+        "replace_refs": "none"
+      },
+      "current": {
+        "head": "2222222222222222222222222222222222222222",
+        "branch_class": "local",
+        "shallow_history": "shallow",
+        "replace_refs": "none"
+      },
+      "probe": "shallow_boundary_reached",
+      "expected": {
+        "ref_movement": "head_moved",
+        "ancestry": "unknown",
+        "gap": "shallow_boundary"
+      }
+    },
+    {
+      "id": "worktree_detach",
+      "description": "Checkout of the same commit as a detached HEAD.",
+      "previous": {
+        "head": "1111111111111111111111111111111111111111",
+        "branch_class": "local",
+        "shallow_history": "complete",
+        "replace_refs": "none"
+      },
+      "current": {
+        "head": "1111111111111111111111111111111111111111",
+        "branch_class": "detached_head",
+        "shallow_history": "complete",
+        "replace_refs": "none"
+      },
+      "probe": "not_probed",
+      "expected": {
+        "ref_movement": "detached",
+        "ancestry": "not_applicable",
+        "gap": null
+      }
+    },
+    {
+      "id": "replaced_objects",
+      "description": "Replace refs are active, so an ancestor answer may be substituted.",
+      "previous": {
+        "head": "1111111111111111111111111111111111111111",
+        "branch_class": "local",
+        "shallow_history": "complete",
+        "replace_refs": "active"
+      },
+      "current": {
+        "head": "2222222222222222222222222222222222222222",
+        "branch_class": "local",
+        "shallow_history": "complete",
+        "replace_refs": "active"
+      },
+      "probe": "previous_is_ancestor",
+      "expected": {
+        "ref_movement": "head_moved",
+        "ancestry": "unknown",
+        "gap": "replaced_objects"
+      }
+    },
+    {
+      "id": "not_probed",
+      "description": "HEAD moved and the adapter did not ask about ancestry.",
+      "previous": {
+        "head": "1111111111111111111111111111111111111111",
+        "branch_class": "local",
+        "shallow_history": "complete",
+        "replace_refs": "none"
+      },
+      "current": {
+        "head": "2222222222222222222222222222222222222222",
+        "branch_class": "local",
+        "shallow_history": "complete",
+        "replace_refs": "none"
+      },
+      "probe": "not_probed",
+      "expected": {
+        "ref_movement": "head_moved",
+        "ancestry": "unknown",
+        "gap": "ancestry_not_probed"
+      }
+    },
+    {
+      "id": "first_commit",
+      "description": "First commit on an unborn branch.",
+      "previous": {
+        "head": null,
+        "branch_class": "unborn",
+        "shallow_history": "complete",
+        "replace_refs": "none"
+      },
+      "current": {
+        "head": "1111111111111111111111111111111111111111",
+        "branch_class": "local",
+        "shallow_history": "complete",
+        "replace_refs": "none"
+      },
+      "probe": "not_probed",
+      "expected": {
+        "ref_movement": "first_commit",
+        "ancestry": "not_applicable",
+        "gap": null
+      }
+    }
+  ]
+}
