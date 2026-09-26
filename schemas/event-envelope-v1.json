@@ -383,7 +383,22 @@
           "required": ["session_id", "shell_kind"],
           "properties": {
             "session_id": { "$ref": "#/$defs/opaque_identifier" },
-            "shell_kind": { "$ref": "#/$defs/opaque_identifier" }
+            "shell_kind": { "$ref": "#/$defs/opaque_identifier" },
+            "executable_id": {
+              "$ref": "#/$defs/opaque_identifier",
+              "not": { "pattern": "password|passwd|secret|credential|authorization|bearer|private-key" }
+            },
+            "working_directory": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path_class", "path_digest"],
+              "properties": {
+                "path_class": {
+                  "enum": ["workspace_relative", "home_relative", "absolute_redacted", "unknown"]
+                },
+                "path_digest": { "$ref": "#/$defs/sha256_digest" }
+              }
+            }
           }
         }
       }
@@ -411,7 +426,8 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 18446744073709551615
-            }
+            },
+            "signal": { "type": "integer", "minimum": 1, "maximum": 64 }
           }
         }
       }

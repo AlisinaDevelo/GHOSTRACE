@@ -206,6 +206,39 @@ crash are represented as explicit gaps with no completion, end time, exit code, 
 success status. This is a test contract only: GHOSTRACE does not ship a shell
 executor, PTY, terminal collector, or command capture path.
 
+### Explicit shell run wrapper
+
+`ShellWrapper` (`src/shell_wrapper.rs`) is the only shell capture path. It is a
+library adapter built like the selected-root collector: the caller renders a
+consent preview for a policy document that enables the `shell` source, and the
+wrapper refuses to run anything once consent is revoked. Each `run`/`run_in` call
+executes exactly one user-supplied program with inherited standard streams and
+environment, so the command behaves as it would in the terminal, but none of those
+bytes are read, stored, or hashed.
+
+A run commits `shell_started` before the child is spawned and a terminal event after
+it exits, both under a live ingestion origin with the started event as parent:
+
+- `shell_started` carries the wrapper session, `shell_kind: ghostrace-run`, the
+  normalized executable basename token, and a working-directory class plus digest.
+  A basename that is not a safe lowercase token is recorded as `unclassified`.
+- The working directory is classified as `workspace_relative` (under a
+  policy-selected workspace root), `home_relative`, `absolute_redacted`, or
+  `unknown`. Its digest is domain-separated and anchored to the scope directory's
+  device/inode; outside any scope it digests only the directory's own device/inode,
+  so it cannot be matched against a dictionary of path strings.
+- `shell_finished` carries the outcome class, exit code, duration, and the
+  terminating signal for a signaled child. The wrapper returns the child's exit
+  code, or `128 + signal`, unchanged to its caller.
+- A program that cannot be started produces a `gap` (`shell_exec_failed`) with no
+  end status and exit code 127. A wrapper killed before the child exits leaves an
+  unmatched `shell_started`, which is an incomplete run, not a success.
+
+The wrapper ignores SIGINT and SIGQUIT only while it waits, after the child has been
+spawned with default dispositions, so terminal interrupts reach the command and the
+wrapper can still record the outcome. `executable_id`, `working_directory`, and
+`signal` are optional v1 payload fields; envelopes without them are unchanged.
+
 ### Shell secret-leakage red-team boundary
 
 [`fixtures/shell-secret-leakage-v1.json`](../fixtures/shell-secret-leakage-v1.json)
