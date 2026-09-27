@@ -28,7 +28,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0022 | Add optional Parquet cold-archive export | M3 | backlog | explain-export | maintainer | — | 0020, 0021, 0090 |
 | 0023 | Add tamper-evident event chain and verifier | M3 | done | explain-export | maintainer | — | 0008, 0009, 0020, 0088, 0089 |
 | 0024 | Add explicit shell-wrapper metadata capture | M4 | done | shell-git | maintainer | — | 0007, 0018, 0091, 0092, 0093 |
-| 0025 | Add explicit Git snapshot integration | M4 | backlog | shell-git | maintainer | — | 0007, 0018, 0094, 0095, 0096 |
+| 0025 | Add explicit Git snapshot integration | M4 | done | shell-git | maintainer | — | 0007, 0018, 0094, 0095, 0096 |
 | 0026 | Add opt-in Git hook install and uninstall | M4 | backlog | shell-git | maintainer | — | 0025, 0097 |
 | 0027 | Implement NSWorkspace frontmost-app collector | M4 | backlog | frontmost | maintainer | — | 0006, 0007, 0010, 0012, 0098 |
 | 0028 | Add frontmost attribution and privacy tests | M4 | backlog | frontmost | maintainer | — | 0027, 0018, 0099, 0100 |
@@ -42,8 +42,8 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0036 | Build read-only Tauri timeline and explain UI | M5 | backlog | service-ui | maintainer | — | 0019, 0020, 0035, 0113 |
 | 0037 | Add launchd user-agent lifecycle and permission UX | M5 | backlog | service-ui | maintainer | — | 0013, 0027, 0030, 0035, 0114 |
 | 0038 | Harden release signing, notarization, SBOM, and dependencies | M6 | backlog | release-scale | maintainer | — | 0005, 0008, 0023, 0031, 0037, 0047, 0048, 0115, 0116, 0117, 0118 |
-| 0039 | Establish performance and resource benchmark gates | M6 | backlog | release-scale | maintainer | — | 0013, 0018, 0035, 0037, 0119, 0120 |
-| 0040 | Complete v1.0 compatibility, privacy, and incident readiness | M6 | backlog | release-scale | maintainer | — | 0020, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028, 0029, 0030, 0031, 0032, 0033, 0034, 0035, 0036, 0037, 0038, 0039, 0041, 0042, 0121, 0122, 0123 |
+| 0039 | Establish performance and resource benchmark gates | M6 | backlog | release-scale | maintainer | — | 0013, 0018, 0035, 0037, 0119, 0120, 0163 |
+| 0040 | Complete v1.0 compatibility, privacy, and incident readiness | M6 | backlog | release-scale | maintainer | — | 0020, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028, 0029, 0030, 0031, 0032, 0033, 0034, 0035, 0036, 0037, 0038, 0039, 0041, 0042, 0121, 0122, 0123, 0161, 0162 |
 | 0041 | Validate the project identity and package namespaces | M0 | done | foundation | maintainer | — | 0001 |
 | 0042 | Evaluate optional Endpoint Security actor attribution | M6 | backlog | release-scale | maintainer | — | 0017, 0019, 0037, 0124 |
 | 0043 | Build the prohibited-data privacy regression corpus | M0 | done | privacy | test-engineer | 0005 | 0004, 0006 |
@@ -99,9 +99,9 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0093 | Red-team shell secret leakage | M4 | done | shell-git | security-auditor | 0024 | 0091 |
 | 0094 | Define stable Git repository and worktree identity | M4 | done | shell-git | git-specialist | 0025 | 0007, 0018 |
 | 0095 | Minimize Git refs, object IDs, and snapshot fields | M4 | done | shell-git | privacy-engineer | 0025 | 0094 |
-| 0096 | Represent Git rewrites and unavailable history as gaps | M4 | backlog | shell-git | git-specialist | 0025 | 0094, 0095 |
-| 0097 | Make Git hook installation verifiable and reversible | M4 | backlog | shell-git | git-specialist | 0026 | 0094, 0095 |
-| 0098 | Define frontmost application identity and session semantics | M4 | backlog | frontmost | macos-engineer | 0027 | 0006, 0007, 0010, 0012 |
+| 0096 | Represent Git rewrites and unavailable history as gaps | M4 | done | shell-git | git-specialist | 0025 | 0094, 0095 |
+| 0097 | Make Git hook installation verifiable and reversible | M4 | done | shell-git | git-specialist | 0026 | 0094, 0095 |
+| 0098 | Define frontmost application identity and session semantics | M4 | done | frontmost | macos-engineer | 0027 | 0006, 0007, 0010, 0012 |
 | 0099 | Test frontmost sleep, wake, and privacy transitions | M4 | backlog | frontmost | test-engineer | 0028 | 0018, 0098 |
 | 0100 | Evaluate developer-workflow cross-source explanations | M4 | backlog | frontmost | researcher | 0028 | 0092, 0096, 0099 |
 | 0101 | Build the browser integration threat corpus | M5 | backlog | browser | security-auditor | 0029 | 0002, 0004, 0005, 0012 |
@@ -164,3 +164,6 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0158 | Commission an independent privacy and security audit | M11 | backlog | long-term | security-auditor | 0153 | 0146, 0154, 0155, 0156 |
 | 0159 | Run the v2 migration and rollback release candidate | M11 | backlog | long-term | release-engineer | 0153 | 0154, 0155, 0156, 0158 |
 | 0160 | Publish the 2032 research and sustainability decision | M11 | backlog | long-term | maintainer | 0153 | 0145, 0151, 0157 |
+| 0161 | Ship an explicit ghostrace run CLI over a Keychain journal | M4 | backlog | shell-git | macos-engineer | 0024 | 0024, 0054 |
+| 0162 | Close interrupted shell runs with explicit gaps | M4 | backlog | shell-git | test-engineer | 0024 | 0024 |
+| 0163 | Bring the native FSEvents benchmark within its device bound | M6 | backlog | release-scale | performance-engineer | 0039 | 0017 |

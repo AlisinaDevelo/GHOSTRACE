@@ -1,0 +1,909 @@
+{
+  "schema_version": 1,
+  "program": "ghostrace-frontmost-coverage-v1",
+  "privacy": {
+    "synthetic_only": true,
+    "user_data_included": false,
+    "network_required": false,
+    "retains_excluded_identity": false
+  },
+  "epoch": "2026-01-01T09:00:00Z",
+  "exclusions": [
+    "com.example.private-notes"
+  ],
+  "transition_table": [
+    {
+      "scenario": "startup",
+      "notification": "observer_started",
+      "classification": "direct"
+    },
+    {
+      "scenario": "login",
+      "notification": "didActivateApplication",
+      "classification": "direct"
+    },
+    {
+      "scenario": "fast_user_switching",
+      "notification": "sessionDidResignActive",
+      "classification": "inferred_closure"
+    },
+    {
+      "scenario": "fast_user_switching",
+      "notification": "sessionDidBecomeActive",
+      "classification": "gap"
+    },
+    {
+      "scenario": "lock",
+      "notification": "screensDidSleep/lock",
+      "classification": "inferred_closure"
+    },
+    {
+      "scenario": "sleep",
+      "notification": "willSleep",
+      "classification": "inferred_closure"
+    },
+    {
+      "scenario": "wake",
+      "notification": "didWake",
+      "classification": "gap"
+    },
+    {
+      "scenario": "mission_control",
+      "notification": "didActivateApplication (Dock)",
+      "classification": "direct"
+    },
+    {
+      "scenario": "app_termination",
+      "notification": "didTerminateApplication",
+      "classification": "direct"
+    },
+    {
+      "scenario": "missed_deactivation",
+      "notification": "didActivateApplication (next app)",
+      "classification": "inferred_closure"
+    },
+    {
+      "scenario": "observer_restart",
+      "notification": "observer_started without observer_stopped",
+      "classification": "gap"
+    }
+  ],
+  "sequences": [
+    {
+      "id": "startup",
+      "steps": [
+        [
+          {
+            "system": "observer_started",
+            "at": 0
+          },
+          [
+            {
+              "record": "coverage",
+              "state": "started",
+              "gap": false
+            }
+          ]
+        ],
+        [
+          {
+            "app": {
+              "transition": "activated",
+              "bundle": "com.example.editor",
+              "pid": 501,
+              "at": 1
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "activated",
+              "basis": "direct",
+              "dwell_ms": null
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "login",
+      "steps": [
+        [
+          {
+            "system": "observer_started",
+            "at": 0
+          },
+          [
+            {
+              "record": "coverage",
+              "state": "started",
+              "gap": false
+            }
+          ]
+        ],
+        [
+          {
+            "app": {
+              "transition": "activated",
+              "bundle": "com.apple.finder",
+              "pid": 90,
+              "at": 0.2
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "activated",
+              "basis": "direct",
+              "dwell_ms": null
+            }
+          ]
+        ],
+        [
+          {
+            "app": {
+              "transition": "deactivated",
+              "bundle": "com.apple.finder",
+              "pid": 90,
+              "at": 3
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "deactivated",
+              "basis": "direct",
+              "dwell_ms": 2800
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "fast_user_switching",
+      "steps": [
+        [
+          {
+            "system": "observer_started",
+            "at": 0
+          },
+          [
+            {
+              "record": "coverage",
+              "state": "started",
+              "gap": false
+            }
+          ]
+        ],
+        [
+          {
+            "app": {
+              "transition": "activated",
+              "bundle": "com.example.editor",
+              "pid": 501,
+              "at": 1
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "activated",
+              "basis": "direct",
+              "dwell_ms": null
+            }
+          ]
+        ],
+        [
+          {
+            "system": "session_resigned_active",
+            "at": 11
+          },
+          [
+            {
+              "record": "app",
+              "transition": "deactivated",
+              "basis": "inferred_closure",
+              "dwell_ms": 10000
+            },
+            {
+              "record": "coverage",
+              "state": "suspended",
+              "gap": false
+            }
+          ]
+        ],
+        [
+          {
+            "system": "session_became_active",
+            "at": 71
+          },
+          [
+            {
+              "record": "coverage",
+              "state": "resumed",
+              "gap": true
+            }
+          ]
+        ],
+        [
+          {
+            "app": {
+              "transition": "activated",
+              "bundle": "com.example.editor",
+              "pid": 501,
+              "at": 72
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "activated",
+              "basis": "direct",
+              "dwell_ms": null
+            }
+          ]
+        ],
+        [
+          {
+            "app": {
+              "transition": "deactivated",
+              "bundle": "com.example.editor",
+              "pid": 501,
+              "at": 74
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "deactivated",
+              "basis": "direct",
+              "dwell_ms": 2000
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "lock",
+      "steps": [
+        [
+          {
+            "app": {
+              "transition": "activated",
+              "bundle": "com.example.editor",
+              "pid": 501,
+              "at": 0
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "activated",
+              "basis": "direct",
+              "dwell_ms": null
+            }
+          ]
+        ],
+        [
+          {
+            "system": "screen_locked",
+            "at": 5
+          },
+          [
+            {
+              "record": "app",
+              "transition": "deactivated",
+              "basis": "inferred_closure",
+              "dwell_ms": 5000
+            },
+            {
+              "record": "coverage",
+              "state": "suspended",
+              "gap": false
+            }
+          ]
+        ],
+        [
+          {
+            "system": "screen_unlocked",
+            "at": 600
+          },
+          [
+            {
+              "record": "coverage",
+              "state": "resumed",
+              "gap": true
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "sleep_wake",
+      "steps": [
+        [
+          {
+            "app": {
+              "transition": "activated",
+              "bundle": "com.example.terminal",
+              "pid": 777,
+              "at": 0
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "activated",
+              "basis": "direct",
+              "dwell_ms": null
+            }
+          ]
+        ],
+        [
+          {
+            "system": "will_sleep",
+            "at": 30
+          },
+          [
+            {
+              "record": "app",
+              "transition": "deactivated",
+              "basis": "inferred_closure",
+              "dwell_ms": 30000
+            },
+            {
+              "record": "coverage",
+              "state": "suspended",
+              "gap": false
+            }
+          ]
+        ],
+        [
+          {
+            "system": "did_wake",
+            "at": 3630
+          },
+          [
+            {
+              "record": "coverage",
+              "state": "resumed",
+              "gap": true
+            }
+          ]
+        ],
+        [
+          {
+            "app": {
+              "transition": "activated",
+              "bundle": "com.example.editor",
+              "pid": 501,
+              "at": 3631
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "activated",
+              "basis": "direct",
+              "dwell_ms": null
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "lock_then_sleep_resumes_once",
+      "steps": [
+        [
+          {
+            "app": {
+              "transition": "activated",
+              "bundle": "com.example.editor",
+              "pid": 501,
+              "at": 0
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "activated",
+              "basis": "direct",
+              "dwell_ms": null
+            }
+          ]
+        ],
+        [
+          {
+            "system": "screen_locked",
+            "at": 2
+          },
+          [
+            {
+              "record": "app",
+              "transition": "deactivated",
+              "basis": "inferred_closure",
+              "dwell_ms": 2000
+            },
+            {
+              "record": "coverage",
+              "state": "suspended",
+              "gap": false
+            }
+          ]
+        ],
+        [
+          {
+            "system": "will_sleep",
+            "at": 60
+          },
+          [
+            {
+              "record": "coverage",
+              "state": "suspended",
+              "gap": false
+            }
+          ]
+        ],
+        [
+          {
+            "system": "did_wake",
+            "at": 900
+          },
+          [
+            {
+              "record": "coverage",
+              "state": "resumed",
+              "gap": true
+            }
+          ]
+        ],
+        [
+          {
+            "system": "screen_unlocked",
+            "at": 905
+          },
+          [
+            {
+              "record": "coverage",
+              "state": "resumed",
+              "gap": false
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "mission_control",
+      "steps": [
+        [
+          {
+            "app": {
+              "transition": "activated",
+              "bundle": "com.example.editor",
+              "pid": 501,
+              "at": 0
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "activated",
+              "basis": "direct",
+              "dwell_ms": null
+            }
+          ]
+        ],
+        [
+          {
+            "app": {
+              "transition": "activated",
+              "bundle": "com.apple.dock",
+              "pid": 60,
+              "at": 4
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "deactivated",
+              "basis": "inferred_closure",
+              "dwell_ms": 4000
+            },
+            {
+              "record": "app",
+              "transition": "activated",
+              "basis": "direct",
+              "dwell_ms": null
+            }
+          ]
+        ],
+        [
+          {
+            "app": {
+              "transition": "activated",
+              "bundle": "com.example.editor",
+              "pid": 501,
+              "at": 4.3
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "deactivated",
+              "basis": "inferred_closure",
+              "dwell_ms": 300
+            },
+            {
+              "record": "app",
+              "transition": "activated",
+              "basis": "direct",
+              "dwell_ms": null
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "app_termination",
+      "steps": [
+        [
+          {
+            "app": {
+              "transition": "activated",
+              "bundle": "com.example.editor",
+              "pid": 501,
+              "at": 0
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "activated",
+              "basis": "direct",
+              "dwell_ms": null
+            }
+          ]
+        ],
+        [
+          {
+            "app": {
+              "transition": "terminated",
+              "bundle": "com.example.editor",
+              "pid": 501,
+              "at": 8
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "terminated",
+              "basis": "direct",
+              "dwell_ms": 8000
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "missed_deactivation",
+      "steps": [
+        [
+          {
+            "app": {
+              "transition": "activated",
+              "bundle": "com.example.editor",
+              "pid": 501,
+              "at": 0
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "activated",
+              "basis": "direct",
+              "dwell_ms": null
+            }
+          ]
+        ],
+        [
+          {
+            "app": {
+              "transition": "activated",
+              "bundle": "com.example.terminal",
+              "pid": 777,
+              "at": 5
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "deactivated",
+              "basis": "inferred_closure",
+              "dwell_ms": 5000
+            },
+            {
+              "record": "app",
+              "transition": "activated",
+              "basis": "direct",
+              "dwell_ms": null
+            }
+          ]
+        ],
+        [
+          {
+            "app": {
+              "transition": "deactivated",
+              "bundle": "com.example.editor",
+              "pid": 501,
+              "at": 6
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "deactivated",
+              "basis": "direct",
+              "dwell_ms": null
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "observer_restart_without_stop",
+      "steps": [
+        [
+          {
+            "system": "observer_started",
+            "at": 0
+          },
+          [
+            {
+              "record": "coverage",
+              "state": "started",
+              "gap": false
+            }
+          ]
+        ],
+        [
+          {
+            "app": {
+              "transition": "activated",
+              "bundle": "com.example.editor",
+              "pid": 501,
+              "at": 1
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "activated",
+              "basis": "direct",
+              "dwell_ms": null
+            }
+          ]
+        ],
+        [
+          {
+            "system": "observer_started",
+            "at": 100
+          },
+          [
+            {
+              "record": "coverage",
+              "state": "interrupted",
+              "gap": true
+            }
+          ]
+        ],
+        [
+          {
+            "app": {
+              "transition": "deactivated",
+              "bundle": "com.example.editor",
+              "pid": 501,
+              "at": 101
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "deactivated",
+              "basis": "direct",
+              "dwell_ms": null
+            }
+          ]
+        ],
+        [
+          {
+            "app": {
+              "transition": "activated",
+              "bundle": "com.example.editor",
+              "pid": 501,
+              "at": 102
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "activated",
+              "basis": "direct",
+              "dwell_ms": null
+            }
+          ]
+        ],
+        [
+          {
+            "app": {
+              "transition": "deactivated",
+              "bundle": "com.example.editor",
+              "pid": 501,
+              "at": 104
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "deactivated",
+              "basis": "direct",
+              "dwell_ms": 2000
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "observer_clean_restart",
+      "steps": [
+        [
+          {
+            "system": "observer_started",
+            "at": 0
+          },
+          [
+            {
+              "record": "coverage",
+              "state": "started",
+              "gap": false
+            }
+          ]
+        ],
+        [
+          {
+            "app": {
+              "transition": "activated",
+              "bundle": "com.example.editor",
+              "pid": 501,
+              "at": 1
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "activated",
+              "basis": "direct",
+              "dwell_ms": null
+            }
+          ]
+        ],
+        [
+          {
+            "system": "observer_stopped",
+            "at": 20
+          },
+          [
+            {
+              "record": "app",
+              "transition": "deactivated",
+              "basis": "inferred_closure",
+              "dwell_ms": 19000
+            },
+            {
+              "record": "coverage",
+              "state": "suspended",
+              "gap": false
+            }
+          ]
+        ],
+        [
+          {
+            "system": "observer_started",
+            "at": 40
+          },
+          [
+            {
+              "record": "coverage",
+              "state": "resumed",
+              "gap": true
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "private_application_is_withheld",
+      "steps": [
+        [
+          {
+            "app": {
+              "transition": "activated",
+              "bundle": "com.example.editor",
+              "pid": 501,
+              "at": 0
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "activated",
+              "basis": "direct",
+              "dwell_ms": null
+            }
+          ]
+        ],
+        [
+          {
+            "app": {
+              "transition": "activated",
+              "bundle": "com.example.private-notes",
+              "pid": 888,
+              "at": 3
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "deactivated",
+              "basis": "inferred_closure",
+              "dwell_ms": 3000
+            },
+            {
+              "record": "app",
+              "transition": "activated",
+              "basis": "direct",
+              "dwell_ms": null,
+              "excluded": true
+            }
+          ]
+        ],
+        [
+          {
+            "app": {
+              "transition": "deactivated",
+              "bundle": "com.example.private-notes",
+              "pid": 888,
+              "at": 9
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "deactivated",
+              "basis": "direct",
+              "dwell_ms": null,
+              "excluded": true
+            }
+          ]
+        ],
+        [
+          {
+            "app": {
+              "transition": "activated",
+              "bundle": "com.example.editor",
+              "pid": 501,
+              "at": 9
+            }
+          },
+          [
+            {
+              "record": "app",
+              "transition": "activated",
+              "basis": "direct",
+              "dwell_ms": null
+            }
+          ]
+        ]
+      ]
+    }
+  ]
+}

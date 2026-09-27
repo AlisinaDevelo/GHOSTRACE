@@ -13,8 +13,9 @@ use crate::{
     },
     error::GhostraceError,
     journal::Journal,
-    model::{EventEnvelope, EventKind, Evidence},
+    model::{EventEnvelope, EventKind, EventPayload, Evidence},
     ordering::{analyze_temporal_observations, TemporalObservation},
+    shell_wrapper::SHELL_WRAPPER_KIND,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -85,8 +86,32 @@ pub fn explain(journal: &Journal, target: Uuid) -> Result<Explanation, Ghostrace
     warnings.extend(reverse_chain.iter().filter(|event| event.kind == EventKind::SourceError).map(
         |event| format!("source error limits coverage; evidence cites event {}", event.event_id),
     ));
-    let ingest_sequences = journal
-        .events()?
+    let journal_events = journal.events()?;
+    // A wrapper run is complete only when a finish or gap event names
+    // its start as parent; otherwise its end was never observed.
+    let terminated_runs = journal_events
+        .iter()
+        .filter(|stored| matches!(stored.event.kind, EventKind::ShellFinished | EventKind::Gap))
+        .filter_map(|stored| stored.event.parent_event_id)
+        .collect::<HashSet<_>>();
+    warnings.extend(
+        reverse_chain
+            .iter()
+            .filter(|event| {
+                matches!(
+                    &event.payload,
+                    EventPayload::ShellStarted(payload)
+                        if payload.shell_kind.as_str() == SHELL_WRAPPER_KIND
+                ) && !terminated_runs.contains(&event.event_id)
+            })
+            .map(|event| {
+                format!(
+                    "shell run has no terminal observation; evidence cites event {}",
+                    event.event_id
+                )
+            }),
+    );
+    let ingest_sequences = journal_events
         .into_iter()
         .map(|stored| (stored.event.event_id, stored.ingest_seq))
         .collect::<HashMap<_, _>>();
