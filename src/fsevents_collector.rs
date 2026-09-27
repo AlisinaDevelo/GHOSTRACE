@@ -48,7 +48,10 @@ use crate::{
         StartupCursor, StartupCursorDecision, StartupCursorError, StartupCursorRejection,
         StreamState, EVENT_ID_SINCE_NOW, FLAG_FILE_EVENTS,
     },
-    fsevents_flags::{FseventsEventFlag, FseventsEvidenceStatus, NormalizedFseventsEvent},
+    fsevents_flags::{
+        FseventsEventFlag, FseventsEvidenceStatus, NormalizedFseventsEvent,
+        EVENT_FLAG_EVENT_IDS_WRAPPED,
+    },
     journal::{DiagnosticRecord, Journal},
     model::{
         CollectorLifecyclePayload, EntryKind, EventEnvelope, EventKind, EventPayload, EventSource,
@@ -497,6 +500,9 @@ pub struct CollectorStatus {
     pub rescan_required: u64,
     pub unsupported_events: u64,
     pub contradictory_events: u64,
+    /// Distinct deliveries whose native ID was at or below the committed
+    /// cursor; each is recorded as an `fsevents_out_of_order` gap.
+    pub out_of_order_events: u64,
     /// Exact callback deliveries suppressed by the bounded transport window.
     /// Distinct source event IDs are never counted here or suppressed.
     pub transport_duplicates: u64,
@@ -666,6 +672,7 @@ pub struct FseventsCollector {
     rescan_required: u64,
     unsupported_events: u64,
     contradictory_events: u64,
+    out_of_order_events: u64,
     transport_duplicates: u64,
     internal_path_denials: u64,
     blocked_internal_events: u64,
@@ -793,6 +800,7 @@ impl FseventsCollector {
             rescan_required: 0,
             unsupported_events: 0,
             contradictory_events: 0,
+            out_of_order_events: 0,
             transport_duplicates: 0,
             internal_path_denials: 0,
             blocked_internal_events: 0,
@@ -824,6 +832,7 @@ impl FseventsCollector {
             rescan_required: self.rescan_required,
             unsupported_events: self.unsupported_events,
             contradictory_events: self.contradictory_events,
+            out_of_order_events: self.out_of_order_events,
             transport_duplicates: self.transport_duplicates,
             internal_path_denials: self.internal_path_denials,
             recovery_required: self.recovery_required,
@@ -964,10 +973,17 @@ impl FseventsCollector {
     }
 
     fn drain_pending(&mut self) -> Result<Vec<CollectedFilesystemEvent>, FseventsCollectorError> {
-        let (events, overflowed) = {
+        let (mut events, overflowed) = {
             let mut pending = self.pending.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             (pending.events.drain(..).collect::<Vec<_>>(), std::mem::take(&mut pending.overflowed))
         };
+        // FSEvents does not promise ascending IDs across coalesced
+        // deliveries. Order each drained batch by ID so a late delivery in the
+        // same batch still advances the cursor, unless the batch spans an ID
+        // wraparound, where numeric order is not event order.
+        if !events.iter().any(|event| event.flags & EVENT_FLAG_EVENT_IDS_WRAPPED != 0) {
+            events.sort_by_key(|event| event.event_id);
+        }
         if self.state == CollectorState::Revoked {
             self.pending_overflow_events = self.pending_overflow_events.saturating_add(overflowed);
             self.dropped_events =
@@ -1083,6 +1099,24 @@ impl FseventsCollector {
                 path_digest.clone(),
             )) {
                 self.transport_duplicates = self.transport_duplicates.saturating_add(1);
+                continue;
+            }
+            // A distinct delivery at or below the committed cursor cannot
+            // advance it. Record a visible ordering gap instead of aborting
+            // collection; the event itself may be a late or reordered change.
+            if self.at_or_below_committed_cursor(&source_cursor)? {
+                self.out_of_order_events = self.out_of_order_events.saturating_add(1);
+                self.dropped_events = self.dropped_events.saturating_add(1);
+                self.submit_gap(GapSubmission {
+                    dropped_count: 1,
+                    reason_code: "fsevents_out_of_order",
+                    source_cursor: None,
+                    from_cursor: None,
+                    to_cursor: None,
+                    remediation: Some(GapRemediation::RescanSelectedRoots),
+                    root_ids: vec![root_id.clone()],
+                    requires_reconciliation: false,
+                })?;
                 continue;
             }
             let Some(mut operation) = operation_for(&normalized) else {
@@ -1395,6 +1429,25 @@ impl FseventsCollector {
         self.root_for_path(path)
             .map(|root| vec![root.id.clone()])
             .unwrap_or_else(|| self.all_root_ids())
+    }
+
+    fn at_or_below_committed_cursor(
+        &self,
+        candidate: &SourceCursor,
+    ) -> Result<bool, FseventsCollectorError> {
+        let Some(state) = self.journal.cursor_state(&self.replay_boundary.identity)? else {
+            return Ok(false);
+        };
+        if state.can_accept_first_event() && state.token.raw() == candidate {
+            return Ok(false);
+        }
+        let current = CursorToken::new(state.token.raw().clone());
+        let candidate = CursorToken::new(candidate.clone());
+        Ok(current.epoch() == candidate.epoch()
+            && current
+                .position()
+                .zip(candidate.position())
+                .is_some_and(|(current, candidate)| candidate <= current))
     }
 
     fn coverage_gap_cursors(
@@ -2528,5 +2581,105 @@ mod tests {
         let rendered = serde_json::to_string(&receipt).expect("receipt JSON");
         assert!(!rendered.contains(&root_path.to_string_lossy().to_string()));
         println!("event-storm-backpressure-receipt={rendered}");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn reordered_and_late_native_ids_become_ordering_gaps_instead_of_errors() {
+        use crate::{
+            consent::ConsentPreview,
+            fsevents::{FseventsEvent, FseventsOptions},
+            model::EventSource,
+            policy::PolicyDocument,
+            DeterministicKeyProvider,
+        };
+        use chrono::{TimeZone, Utc};
+        use std::fs;
+        use tempfile::tempdir;
+
+        let directory = tempdir().expect("private root");
+        let root_path = directory.path().join("selected-root");
+        fs::create_dir(&root_path).expect("selected root");
+        let root = SelectedRoot::new("root-main", &root_path).expect("root");
+        let document = PolicyDocument::new(
+            "live-filesystem-v1",
+            1,
+            [EventSource::Filesystem, EventSource::Lifecycle],
+            ["root-main"],
+            false,
+        )
+        .expect("policy");
+        let confirmation = ConsentPreview::from_policy(
+            &document,
+            ["path_digest", "operation", "entry_kind"],
+            ["fsevents_coalescing", "no_process_attribution", "history_can_be_dropped"],
+        )
+        .expect("consent preview")
+        .confirm();
+        let journal = Journal::in_memory(DeterministicKeyProvider::from_seed("out-of-order"))
+            .expect("journal");
+        let config = FseventsCollectorConfig {
+            options: FseventsOptions {
+                latency: Duration::from_millis(20),
+                ..FseventsOptions::default()
+            },
+            writer: WriterConfig::default(),
+            collector_instance: "live-out-of-order".to_owned(),
+            instance_label: "out-of-order".to_owned(),
+            consent_at: Utc.timestamp_opt(1_750_000_000, 0).single().expect("timestamp"),
+            actor: "human".to_owned(),
+            reason: "root_opt_in".to_owned(),
+            history_timeout: Duration::from_secs(5),
+            internal_paths: InternalPathPolicy::default(),
+        };
+        let mut collector = FseventsCollector::new(confirmation, document, [root], journal, config)
+            .expect("collector");
+        let event = |id: u64, name: &str| FseventsEvent {
+            path: root_path.join(name),
+            event_id: id,
+            flags: EVENT_FLAG_ITEM_CREATED | EVENT_FLAG_ITEM_IS_FILE,
+        };
+        let enqueue = |collector: &FseventsCollector, events: Vec<FseventsEvent>| {
+            let mut pending =
+                collector.pending.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            pending.events.extend(events);
+        };
+        let ordering_gaps = |collector: &FseventsCollector| {
+            collector
+                .journal
+                .events()
+                .expect("events")
+                .iter()
+                .filter(|stored| {
+                    matches!(&stored.event.payload, EventPayload::Gap(payload)
+                        if payload.reason_code.as_str() == "fsevents_out_of_order")
+                })
+                .count()
+        };
+
+        enqueue(&collector, vec![event(10, "a"), event(11, "b")]);
+        assert_eq!(collector.drain_pending().expect("in order").len(), 2);
+
+        // Reversed within one delivery batch: sorted, so both advance the cursor.
+        enqueue(&collector, vec![event(13, "d"), event(12, "c")]);
+        let reordered = collector.drain_pending().expect("reordered batch");
+        assert_eq!(
+            reordered.iter().map(|event| event.source_event_id).collect::<Vec<_>>(),
+            vec![12, 13]
+        );
+
+        // A later batch with an older ID, and a distinct path sharing the
+        // committed ID, are recorded as ordering gaps instead of aborting.
+        enqueue(&collector, vec![event(5, "late"), event(13, "same-id-other-path")]);
+        let late = collector.drain_pending().expect("late IDs must not abort collection");
+        assert!(late.is_empty());
+        let status = collector.status();
+        assert_eq!(status.out_of_order_events, 2);
+        assert_eq!(ordering_gaps(&collector), 2);
+        assert!(!status.recovery_required, "an ordering gap does not require reconciliation");
+
+        // Collection continues from the committed cursor.
+        enqueue(&collector, vec![event(14, "e")]);
+        assert_eq!(collector.drain_pending().expect("continues").len(), 1);
     }
 }

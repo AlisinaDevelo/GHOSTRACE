@@ -93,3 +93,32 @@ When a target is unavailable, the register records `unavailable`, the reason, ow
 and no-go decision. It does not substitute a hosted runner or inferred result. This
 keeps the program honest about the difference between a plan, an observation, a
 derived interpretation, and an unmeasured surface.
+
+## Permission drift gate
+
+[`planning/permission-manifest.json`](../planning/permission-manifest.json) is the
+reviewed permission baseline for every shipped artifact: bundle identifier,
+helpers, extensions, signature class, hardened-runtime and sandbox state,
+entitlements, linked libraries, privacy-sensitive APIs, filesystem rights, and
+network capability. Today it has one artifact, the ad-hoc linker-signed
+`ghostrace` CLI, with no entitlements, no network capability, and five system
+libraries.
+
+`python3 scripts/permissions.py check` fails when:
+
+- any permission-relevant field changes without updating
+  `approved_permission_digest`, which is only done alongside the named privacy,
+  threat-model, test, and migration evidence;
+- a forbidden entitlement such as `get-task-allow`,
+  `cs.disable-library-validation`, `cs.allow-jit`, or a network or
+  temporary-exception entitlement appears, even in an approved manifest;
+- the artifact claims a network capability.
+
+With `--binary`, the check reads the built artifact's signed entitlements with
+`codesign` and its load commands with `otool -L` and reports any forbidden or
+unreviewed entitlement, changed entitlement value, network framework, unreviewed
+library, hardened-runtime difference, or signature-class difference. The macOS
+`permissions` CI job runs it against `target/release/ghostrace` on every change.
+`tests/test_permissions.py` covers each failure, including a real binary re-signed
+with `get-task-allow`. Signing, notarization, and bundle artifacts arrive with tasks
+0116–0118 and must add their entries here first.

@@ -41,6 +41,8 @@ pub const UNCLASSIFIED_EXECUTABLE_ID: &str = "unclassified";
 pub const SHELL_EXEC_FAILED_REASON: &str = "shell_exec_failed";
 /// Gap reason when the wrapper lost the child before observing its status.
 pub const SHELL_WAIT_FAILED_REASON: &str = "shell_wait_failed";
+/// Gap reason for a run whose start was journaled but whose end never was.
+pub const SHELL_RUN_INCOMPLETE_REASON: &str = "shell_run_incomplete";
 
 const CWD_DIGEST_DOMAIN: &[u8] = b"ghostrace-shell-cwd-digest-v1\0";
 const EXEC_FAILED_EXIT_CODE: i32 = 127;
@@ -92,6 +94,7 @@ pub struct ShellWrapper {
     consent: ConsentStateMachine,
     consent_receipt: ConsentReceipt,
     writer: Writer,
+    journal: Journal,
     origin: IngestionOrigin,
     workspace: Option<AnchoredScope>,
     home: Option<AnchoredScope>,
@@ -154,8 +157,8 @@ impl ShellWrapper {
             return Err(wrapper_error("consent does not match the policy document"));
         }
         let origin = IngestionOrigin::live(config.collector_instance)?;
-        let writer = Writer::new(journal, config.writer)?;
-        Ok(Self { policy, consent, consent_receipt, writer, origin, workspace, home })
+        let writer = Writer::new(journal.clone(), config.writer)?;
+        Ok(Self { policy, consent, consent_receipt, writer, journal, origin, workspace, home })
     }
 
     pub fn consent_receipt(&self) -> &ConsentReceipt {
@@ -202,6 +205,7 @@ impl ShellWrapper {
         if !self.consent.is_capture_allowed() {
             return Err(GhostraceError::PolicyDenied { reason: "consent_not_active".to_owned() });
         }
+        let _run = RUN_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let executable_id = normalize_executable(program);
         let working_directory = self.classify_working_directory(cwd);
         let session_id = SessionId::try_from(format!("shell-{}", Uuid::new_v4().simple()))?;
@@ -220,9 +224,7 @@ impl ShellWrapper {
         command.args(args).current_dir(cwd);
         let status = match command.spawn() {
             Ok(mut child) => {
-                // The terminal delivers SIGINT/SIGQUIT to the whole foreground
-                // group; the wrapper must survive them to record the outcome.
-                let _guard = InterruptGuard::install();
+                let _guard = SignalGuard::install(child.id());
                 child.wait()
             }
             Err(error) => Err(error),
@@ -290,6 +292,55 @@ impl ShellWrapper {
         };
 
         Ok(ShellRunReport { session_id, started_event_id, terminal_event_id, evidence, exit_code })
+    }
+
+    /// Close runs whose `shell_started` has no terminal event and was
+    /// observed more than `older_than` ago, typically because a wrapper
+    /// crashed or was killed. Each receives a `shell_run_incomplete` gap
+    /// parented to the start, with no end time or status. The age bound keeps
+    /// a run still in progress in another process from being closed. Returns
+    /// the number of runs closed.
+    pub fn recover_incomplete_runs(
+        &mut self,
+        older_than: chrono::Duration,
+    ) -> Result<usize, GhostraceError> {
+        if !self.consent.is_capture_allowed() {
+            return Err(GhostraceError::PolicyDenied { reason: "consent_not_active".to_owned() });
+        }
+        let cutoff = Utc::now() - older_than;
+        let events = self.journal.events()?;
+        let closed = events
+            .iter()
+            .filter_map(|stored| stored.event.parent_event_id)
+            .collect::<std::collections::HashSet<_>>();
+        let dangling = events
+            .iter()
+            .map(|stored| &stored.event)
+            .filter(|event| {
+                event.kind == EventKind::ShellStarted
+                    && !closed.contains(&event.event_id)
+                    && event.observed_at <= cutoff
+            })
+            .map(|event| event.event_id)
+            .collect::<Vec<_>>();
+        for started_event_id in &dangling {
+            self.commit(
+                Uuid::new_v4(),
+                Utc::now(),
+                EventPayload::Gap(GapPayload {
+                    source: EventSource::Shell,
+                    reason_code: ReasonCode::try_from(SHELL_RUN_INCOMPLETE_REASON)?,
+                    dropped_count: 0,
+                    from_cursor: None,
+                    to_cursor: None,
+                    volume_digest: None,
+                    root_ids: Vec::new(),
+                    remediation: None,
+                }),
+                Some(*started_event_id),
+            )?;
+        }
+        Ok(dangling.len())
     }
 
     fn commit(
@@ -450,38 +501,83 @@ fn classify(status: ExitStatus) -> (ShellStatus, Option<i32>, Option<u8>) {
     }
 }
 
-/// Ignores SIGINT and SIGQUIT in the wrapper for its lifetime. It is installed
-/// after the child is spawned so the child keeps default dispositions.
-struct InterruptGuard {
-    #[cfg(unix)]
-    previous: [libc::sighandler_t; 2],
+/// Serializes runs within one process: the signal dispositions below are
+/// process-global, so two concurrent runs would overwrite each other's child.
+static RUN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Child process that SIGTERM/SIGHUP are forwarded to while a run waits.
+#[cfg(unix)]
+static FORWARD_PID: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+#[cfg(unix)]
+extern "C" fn forward_to_child(signal: libc::c_int) {
+    let pid = FORWARD_PID.load(std::sync::atomic::Ordering::SeqCst);
+    if pid > 0 {
+        // SAFETY: kill(2) is async-signal-safe.
+        unsafe {
+            libc::kill(pid, signal);
+        }
+    }
 }
 
-impl InterruptGuard {
-    fn install() -> Self {
-        #[cfg(unix)]
-        {
-            // SAFETY: `signal` with SIG_IGN installs no Rust code as a handler.
-            let previous = unsafe {
-                [
-                    libc::signal(libc::SIGINT, libc::SIG_IGN),
-                    libc::signal(libc::SIGQUIT, libc::SIG_IGN),
-                ]
-            };
-            Self { previous }
+/// While the wrapper waits for its child:
+///
+/// - SIGINT and SIGQUIT are ignored. The terminal already delivers them to
+///   the whole foreground process group, so the child receives them itself.
+/// - SIGTERM and SIGHUP (terminal close) are forwarded to the child, so the
+///   wrapper survives to observe and record the child's actual outcome.
+///
+/// The guard is installed after the child is spawned, so the child keeps
+/// default dispositions, and the previous dispositions are restored on drop.
+struct SignalGuard {
+    #[cfg(unix)]
+    previous: Vec<(libc::c_int, libc::sigaction)>,
+}
+
+impl SignalGuard {
+    #[cfg(unix)]
+    fn install(child: u32) -> Self {
+        FORWARD_PID.store(i32::try_from(child).unwrap_or(0), std::sync::atomic::Ordering::SeqCst);
+        let mut previous = Vec::new();
+        for (signal, handler) in [
+            (libc::SIGINT, libc::SIG_IGN),
+            (libc::SIGQUIT, libc::SIG_IGN),
+            (libc::SIGTERM, forward_to_child as extern "C" fn(libc::c_int) as libc::sighandler_t),
+            (libc::SIGHUP, forward_to_child as extern "C" fn(libc::c_int) as libc::sighandler_t),
+        ] {
+            // SAFETY: the handler only performs an atomic load and kill(2);
+            // the previous action is saved and restored on drop.
+            unsafe {
+                let mut action: libc::sigaction = std::mem::zeroed();
+                action.sa_sigaction = handler;
+                action.sa_flags = libc::SA_RESTART;
+                libc::sigemptyset(&mut action.sa_mask);
+                let mut old: libc::sigaction = std::mem::zeroed();
+                if libc::sigaction(signal, &action, &mut old) == 0 {
+                    previous.push((signal, old));
+                }
+            }
         }
-        #[cfg(not(unix))]
+        Self { previous }
+    }
+
+    #[cfg(not(unix))]
+    fn install(_child: u32) -> Self {
         Self {}
     }
 }
 
-impl Drop for InterruptGuard {
+impl Drop for SignalGuard {
     fn drop(&mut self) {
         #[cfg(unix)]
-        // SAFETY: restores the dispositions returned by `install`.
-        unsafe {
-            libc::signal(libc::SIGINT, self.previous[0]);
-            libc::signal(libc::SIGQUIT, self.previous[1]);
+        {
+            for (signal, old) in self.previous.drain(..).rev() {
+                // SAFETY: restores the action saved by `install`.
+                unsafe {
+                    libc::sigaction(signal, &old, std::ptr::null_mut());
+                }
+            }
+            FORWARD_PID.store(0, std::sync::atomic::Ordering::SeqCst);
         }
     }
 }

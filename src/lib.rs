@@ -239,8 +239,8 @@ pub use shell_metadata::{
 };
 pub use shell_wrapper::{
     normalize_executable, ShellRunEvidence, ShellRunReport, ShellWorkspaceRoot, ShellWrapper,
-    ShellWrapperConfig, SHELL_EXEC_FAILED_REASON, SHELL_WAIT_FAILED_REASON, SHELL_WRAPPER_KIND,
-    UNCLASSIFIED_EXECUTABLE_ID,
+    ShellWrapperConfig, SHELL_EXEC_FAILED_REASON, SHELL_RUN_INCOMPLETE_REASON,
+    SHELL_WAIT_FAILED_REASON, SHELL_WRAPPER_KIND, UNCLASSIFIED_EXECUTABLE_ID,
 };
 pub use volume::{
     MountState, VolumeIdentity, VolumeIdentityError, VolumeObservation, VolumeTransition,
