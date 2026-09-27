@@ -106,7 +106,7 @@ impl StartupCursor {
     pub fn from_source_cursor(cursor: &SourceCursor) -> Result<Self, StartupCursorError> {
         let token = CursorToken::new(cursor.clone());
         match token.kind() {
-            CursorKind::Sequence => {
+            CursorKind::Sequence | CursorKind::Sparse => {
                 let Some(position) = token.position() else {
                     return Err(StartupCursorError::Refused(StartupCursorRejection::Corrupted));
                 };
