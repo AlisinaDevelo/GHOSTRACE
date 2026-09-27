@@ -232,3 +232,34 @@ fn query_scope_bounds_and_rule_version_identity_are_reproducible() {
     );
     assert!(oversized_window.is_err());
 }
+
+#[test]
+fn a_third_distinct_source_inside_the_window_is_a_competing_explanation() {
+    let events = fixture();
+    let policy = PolicyProfile::fixture_default();
+    // Shell, Git, and filesystem observations one second apart.
+    let competing = evaluate_correlation(
+        CorrelationRuleId::CrossSourceTemporalAdjacency,
+        &[events[1].clone(), events[2].clone(), events[3].clone()],
+        &policy,
+        &query(&policy),
+    )
+    .expect("competing evaluation");
+    assert_eq!(competing.evidence, Evidence::Unknown);
+    assert_eq!(competing.reason, CorrelationReason::CompetingSources);
+    assert!(competing.gap_limited);
+    assert_eq!(competing.input_event_ids.len(), 3);
+
+    // A third observation from a source already in the pair does not compete.
+    let mut repeat = events[3].clone();
+    repeat.event_id = uuid::Uuid::from_u128(0xfeed);
+    repeat.observed_at = timestamp("2026-01-01T00:00:04Z");
+    let pair = evaluate_correlation(
+        CorrelationRuleId::CrossSourceTemporalAdjacency,
+        &[events[2].clone(), events[3].clone(), repeat],
+        &policy,
+        &query(&policy),
+    )
+    .expect("pair evaluation");
+    assert_eq!(pair.reason, CorrelationReason::BoundedCrossSourceAdjacency);
+}
