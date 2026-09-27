@@ -26,6 +26,10 @@ jobs:
         run: python3 scripts/roadmap.py check
       - name: Test roadmap synchronizer
         run: python3 -m unittest discover -s tests -p 'test_roadmap.py' -v
+      - name: Check compatibility matrix
+        run: python3 scripts/compatibility.py check
+      - name: Test compatibility matrix checker
+        run: python3 -m unittest discover -s tests -p 'test_compatibility.py' -v
       - name: Verify task index
         run: |
           python3 scripts/roadmap.py index > /tmp/ghostrace-roadmap-index.md
