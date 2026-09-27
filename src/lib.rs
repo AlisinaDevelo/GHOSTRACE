@@ -36,6 +36,8 @@ pub mod keychain;
 pub mod local_service;
 pub mod model;
 pub mod native_messaging;
+#[cfg(unix)]
+pub mod native_host_manifest;
 pub mod ordering;
 pub mod parquet_profile;
 pub mod policy;
@@ -214,6 +216,11 @@ pub use native_messaging::{
     MAX_NATIVE_FRAME_BYTES, MAX_NATIVE_MESSAGES_PER_WINDOW, MAX_NATIVE_MESSAGE_DEPTH,
     MAX_NATIVE_MESSAGE_VALUES, NATIVE_MESSAGING_PROTOCOL_VERSION, NATIVE_RATE_WINDOW,
     NATIVE_SESSION_IDLE_TIMEOUT,
+};
+#[cfg(unix)]
+pub use native_host_manifest::{
+    exact_origin, NativeHostAction, NativeHostChange, NativeHostError, NativeHostHealth,
+    NativeHostInstaller, NATIVE_HOST_CHANNELS, NATIVE_HOST_NAME, NATIVE_HOST_RECEIPT_SUFFIX,
 };
 pub use ordering::{
     analyze_temporal_observations, compare_event_order, StableOrderKey, TemporalAnalysis,
