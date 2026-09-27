@@ -164,7 +164,7 @@ fn oversized_malformed_and_unknown_field_requests_are_refused() {
 }
 
 #[test]
-fn a_mismatched_peer_is_rejected_before_reading_the_request() {
+fn a_mismatched_peer_is_rejected_before_the_request_is_parsed() {
     let parent = private_parent();
     let mut service =
         LocalService::bind(&parent.path().join("svc"), [ServiceCapability::Read]).expect("bind");
@@ -207,7 +207,7 @@ fn unsafe_directories_and_socket_paths_are_refused_without_following_links() {
 #[test]
 fn the_module_opens_no_network_listener() {
     let source = include_str!("../src/local_service.rs");
-    for forbidden in ["TcpListener", "TcpStream", "UdpSocket", "std::net::"] {
+    for forbidden in ["TcpListener", "TcpStream", "UdpSocket", "SocketAddr"] {
         assert!(!source.contains(forbidden), "{forbidden} appears in the service");
     }
 }

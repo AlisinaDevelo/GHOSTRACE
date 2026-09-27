@@ -184,7 +184,9 @@ impl LocalService {
                     .map_err(|_| ServiceError::Io)?,
             );
         }
-        write_message(&mut stream, &body)
+        write_message(&mut stream, &body)?;
+        finish(&mut stream);
+        Ok(())
     }
 
     fn admit(&mut self, stream: &mut UnixStream) -> Result<ServiceRequest, ServiceError> {
@@ -227,6 +229,22 @@ impl LocalService {
 impl Drop for LocalService {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.socket_path);
+    }
+}
+
+/// Close the write side, then discard unread input (bounded) so the kernel
+/// does not reset the connection before the client reads a refusal that was
+/// sent without parsing its request.
+fn finish(stream: &mut UnixStream) {
+    let _ = stream.shutdown(std::net::Shutdown::Write);
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
+    let mut sink = [0u8; 4096];
+    let mut drained = 0usize;
+    while drained <= MAX_SERVICE_MESSAGE_BYTES + 4 {
+        match stream.read(&mut sink) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => drained += read,
+        }
     }
 }
 
