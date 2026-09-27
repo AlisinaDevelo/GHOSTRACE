@@ -6,6 +6,7 @@
 
 pub mod authenticated;
 pub mod browser_origin;
+pub mod browser_pairing;
 pub mod claims;
 pub mod consent;
 pub mod correlation;
@@ -59,6 +60,10 @@ pub use authenticated::{
 pub use browser_origin::{
     CanonicalNavigation, NavigationHostClass, NavigationRefusal, PathSegmentClass, UrlShapePolicy,
     MAX_RETAINED_PATH_SEGMENT,
+};
+pub use browser_pairing::{
+    hmac_sha256_for_test, BrowserEventClass, ClientHello, PairedSession, PairingError,
+    PairingRecord, PairingRequest, ProfileClass, PAIRING_LIFETIME_DAYS,
 };
 pub use claims::{
     render_claim, ClaimLocale, ClaimTemplateDescriptor, ClaimTemplateId, EvidenceRequirement,
