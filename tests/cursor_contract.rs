@@ -224,3 +224,17 @@ fn reset_wrap_and_invalidate_controls_require_typed_epochs() {
         .reset_cursor(&identity, &SourceCursor::try_from("opaque-reset").expect("cursor"), &p)
         .is_err());
 }
+
+#[test]
+fn sparse_cursors_advance_across_holes_and_continue_legacy_sequences() {
+    use ghostrace::{CursorKind, CursorToken, CursorTransition, SourceCursor};
+    let token = |raw: &str| CursorToken::new(SourceCursor::try_from(raw).expect("cursor"));
+    let sparse = token("sparse-0-1000");
+    assert_eq!(sparse.kind(), CursorKind::Sparse);
+    assert_eq!(sparse.position(), Some(1000));
+    assert_eq!(sparse.transition(&token("sparse-0-90000")), CursorTransition::Advance);
+    assert_eq!(sparse.transition(&token("sparse-0-999")), CursorTransition::Regression);
+    assert_eq!(sparse.transition(&token("sparse-0-1000")), CursorTransition::Duplicate);
+    // A journal that committed the legacy `cursor-N` shape continues forward.
+    assert_eq!(token("cursor-5").transition(&token("sparse-0-900")), CursorTransition::Advance);
+}

@@ -804,3 +804,13 @@ journal. A source that cannot reconnect to its history must not resume as if no
 interval were lost. A full queue must produce backpressure or an explicit loss
 record. A failed decrypt, malformed fixture, invalid policy, or existing export
 destination must produce a bounded error without dumping sensitive payloads.
+
+FSEvents event IDs are global across the whole system, while a stream only
+delivers events for its selected roots, so consecutive deliveries are normally
+non-contiguous. The collector therefore records native events with a `sparse`
+cursor (`sparse-0-<event ID>`): positions must strictly increase, but a hole is
+not a loss. The journal's skipped-position check applies only to contiguous
+`sequence` cursors. Loss on a live stream comes solely from the source's own
+drop and rescan flags, and across a restart the replayed history covers the
+interval, with history unavailability reported by the existing startup gaps.
+Journals that committed the earlier `cursor-<id>` form continue forward.
