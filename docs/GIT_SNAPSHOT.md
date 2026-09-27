@@ -126,6 +126,25 @@ hooks directory or a hook is a symlink or owned by another user, when any record
 shim drifted, when another hook operation holds the lock, or when a file appears
 during exclusive creation. The digest record is `hooks/ghostrace-hooks.json`.
 
+### Chaining existing hooks
+
+`plan_chained_install` offers the convenient path for repositories that already
+have their own hooks. Instead of refusing, a foreign hook becomes a `chain` action:
+the user's file is moved to `<hook>.ghostrace-preserved` (refusing if that name is
+taken) and a chaining shim runs it first with the original arguments and
+standard input, then runs the delegate with neither, and exits with the user
+hook's status. The plan carries a digest over every change, the content of every
+hook it would preserve, the delegate, and the shim version; `install_chained`
+recomputes the plan under the lock and refuses unless the caller passes that exact
+digest, so nothing is changed without confirmation of what was shown. Disabling a
+chained shim rewrites it to run only the user's hook, so turning GHOSTRACE off
+never turns the user's hook off. `uninstall` restores each preserved hook with its
+original content and mode, and refuses if the preserved copy or the shim changed.
+Neither path reads or writes global Git configuration, and the plain `install`
+still refuses foreign hooks. `tests/git_hook_chaining.rs` covers confirmation,
+argument and ordering behavior on real commits and checkouts, disable/enable,
+exact restoration, drift refusal, and an existing preserved copy.
+
 `tests/git_hook_lifecycle.rs` runs each operation against real repositories and
 checks that a real commit runs the delegate, that a disabled shim does not, that a
 user hook keeps its content and mode, that drifted shims survive uninstall, and

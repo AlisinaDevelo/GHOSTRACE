@@ -4,7 +4,7 @@
   "title": "GHOSTRACE frontmost application observation v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "transition", "observed_at", "app", "dwell_ms", "transient"],
+  "required": ["schema_version", "transition", "observed_at", "app", "dwell_ms", "transient", "basis"],
   "properties": {
     "schema_version": { "const": 1 },
     "transition": { "enum": ["activated", "deactivated", "terminated"] },
@@ -60,7 +60,7 @@
           "required": ["identity", "reason"],
           "properties": {
             "identity": { "const": "unknown" },
-            "reason": { "enum": ["no_identity", "no_process"] }
+            "reason": { "enum": ["no_identity", "no_process", "excluded"] }
           }
         }
       ]
@@ -68,6 +68,7 @@
     "dwell_ms": {
       "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }]
     },
-    "transient": { "type": "boolean" }
+    "transient": { "type": "boolean" },
+    "basis": { "enum": ["direct", "inferred_closure"] }
   }
 }

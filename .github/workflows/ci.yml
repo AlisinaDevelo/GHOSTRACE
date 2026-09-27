@@ -26,6 +26,10 @@ jobs:
         run: python3 scripts/roadmap.py check
       - name: Test roadmap synchronizer
         run: python3 -m unittest discover -s tests -p 'test_roadmap.py' -v
+      - name: Check compatibility matrix
+        run: python3 scripts/compatibility.py check
+      - name: Test compatibility matrix checker
+        run: python3 -m unittest discover -s tests -p 'test_compatibility.py' -v
       - name: Verify task index
         run: |
           python3 scripts/roadmap.py index > /tmp/ghostrace-roadmap-index.md
@@ -44,6 +48,26 @@ jobs:
         run: python3 scripts/reproducibility.py check
       - name: Test reproducibility contract
         run: python3 -m unittest discover -s tests -p 'test_reproducibility.py' -v
+
+  permissions:
+    name: permissions
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
+        with:
+          toolchain: 1.88.0
+      - name: Test permission manifest contract
+        run: python3 -m unittest discover -s tests -p 'test_permissions.py' -v
+      - name: Build release artifact
+        run: cargo build --release --locked
+      - name: Compare signed artifact with the reviewed manifest
+        run: python3 scripts/permissions.py check --binary target/release/ghostrace
 
   fmt:
     name: rustfmt

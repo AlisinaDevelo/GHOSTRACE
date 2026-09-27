@@ -231,12 +231,18 @@ it exits, both under a live ingestion origin with the started event as parent:
   terminating signal for a signaled child. The wrapper returns the child's exit
   code, or `128 + signal`, unchanged to its caller.
 - A program that cannot be started produces a `gap` (`shell_exec_failed`) with no
-  end status and exit code 127. A wrapper killed before the child exits leaves an
-  unmatched `shell_started`, which is an incomplete run, not a success.
+  end status and exit code 127.
+- A wrapper killed before the child exits leaves an unmatched `shell_started`.
+  Explanations report such a run as having no terminal observation, and
+  `recover_incomplete_runs(older_than)` later closes each one with a
+  `shell_run_incomplete` gap parented to the start, never with an end time or
+  status. The age bound keeps a run that is still live in another process open.
 
-The wrapper ignores SIGINT and SIGQUIT only while it waits, after the child has been
-spawned with default dispositions, so terminal interrupts reach the command and the
-wrapper can still record the outcome. `executable_id`, `working_directory`, and
+While it waits, and only after the child has been spawned with default
+dispositions, the wrapper ignores SIGINT and SIGQUIT (the terminal already delivers
+them to the command) and forwards SIGTERM and SIGHUP to the child, so a terminal
+close or a kill of the wrapper still ends in a recorded outcome. Runs are serialized
+within one process because these dispositions are process-global. `executable_id`, `working_directory`, and
 `signal` are optional v1 payload fields; envelopes without them are unchanged.
 
 ### Shell secret-leakage red-team boundary
@@ -280,6 +286,23 @@ never establishes that an application caused a filesystem change. The corpus
 [`fixtures/frontmost-identity-v1.json`](../fixtures/frontmost-identity-v1.json) and
 schema [`schemas/frontmost-observation-v1.json`](../schemas/frontmost-observation-v1.json)
 are exercised by `tests/frontmost_identity.rs`.
+
+Coverage is bounded as well as identity. Every app record carries a `basis`:
+`direct` when a notification reported it, or `inferred_closure` when the tracker
+ended a session because the notification that should have ended it was not seen.
+An activation while another session is open closes that session at the
+activation time. Sleep, screen lock, fast user switching, and observer stops close
+the open session at the boundary and emit a `suspended` coverage record; the
+matching wake, unlock, session return, or observer start emits `resumed` with the
+time coverage was lost. An observer start without a clean stop emits
+`interrupted`, drops the open session without a dwell, and reports the interval
+since the last observation as a gap, so no session is ever extended across
+downtime. Private applications and user exclusions are replaced by an `excluded`
+unknown app before any record exists. The transition table and sequences in
+[`fixtures/frontmost-coverage-v1.json`](../fixtures/frontmost-coverage-v1.json)
+cover startup, login, fast user switching, lock, sleep and wake, Mission Control,
+termination, missed deactivations, and observer restarts; `tests/frontmost_coverage.rs`
+also checks that no dwell interval contains a suspension or interruption.
 
 ## FSEvents lifecycle boundary
 
@@ -338,7 +361,13 @@ denied after relocation through device/inode binding, while symlink redirects fa
 closed during canonicalization and selected-root containment. Exact transport duplicates are
 suppressed only when their source event ID, raw flags, and path digest all match a
 bounded event-ID window; the suppression count is exposed in collector status and
-never becomes a missing filesystem event. Source coalescing, repeated modification,
+never becomes a missing filesystem event. FSEvents does not promise ascending IDs
+across coalesced deliveries, so each drained batch is ordered by event ID (except a
+batch spanning an ID wraparound). A distinct delivery whose ID is still at or below
+the committed cursor cannot advance it: it is counted as `out_of_order_events` and
+recorded as an `fsevents_out_of_order` gap that recommends a rescan but, like
+`cursor_jump`, leaves the cursor valid, so collection continues instead of stopping
+with a cursor regression. Source coalescing, repeated modification,
 and the source's `OwnEvent` flag remain explicit path-free qualifiers; OwnEvent is
 accepted as evidence for unrelated paths rather than treated as a blanket drop rule.
 A rename is recorded with an unknown old-to-new pairing unless a future bounded

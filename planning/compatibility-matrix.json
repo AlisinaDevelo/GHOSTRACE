@@ -1,0 +1,206 @@
+{
+  "schema_version": 1,
+  "deprecation_policy": {
+    "minimum_window_releases": 2,
+    "requires": [
+      "announced_in",
+      "removal_not_before",
+      "migration_tool",
+      "rollback_evidence",
+      "release_note"
+    ]
+  },
+  "formats": [
+    {
+      "id": "journal-database",
+      "kind": "database",
+      "format": "ghostrace-journal-v1 (migrations 0000-0005)",
+      "current_version": 5,
+      "supported_read": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "write_version": 5,
+      "golden": "migrations/0001_init.sql",
+      "status": "supported",
+      "cases": {
+        "current": {
+          "outcome": "accept",
+          "test": "tests/compatibility_matrix.rs::legacy_journal_survives_upgrade_query_explain_export_verify_and_delete"
+        },
+        "backward": {
+          "outcome": "accept_with_upgrade",
+          "test": "tests/migrations.rs::legacy_v1_database_upgrades_and_reopens_idempotently"
+        },
+        "forward": {
+          "outcome": "refuse",
+          "test": "tests/compatibility_matrix.rs::partially_migrated_and_future_journals_are_refused"
+        },
+        "downgrade": {
+          "outcome": "refuse",
+          "test": "tests/migrations.rs::unsupported_downgrade_refuses_startup"
+        },
+        "partially_migrated": {
+          "outcome": "refuse",
+          "test": "tests/compatibility_matrix.rs::partially_migrated_and_future_journals_are_refused"
+        },
+        "corrupted": {
+          "outcome": "refuse",
+          "test": "tests/migrations.rs::modified_migration_refuses_startup_without_echoing_path"
+        }
+      }
+    },
+    {
+      "id": "event-envelope",
+      "kind": "json_contract",
+      "format": "schemas/event-envelope-v1.json",
+      "current_version": 1,
+      "supported_read": [
+        1
+      ],
+      "write_version": 1,
+      "golden": "fixtures/event-envelope-v1.golden.json",
+      "status": "supported",
+      "cases": {
+        "current": {
+          "outcome": "accept",
+          "test": "tests/compatibility_matrix.rs::event_envelope_v1_accepts_its_golden_and_refuses_every_other_variant"
+        },
+        "additive_optional_fields": {
+          "outcome": "accept",
+          "test": "tests/shell_run_wrapper.rs::wrapper_events_validate_against_the_published_event_schema"
+        },
+        "forward": {
+          "outcome": "refuse",
+          "test": "tests/compatibility_matrix.rs::event_envelope_v1_accepts_its_golden_and_refuses_every_other_variant"
+        },
+        "backward": {
+          "outcome": "refuse",
+          "test": "tests/compatibility_matrix.rs::event_envelope_v1_accepts_its_golden_and_refuses_every_other_variant"
+        },
+        "unknown_field": {
+          "outcome": "refuse",
+          "test": "tests/compatibility_matrix.rs::event_envelope_v1_accepts_its_golden_and_refuses_every_other_variant"
+        },
+        "corrupted": {
+          "outcome": "refuse",
+          "test": "tests/compatibility_matrix.rs::event_envelope_v1_accepts_its_golden_and_refuses_every_other_variant"
+        }
+      }
+    },
+    {
+      "id": "export-stream",
+      "kind": "stream",
+      "format": "schemas/export-registry-v1.json (manifest, event, gap, claim, policy, source coverage)",
+      "current_version": 1,
+      "supported_read": [
+        1
+      ],
+      "write_version": 1,
+      "golden": "fixtures/export-manifest-v1.golden.json",
+      "status": "supported",
+      "cases": {
+        "current": {
+          "outcome": "accept",
+          "test": "tests/compatibility_matrix.rs::legacy_journal_survives_upgrade_query_explain_export_verify_and_delete"
+        },
+        "forward": {
+          "outcome": "refuse",
+          "test": "tests/compatibility_matrix.rs::export_stream_refuses_forward_backward_unknown_mixed_corrupted_and_truncated_input"
+        },
+        "backward": {
+          "outcome": "refuse",
+          "test": "tests/compatibility_matrix.rs::export_stream_refuses_forward_backward_unknown_mixed_corrupted_and_truncated_input"
+        },
+        "unknown_field": {
+          "outcome": "refuse",
+          "test": "tests/compatibility_matrix.rs::export_stream_refuses_forward_backward_unknown_mixed_corrupted_and_truncated_input"
+        },
+        "mixed": {
+          "outcome": "refuse",
+          "test": "tests/compatibility_matrix.rs::export_stream_refuses_forward_backward_unknown_mixed_corrupted_and_truncated_input"
+        },
+        "corrupted": {
+          "outcome": "refuse",
+          "test": "tests/compatibility_matrix.rs::export_stream_refuses_forward_backward_unknown_mixed_corrupted_and_truncated_input"
+        },
+        "digest_drift": {
+          "outcome": "refuse",
+          "test": "tests/export_schema.rs::export_validator_rejects_mixed_versions_unknown_fields_and_digest_drift"
+        }
+      }
+    },
+    {
+      "id": "git-snapshot-metadata",
+      "kind": "json_contract",
+      "format": "schemas/git-snapshot-metadata-v1.json",
+      "current_version": 1,
+      "supported_read": [
+        1
+      ],
+      "write_version": 1,
+      "golden": "fixtures/git-snapshot-metadata-v1.golden.json",
+      "status": "supported",
+      "cases": {
+        "current": {
+          "outcome": "accept",
+          "test": "tests/compatibility_matrix.rs::git_snapshot_v1_accepts_its_golden_and_refuses_every_other_variant"
+        },
+        "forward": {
+          "outcome": "refuse",
+          "test": "tests/compatibility_matrix.rs::git_snapshot_v1_accepts_its_golden_and_refuses_every_other_variant"
+        },
+        "backward": {
+          "outcome": "refuse",
+          "test": "tests/compatibility_matrix.rs::git_snapshot_v1_accepts_its_golden_and_refuses_every_other_variant"
+        },
+        "unknown_field": {
+          "outcome": "refuse",
+          "test": "tests/compatibility_matrix.rs::git_snapshot_v1_accepts_its_golden_and_refuses_every_other_variant"
+        },
+        "corrupted": {
+          "outcome": "refuse",
+          "test": "tests/compatibility_matrix.rs::git_snapshot_v1_accepts_its_golden_and_refuses_every_other_variant"
+        }
+      }
+    },
+    {
+      "id": "shell-execution-metadata",
+      "kind": "json_contract",
+      "format": "schemas/shell-execution-metadata-v1.json",
+      "current_version": 1,
+      "supported_read": [
+        1
+      ],
+      "write_version": 1,
+      "golden": "fixtures/shell-execution-metadata-v1.golden.json",
+      "status": "supported",
+      "cases": {
+        "current": {
+          "outcome": "accept",
+          "test": "tests/compatibility_matrix.rs::shell_metadata_v1_accepts_its_golden_and_refuses_every_other_variant"
+        },
+        "forward": {
+          "outcome": "refuse",
+          "test": "tests/compatibility_matrix.rs::shell_metadata_v1_accepts_its_golden_and_refuses_every_other_variant"
+        },
+        "backward": {
+          "outcome": "refuse",
+          "test": "tests/compatibility_matrix.rs::shell_metadata_v1_accepts_its_golden_and_refuses_every_other_variant"
+        },
+        "unknown_field": {
+          "outcome": "refuse",
+          "test": "tests/compatibility_matrix.rs::shell_metadata_v1_accepts_its_golden_and_refuses_every_other_variant"
+        },
+        "corrupted": {
+          "outcome": "refuse",
+          "test": "tests/compatibility_matrix.rs::shell_metadata_v1_accepts_its_golden_and_refuses_every_other_variant"
+        }
+      }
+    }
+  ],
+  "retired": []
+}

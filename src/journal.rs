@@ -1868,11 +1868,16 @@ fn same_event_semantics(left: &EventEnvelope, right: &EventEnvelope) -> bool {
     serde_json::to_vec(left).ok() == serde_json::to_vec(right).ok()
 }
 
+/// Gap reasons that recommend a rescan but leave the source stream continuous,
+/// so they must not invalidate the cursor.
+const NON_INVALIDATING_GAP_REASONS: [&str; 2] = ["cursor_jump", "fsevents_out_of_order"];
+
 fn event_requires_recovery_gap(event: &EventEnvelope) -> bool {
     matches!(
         &event.payload,
         crate::model::EventPayload::Gap(payload)
-            if payload.remediation.is_some() && payload.reason_code.as_str() != "cursor_jump"
+            if payload.remediation.is_some()
+                && !NON_INVALIDATING_GAP_REASONS.contains(&payload.reason_code.as_str())
     )
 }
 

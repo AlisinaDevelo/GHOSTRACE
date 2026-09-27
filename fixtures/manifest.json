@@ -198,6 +198,22 @@
       "seed": "ghostrace-fixture-seed-v1",
       "sha256": "d19fd1805ae2591a9ac6b83afc0087abd748a65c6e4a2b15042e23d11f4d9491",
       "bytes": 22131
+    },
+    {
+      "path": "fixtures/frontmost-coverage-v1.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "f5f5288bff84668475dfbfde33e9e6e0ce1051b45d741fcfee6793b150a76579",
+      "bytes": 19885
+    },
+    {
+      "path": "fixtures/browser-threat-corpus-v1.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "2970eb5544d72f34e147591d39acbf9a722cd9a2dab26a0187fb6f49dc5f41f7",
+      "bytes": 21608
     }
   ],
   "privacy": {

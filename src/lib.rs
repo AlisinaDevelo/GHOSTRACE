@@ -108,10 +108,12 @@ pub use fault::{FaultAction, FaultPlan, FaultPoint, FaultSchedule};
 pub use fixture::{ingest_fixture, read_fixture, FixtureIngestReport};
 pub use frontmost::{
     FrontmostActivationPolicy, FrontmostApp, FrontmostAppKind, FrontmostAppLocation,
-    FrontmostError, FrontmostNormalizer, FrontmostObservation, FrontmostRawObservation,
-    FrontmostSessionTracker, FrontmostSigningIdentity, FrontmostSigningInput, FrontmostTransition,
-    FrontmostUnknownReason, FRONTMOST_IDENTITY_CORPUS_JSON, FRONTMOST_SCHEMA_JSON,
-    FRONTMOST_SCHEMA_VERSION, FRONTMOST_TRANSIENT_DWELL_MS, MAX_FRONTMOST_RAW_BYTES,
+    FrontmostBasis, FrontmostCoverageBoundary, FrontmostCoverageState, FrontmostError,
+    FrontmostExclusions, FrontmostNormalizer, FrontmostObservation, FrontmostRawObservation,
+    FrontmostRecord, FrontmostSessionTracker, FrontmostSigningIdentity, FrontmostSigningInput,
+    FrontmostSystemEvent, FrontmostTransition, FrontmostUnknownReason,
+    FRONTMOST_IDENTITY_CORPUS_JSON, FRONTMOST_SCHEMA_JSON, FRONTMOST_SCHEMA_VERSION,
+    FRONTMOST_TRANSIENT_DWELL_MS, MAX_FRONTMOST_RAW_BYTES,
 };
 pub use fsevents::{
     CallbackHealth, FseventsError, FseventsEvent, FseventsOptions, FseventsStream,
@@ -150,8 +152,9 @@ pub use git_history::{
     GIT_HISTORY_TRANSITION_SCHEMA_VERSION,
 };
 pub use git_hooks::{
-    GitHookAction, GitHookChange, GitHookError, GitHookHealth, GitHookManager, GitHookVerification,
-    GIT_HOOK_RECORD_NAME, GIT_HOOK_SHIM_VERSION, MANAGED_GIT_HOOKS,
+    GitHookAction, GitHookChange, GitHookError, GitHookHealth, GitHookManager, GitHookPlan,
+    GitHookVerification, GIT_HOOK_PRESERVED_SUFFIX, GIT_HOOK_RECORD_NAME, GIT_HOOK_SHIM_VERSION,
+    MANAGED_GIT_HOOKS,
 };
 pub use git_identity::{
     GitContinuity, GitFilesystemIdentity, GitIdentity, GitIdentityError, GitRepositoryKind,
@@ -242,8 +245,8 @@ pub use shell_metadata::{
 };
 pub use shell_wrapper::{
     normalize_executable, ShellRunEvidence, ShellRunReport, ShellWorkspaceRoot, ShellWrapper,
-    ShellWrapperConfig, SHELL_EXEC_FAILED_REASON, SHELL_WAIT_FAILED_REASON, SHELL_WRAPPER_KIND,
-    UNCLASSIFIED_EXECUTABLE_ID,
+    ShellWrapperConfig, SHELL_EXEC_FAILED_REASON, SHELL_RUN_INCOMPLETE_REASON,
+    SHELL_WAIT_FAILED_REASON, SHELL_WRAPPER_KIND, UNCLASSIFIED_EXECUTABLE_ID,
 };
 pub use volume::{
     MountState, VolumeIdentity, VolumeIdentityError, VolumeObservation, VolumeTransition,

@@ -1,0 +1,415 @@
+{
+  "schema_version": 1,
+  "program": "ghostrace-browser-threat-corpus-v1",
+  "privacy": {
+    "synthetic_only": true,
+    "user_data_included": false,
+    "network_required": false
+  },
+  "layers": [
+    "native_host_framing",
+    "protocol_validator",
+    "pairing",
+    "sanitized_url",
+    "policy",
+    "journal",
+    "native_host_install"
+  ],
+  "outcomes": [
+    "reject",
+    "record_gap",
+    "require_repairing",
+    "accept_canonicalized"
+  ],
+  "categories": [
+    "spoofed_origin",
+    "oversized_frame",
+    "duplicate_message",
+    "replayed_message",
+    "unicode_confusion",
+    "url_confusion",
+    "extension_replacement",
+    "downgrade"
+  ],
+  "cases": [
+    {
+      "id": "url-userinfo-query-fragment",
+      "category": "url_confusion",
+      "layer": "sanitized_url",
+      "enforced_by": "SanitizedUrl::parse",
+      "status": "enforced",
+      "input": {
+        "url": "https://user:secret@example.com/a?token=1#frag"
+      },
+      "outcome": "accept_canonicalized",
+      "canonical": "https://example.com/a",
+      "note": "Credentials, query, and fragment are removed before storage."
+    },
+    {
+      "id": "url-idn-homograph",
+      "category": "unicode_confusion",
+      "layer": "sanitized_url",
+      "enforced_by": "SanitizedUrl::parse",
+      "status": "enforced",
+      "input": {
+        "url": "https://аpple.com/"
+      },
+      "outcome": "accept_canonicalized",
+      "canonical": "https://xn--pple-43d.com/",
+      "note": "A Cyrillic homograph is stored as punycode, so it can never render as the Latin name."
+    },
+    {
+      "id": "url-fullwidth-host",
+      "category": "unicode_confusion",
+      "layer": "sanitized_url",
+      "enforced_by": "SanitizedUrl::parse",
+      "status": "enforced",
+      "input": {
+        "url": "https://ｅｘａｍｐｌｅ.com/"
+      },
+      "outcome": "accept_canonicalized",
+      "canonical": "https://example.com/",
+      "note": "IDNA mapping folds fullwidth letters to one canonical host."
+    },
+    {
+      "id": "url-backslash-authority",
+      "category": "url_confusion",
+      "layer": "sanitized_url",
+      "enforced_by": "SanitizedUrl::parse",
+      "status": "enforced",
+      "input": {
+        "url": "https://example.com\\@evil.invalid/"
+      },
+      "outcome": "accept_canonicalized",
+      "canonical": "https://example.com/@evil.invalid/",
+      "note": "WHATWG parsing treats the backslash as a path separator; the host stays example.com."
+    },
+    {
+      "id": "url-fragment-authority",
+      "category": "url_confusion",
+      "layer": "sanitized_url",
+      "enforced_by": "SanitizedUrl::parse",
+      "status": "enforced",
+      "input": {
+        "url": "https://evil.invalid#@example.com"
+      },
+      "outcome": "accept_canonicalized",
+      "canonical": "https://evil.invalid/",
+      "note": "The apparent example.com authority is inside the removed fragment."
+    },
+    {
+      "id": "url-percent-encoded-host",
+      "category": "url_confusion",
+      "layer": "sanitized_url",
+      "enforced_by": "SanitizedUrl::parse",
+      "status": "enforced",
+      "input": {
+        "url": "https://%65xample.com/"
+      },
+      "outcome": "accept_canonicalized",
+      "canonical": "https://example.com/"
+    },
+    {
+      "id": "url-tab-in-host",
+      "category": "unicode_confusion",
+      "layer": "sanitized_url",
+      "enforced_by": "SanitizedUrl::parse",
+      "status": "enforced",
+      "input": {
+        "url": "https://exa\tmple.com/"
+      },
+      "outcome": "accept_canonicalized",
+      "canonical": "https://example.com/",
+      "note": "Tabs and newlines are stripped by the URL standard before parsing."
+    },
+    {
+      "id": "url-rtl-override-path",
+      "category": "unicode_confusion",
+      "layer": "sanitized_url",
+      "enforced_by": "SanitizedUrl::parse",
+      "status": "enforced",
+      "input": {
+        "url": "https://example.com/‮fdp.exe"
+      },
+      "outcome": "accept_canonicalized",
+      "canonical": "https://example.com/%E2%80%AEfdp.exe",
+      "note": "A bidirectional override is percent-encoded and cannot reorder rendered text."
+    },
+    {
+      "id": "url-default-port-case",
+      "category": "url_confusion",
+      "layer": "sanitized_url",
+      "enforced_by": "SanitizedUrl::parse",
+      "status": "enforced",
+      "input": {
+        "url": "HTTPS://EXAMPLE.COM:443/Path"
+      },
+      "outcome": "accept_canonicalized",
+      "canonical": "https://example.com/Path"
+    },
+    {
+      "id": "url-trailing-dot-host",
+      "category": "spoofed_origin",
+      "layer": "sanitized_url",
+      "enforced_by": "SanitizedUrl::parse",
+      "status": "enforced",
+      "input": {
+        "url": "https://example.com./"
+      },
+      "outcome": "accept_canonicalized",
+      "canonical": "https://example.com./",
+      "open_finding": "The trailing-dot form is a second canonical spelling of the same origin; origin canonicalization must fold it (task 0106)."
+    },
+    {
+      "id": "url-loopback-hex",
+      "category": "spoofed_origin",
+      "layer": "sanitized_url",
+      "enforced_by": "SanitizedUrl::parse",
+      "status": "enforced",
+      "input": {
+        "url": "https://0x7f.1/"
+      },
+      "outcome": "accept_canonicalized",
+      "canonical": "https://127.0.0.1/",
+      "open_finding": "Loopback and private-network hosts are retained and can reveal internal services; task 0106 must classify or withhold them."
+    },
+    {
+      "id": "url-path-secret",
+      "category": "url_confusion",
+      "layer": "sanitized_url",
+      "enforced_by": "SanitizedUrl::parse",
+      "status": "enforced",
+      "input": {
+        "url": "https://example.com/reset/Zt7xQ-secret-token"
+      },
+      "outcome": "accept_canonicalized",
+      "canonical": "https://example.com/reset/Zt7xQ-secret-token",
+      "open_finding": "Paths are retained and may carry secrets; task 0106 must reduce navigation evidence to an origin or bounded path class.",
+      "accepted_risk": "R-browser-04"
+    },
+    {
+      "id": "url-javascript-scheme",
+      "category": "spoofed_origin",
+      "layer": "sanitized_url",
+      "enforced_by": "SanitizedUrl::parse",
+      "status": "enforced",
+      "input": {
+        "url": "javascript:alert(1)"
+      },
+      "outcome": "reject"
+    },
+    {
+      "id": "url-data-scheme",
+      "category": "spoofed_origin",
+      "layer": "sanitized_url",
+      "enforced_by": "SanitizedUrl::parse",
+      "status": "enforced",
+      "input": {
+        "url": "data:text/html,hi"
+      },
+      "outcome": "reject"
+    },
+    {
+      "id": "url-file-scheme",
+      "category": "spoofed_origin",
+      "layer": "sanitized_url",
+      "enforced_by": "SanitizedUrl::parse",
+      "status": "enforced",
+      "input": {
+        "url": "file:///etc/passwd"
+      },
+      "outcome": "reject"
+    },
+    {
+      "id": "url-extension-scheme",
+      "category": "spoofed_origin",
+      "layer": "sanitized_url",
+      "enforced_by": "SanitizedUrl::parse",
+      "status": "enforced",
+      "input": {
+        "url": "chrome-extension://abcdefghijklmnopabcdefghijklmnop/page.html"
+      },
+      "outcome": "reject"
+    },
+    {
+      "id": "url-oversized",
+      "category": "oversized_frame",
+      "layer": "sanitized_url",
+      "enforced_by": "SanitizedUrl::parse",
+      "status": "enforced",
+      "input": {
+        "url": "https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "outcome": "reject",
+      "note": "URLs above the byte bound are refused before parsing."
+    },
+    {
+      "id": "frame-over-limit",
+      "category": "oversized_frame",
+      "layer": "native_host_framing",
+      "enforced_by": "task 0103",
+      "status": "specified",
+      "input": {
+        "description": "A native-messaging frame whose length prefix exceeds the protocol bound."
+      },
+      "outcome": "reject"
+    },
+    {
+      "id": "frame-length-mismatch",
+      "category": "oversized_frame",
+      "layer": "native_host_framing",
+      "enforced_by": "task 0103",
+      "status": "specified",
+      "input": {
+        "description": "A length prefix that disagrees with the bytes actually delivered before EOF."
+      },
+      "outcome": "reject"
+    },
+    {
+      "id": "frame-invalid-utf8",
+      "category": "oversized_frame",
+      "layer": "native_host_framing",
+      "enforced_by": "task 0103",
+      "status": "specified",
+      "input": {
+        "description": "A frame body that is not valid UTF-8 JSON."
+      },
+      "outcome": "reject"
+    },
+    {
+      "id": "message-unknown-type",
+      "category": "downgrade",
+      "layer": "protocol_validator",
+      "enforced_by": "task 0103",
+      "status": "specified",
+      "input": {
+        "description": "A message type the negotiated protocol version does not define."
+      },
+      "outcome": "reject"
+    },
+    {
+      "id": "protocol-version-downgrade",
+      "category": "downgrade",
+      "layer": "protocol_validator",
+      "enforced_by": "task 0103",
+      "status": "specified",
+      "input": {
+        "description": "An extension that re-negotiates an older protocol version after pairing."
+      },
+      "outcome": "require_repairing"
+    },
+    {
+      "id": "message-duplicate-sequence",
+      "category": "replayed_message",
+      "layer": "pairing",
+      "enforced_by": "task 0104",
+      "status": "specified",
+      "input": {
+        "description": "A message repeating an already-accepted sequence number within the session."
+      },
+      "outcome": "reject"
+    },
+    {
+      "id": "message-replayed-session",
+      "category": "replayed_message",
+      "layer": "pairing",
+      "enforced_by": "task 0104",
+      "status": "specified",
+      "input": {
+        "description": "A message carrying a valid MAC from an earlier pairing session."
+      },
+      "outcome": "reject"
+    },
+    {
+      "id": "message-sequence-gap",
+      "category": "duplicate_message",
+      "layer": "pairing",
+      "enforced_by": "task 0104",
+      "status": "specified",
+      "input": {
+        "description": "A sequence number that skips ahead, meaning messages were lost."
+      },
+      "outcome": "record_gap"
+    },
+    {
+      "id": "extension-id-unpaired",
+      "category": "spoofed_origin",
+      "layer": "pairing",
+      "enforced_by": "task 0104",
+      "status": "specified",
+      "input": {
+        "description": "A message from an extension ID that was never paired."
+      },
+      "outcome": "reject"
+    },
+    {
+      "id": "extension-replacement",
+      "category": "extension_replacement",
+      "layer": "pairing",
+      "enforced_by": "task 0104",
+      "status": "specified",
+      "input": {
+        "description": "The paired extension ID now presents a different key or unpacked build."
+      },
+      "outcome": "require_repairing",
+      "accepted_risk": "R-browser-02"
+    },
+    {
+      "id": "extension-permission-drift",
+      "category": "extension_replacement",
+      "layer": "policy",
+      "enforced_by": "task 0105",
+      "status": "specified",
+      "input": {
+        "description": "The extension manifest gains permissions beyond the reviewed set (for example history or all-URL host access)."
+      },
+      "outcome": "require_repairing"
+    },
+    {
+      "id": "navigation-from-private-window",
+      "category": "spoofed_origin",
+      "layer": "policy",
+      "enforced_by": "task 0108",
+      "status": "specified",
+      "input": {
+        "description": "A navigation message flagged as incognito or private context."
+      },
+      "outcome": "reject"
+    },
+    {
+      "id": "navigation-fabricated-by-compromised-extension",
+      "category": "spoofed_origin",
+      "layer": "pairing",
+      "enforced_by": "task 0104",
+      "status": "specified",
+      "input": {
+        "description": "A correctly paired but compromised extension reports navigations that did not happen."
+      },
+      "outcome": "record_gap",
+      "accepted_risk": "R-browser-01"
+    },
+    {
+      "id": "message-flood",
+      "category": "oversized_frame",
+      "layer": "journal",
+      "enforced_by": "task 0103",
+      "status": "specified",
+      "input": {
+        "description": "Messages arrive faster than the writer admits them."
+      },
+      "outcome": "record_gap"
+    },
+    {
+      "id": "native-host-manifest-replaced",
+      "category": "extension_replacement",
+      "layer": "native_host_install",
+      "enforced_by": "task 0102",
+      "status": "specified",
+      "input": {
+        "description": "The native-host manifest is edited to allow another extension origin."
+      },
+      "outcome": "require_repairing",
+      "accepted_risk": "R-browser-03"
+    }
+  ]
+}
