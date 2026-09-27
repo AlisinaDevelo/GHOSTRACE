@@ -351,10 +351,22 @@ mod unix {
             .spawn()
             .expect("process-inspection child");
         let pid = child.id().to_string();
-        let inspection = Command::new("/bin/ps")
+        let inspection = match Command::new("/bin/ps")
             .args(["-ww", "-p", &pid, "-o", "command="])
             .output()
-            .expect("process inspection");
+        {
+            Ok(output) => output,
+            // A sandbox that forbids process inspection (the offline lane's
+            // sandbox-exec profile) leaves nothing external to observe; that
+            // is not a retention failure, so the exposure check is skipped.
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                let _ = child.kill();
+                let _ = child.wait();
+                eprintln!("process inspection is not permitted here; OS exposure not observable");
+                return;
+            }
+            Err(error) => panic!("process inspection: {error}"),
+        };
         let _ = child.kill();
         let _ = child.wait();
         assert!(inspection.status.success());
