@@ -38,6 +38,9 @@ pub const GIT_HOOK_SHIM_VERSION: u32 = 1;
 pub const GIT_HOOK_RECORD_NAME: &str = "ghostrace-hooks.json";
 const LOCK_NAME: &str = "ghostrace-hooks.lock";
 const SHIM_MARKER: &str = "# ghostrace-hook-shim";
+/// Suffix of a user hook preserved behind a chaining shim.
+pub const GIT_HOOK_PRESERVED_SUFFIX: &str = ".ghostrace-preserved";
+use GIT_HOOK_PRESERVED_SUFFIX as PRESERVED_SUFFIX;
 
 #[derive(Clone, Debug, Eq, PartialEq, Error)]
 pub enum GitHookError {
@@ -63,6 +66,10 @@ pub enum GitHookError {
     InvalidDelegate,
     #[error("the hook record is unreadable")]
     InvalidRecord,
+    #[error("the confirmed plan no longer matches the repository")]
+    ConfirmationMismatch,
+    #[error("a preserved copy of hook {0} already exists")]
+    PreservedHookExists(&'static str),
     #[error("a filesystem operation on the hooks directory failed")]
     Io,
 }
@@ -71,6 +78,10 @@ pub enum GitHookError {
 #[serde(rename_all = "snake_case")]
 pub enum GitHookAction {
     Create,
+    /// Preserve an existing user hook and install a shim that runs it first.
+    Chain,
+    /// Put a preserved user hook back in place.
+    Restore,
     Replace,
     Enable,
     Disable,
@@ -100,6 +111,8 @@ pub enum GitHookHealth {
 pub struct GitHookVerification {
     pub hook: &'static str,
     pub health: GitHookHealth,
+    /// Health of the preserved user hook the shim chains to, if any.
+    pub preserved: Option<GitHookHealth>,
     pub enabled: bool,
     pub shim_version: u32,
 }
@@ -110,6 +123,24 @@ struct RecordEntry {
     sha256: String,
     shim_version: u32,
     enabled: bool,
+    /// Digest of the user hook moved aside when this shim chains to it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    preserved_sha256: Option<String>,
+}
+
+impl RecordEntry {
+    /// A chained shim stays executable while disabled so the user's hook
+    /// keeps running; only a plain shim is disabled by clearing execute bits.
+    fn expected_executable(&self) -> bool {
+        self.enabled || self.preserved_sha256.is_some()
+    }
+}
+
+/// A chained-install plan and the digest a caller must confirm to apply it.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct GitHookPlan {
+    pub changes: Vec<GitHookChange>,
+    pub digest: String,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -158,7 +189,9 @@ impl GitHookManager {
                     (FileState::Regular { content, .. }, Some(entry))
                         if digest(&content) == entry.sha256 =>
                     {
-                        if content == self.shim(hook) && entry.enabled {
+                        if content == self.shim_for(hook, entry.preserved_sha256.is_some(), true)
+                            && entry.enabled
+                        {
                             GitHookAction::Unchanged
                         } else {
                             GitHookAction::Replace
@@ -182,7 +215,9 @@ impl GitHookManager {
         let plan = self.plan_install(repository)?;
         let mut record = read_record(&hooks)?;
         for change in &plan {
-            let content = self.shim(change.hook);
+            let chained =
+                record.hooks.get(change.hook).is_some_and(|entry| entry.preserved_sha256.is_some());
+            let content = self.shim_for(change.hook, chained, true);
             match change.action {
                 GitHookAction::Create => write_new(&change.path, &content)?,
                 GitHookAction::Replace => replace(&change.path, &content)?,
@@ -194,6 +229,10 @@ impl GitHookManager {
                     sha256: digest(&content),
                     shim_version: GIT_HOOK_SHIM_VERSION,
                     enabled: true,
+                    preserved_sha256: record
+                        .hooks
+                        .get(change.hook)
+                        .and_then(|entry| entry.preserved_sha256.clone()),
                 },
             );
         }
@@ -209,10 +248,21 @@ impl GitHookManager {
             .iter()
             .filter_map(|hook| record.hooks.get(*hook).map(|entry| (hook, entry)))
             .map(|(hook, entry)| {
+                let preserved = entry.preserved_sha256.as_ref().map(|expected| {
+                    match inspect(&preserved_path(&hooks, hook), hook) {
+                        Ok(FileState::Absent) => GitHookHealth::Missing,
+                        Ok(FileState::Regular { content, .. }) if &digest(&content) == expected => {
+                            GitHookHealth::Intact
+                        }
+                        _ => GitHookHealth::Drifted,
+                    }
+                });
                 let health = match inspect(&hooks.join(hook), hook) {
                     Ok(FileState::Absent) => GitHookHealth::Missing,
                     Ok(FileState::Regular { content, executable }) => {
-                        if digest(&content) == entry.sha256 && executable == entry.enabled {
+                        if digest(&content) == entry.sha256
+                            && executable == entry.expected_executable()
+                        {
                             GitHookHealth::Intact
                         } else {
                             GitHookHealth::Drifted
@@ -223,6 +273,7 @@ impl GitHookManager {
                 Ok(GitHookVerification {
                     hook,
                     health,
+                    preserved,
                     enabled: entry.enabled,
                     shim_version: entry.shim_version,
                 })
@@ -262,6 +313,13 @@ impl GitHookManager {
                     _ => return Err(GitHookError::Drift(vec![hook])),
                 }
             }
+            if record.hooks[hook].preserved_sha256.is_some() {
+                // The preserved hook was verified intact above; put it back
+                // with its original content and mode.
+                fs::rename(preserved_path(&hooks, hook), &path).map_err(|_| GitHookError::Io)?;
+                changes.push(GitHookChange { hook, path, action: GitHookAction::Restore });
+                continue;
+            }
             changes.push(GitHookChange {
                 hook,
                 path,
@@ -292,7 +350,13 @@ impl GitHookManager {
             let action = if !present || entry.enabled == enabled {
                 GitHookAction::Unchanged
             } else {
-                set_mode(&path, if enabled { 0o755 } else { 0o644 })?;
+                if entry.preserved_sha256.is_some() {
+                    let content = self.shim_for(hook, true, enabled);
+                    replace(&path, &content)?;
+                    entry.sha256 = digest(&content);
+                } else {
+                    set_mode(&path, if enabled { 0o755 } else { 0o644 })?;
+                }
                 entry.enabled = enabled;
                 if enabled {
                     GitHookAction::Enable
@@ -320,9 +384,20 @@ impl GitHookManager {
             match inspect(&hooks.join(hook), hook) {
                 Ok(FileState::Absent) => checks.push((hook, false)),
                 Ok(FileState::Regular { content, executable })
-                    if digest(&content) == entry.sha256 && executable == entry.enabled =>
+                    if digest(&content) == entry.sha256
+                        && executable == entry.expected_executable() =>
                 {
-                    checks.push((hook, true))
+                    let preserved_intact = entry.preserved_sha256.as_ref().is_none_or(|expected| {
+                        matches!(
+                            inspect(&preserved_path(hooks, hook), hook),
+                            Ok(FileState::Regular { content, .. }) if &digest(&content) == expected
+                        )
+                    });
+                    if preserved_intact {
+                        checks.push((hook, true))
+                    } else {
+                        drifted.push(hook)
+                    }
                 }
                 _ => drifted.push(hook),
             }
@@ -365,15 +440,127 @@ impl GitHookManager {
         }
     }
 
-    fn shim(&self, hook: &str) -> Vec<u8> {
+    /// The shim for `hook`. A chained shim runs the preserved user hook
+    /// first with the original arguments and standard input and exits with
+    /// its status; the delegate never sees either. A disabled chained shim
+    /// runs only the user hook.
+    fn shim_for(&self, hook: &str, chained: bool, enabled: bool) -> Vec<u8> {
         let delegate = self.delegate.to_str().expect("delegate validated as text");
-        format!(
+        let header = format!(
             "#!/bin/sh\n{SHIM_MARKER} v{GIT_HOOK_SHIM_VERSION} hook={hook}\n\
              # Installed by GHOSTRACE. Remove it with the GHOSTRACE hook uninstaller;\n\
-             # hand edits are reported as drift and block automatic removal.\n\
-             exec '{delegate}' git-hook {hook} </dev/null\n"
-        )
-        .into_bytes()
+             # hand edits are reported as drift and block automatic removal.\n"
+        );
+        let body = match (chained, enabled) {
+            (false, _) => format!("exec '{delegate}' git-hook {hook} </dev/null\n"),
+            (true, true) => format!(
+                "\"$(dirname \"$0\")/{hook}{PRESERVED_SUFFIX}\" \"$@\"\n\
+                 status=$?\n\
+                 '{delegate}' git-hook {hook} </dev/null || true\n\
+                 exit $status\n"
+            ),
+            (true, false) => format!(
+                "# GHOSTRACE delegation is disabled; only the preserved hook runs.\n\
+                 exec \"$(dirname \"$0\")/{hook}{PRESERVED_SUFFIX}\" \"$@\"\n"
+            ),
+        };
+        format!("{header}{body}").into_bytes()
+    }
+
+    /// Plan an install that chains existing user hooks instead of refusing.
+    /// The returned digest covers every change, the content of every hook
+    /// that would be preserved, the delegate, and the shim version; the
+    /// caller must pass it back to [`Self::install_chained`].
+    pub fn plan_chained_install(&self, repository: &Path) -> Result<GitHookPlan, GitHookError> {
+        let hooks = self.hooks_dir(repository)?;
+        let record = read_record(&hooks)?;
+        let mut changes = Vec::new();
+        let mut hasher = Sha256::new();
+        hasher.update(b"ghostrace-hook-plan-v1\0");
+        hasher.update(self.delegate.to_string_lossy().as_bytes());
+        hasher.update(GIT_HOOK_SHIM_VERSION.to_le_bytes());
+        for hook in MANAGED_GIT_HOOKS {
+            let path = hooks.join(hook);
+            let (action, foreign) = match (inspect(&path, hook)?, record.hooks.get(hook)) {
+                (FileState::Absent, _) => (GitHookAction::Create, None),
+                (FileState::Regular { content, .. }, Some(entry))
+                    if digest(&content) == entry.sha256 =>
+                {
+                    let current = self.shim_for(hook, entry.preserved_sha256.is_some(), true);
+                    if content == current && entry.enabled {
+                        (GitHookAction::Unchanged, None)
+                    } else {
+                        (GitHookAction::Replace, None)
+                    }
+                }
+                (FileState::Regular { content, .. }, _) if is_shim(&content) => {
+                    return Err(GitHookError::Drift(vec![hook]))
+                }
+                (FileState::Regular { content, .. }, _) => {
+                    if fs::symlink_metadata(preserved_path(&hooks, hook)).is_ok() {
+                        return Err(GitHookError::PreservedHookExists(hook));
+                    }
+                    (GitHookAction::Chain, Some(digest(&content)))
+                }
+            };
+            hasher.update(hook.as_bytes());
+            hasher.update([action as u8]);
+            hasher.update(foreign.as_deref().unwrap_or("").as_bytes());
+            changes.push(GitHookChange { hook, path, action });
+        }
+        let digest = hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect();
+        Ok(GitHookPlan { changes, digest })
+    }
+
+    /// Apply a chained-install plan the caller confirmed by digest. The plan
+    /// is recomputed under the lock and refused if anything changed.
+    pub fn install_chained(
+        &self,
+        repository: &Path,
+        confirmed_digest: &str,
+    ) -> Result<Vec<GitHookChange>, GitHookError> {
+        let hooks = self.hooks_dir(repository)?;
+        let _lock = Lock::acquire(&hooks)?;
+        let plan = self.plan_chained_install(repository)?;
+        if plan.digest != confirmed_digest {
+            return Err(GitHookError::ConfirmationMismatch);
+        }
+        let mut record = read_record(&hooks)?;
+        for change in &plan.changes {
+            let existing = record.hooks.get(change.hook).cloned();
+            let preserved_sha256 = match change.action {
+                GitHookAction::Chain => {
+                    let FileState::Regular { content, .. } = inspect(&change.path, change.hook)?
+                    else {
+                        return Err(GitHookError::ConfirmationMismatch);
+                    };
+                    let preserved = preserved_path(&hooks, change.hook);
+                    if fs::symlink_metadata(&preserved).is_ok() {
+                        return Err(GitHookError::PreservedHookExists(change.hook));
+                    }
+                    fs::rename(&change.path, &preserved).map_err(|_| GitHookError::Io)?;
+                    Some(digest(&content))
+                }
+                _ => existing.as_ref().and_then(|entry| entry.preserved_sha256.clone()),
+            };
+            let content = self.shim_for(change.hook, preserved_sha256.is_some(), true);
+            match change.action {
+                GitHookAction::Create | GitHookAction::Chain => write_new(&change.path, &content)?,
+                GitHookAction::Replace => replace(&change.path, &content)?,
+                _ => {}
+            }
+            record.hooks.insert(
+                change.hook.to_owned(),
+                RecordEntry {
+                    sha256: digest(&content),
+                    shim_version: GIT_HOOK_SHIM_VERSION,
+                    enabled: true,
+                    preserved_sha256,
+                },
+            );
+        }
+        write_record(&hooks, &record)?;
+        Ok(plan.changes)
     }
 }
 
@@ -392,6 +579,10 @@ fn inspect(path: &Path, hook: &'static str) -> Result<FileState, GitHookError> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(FileState::Absent),
         Err(_) => Err(GitHookError::Io),
     }
+}
+
+fn preserved_path(hooks: &Path, hook: &str) -> PathBuf {
+    hooks.join(format!("{hook}{PRESERVED_SUFFIX}"))
 }
 
 fn is_shim(content: &[u8]) -> bool {
