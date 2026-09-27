@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use ghostrace::{
     encode_frame, parse_message, ExtensionMessage, FrameDecoder, NativeMessagingError,
-    ProtocolSession, SessionEvent, MAX_NATIVE_FRAME_BYTES, MAX_NATIVE_MESSAGES_PER_WINDOW,
-    NATIVE_SESSION_IDLE_TIMEOUT,
+    ProtocolSession, SessionEvent, MAX_NATIVE_DECODER_BUFFER, MAX_NATIVE_FRAME_BYTES,
+    MAX_NATIVE_MESSAGES_PER_WINDOW, NATIVE_SESSION_IDLE_TIMEOUT,
 };
 use sha2::{Digest, Sha256};
 
@@ -192,4 +192,26 @@ fn deterministic_fuzz_never_panics_or_echoes_input() {
             let _ = decoder.finish();
         }
     }
+}
+
+#[test]
+fn the_decoder_buffer_is_bounded_regardless_of_chunk_size() {
+    let mut decoder = FrameDecoder::new();
+    assert_eq!(
+        decoder.push(&vec![0u8; MAX_NATIVE_DECODER_BUFFER + 1]),
+        Err(NativeMessagingError::BufferFull),
+        "an oversized first chunk must not be buffered"
+    );
+    // Many small valid frames in one chunk within the bound are fine.
+    let mut stream = Vec::new();
+    for seq in 2..200u64 {
+        stream.extend(encode_frame(&nav(seq)).expect("frame"));
+    }
+    assert!(stream.len() <= MAX_NATIVE_DECODER_BUFFER);
+    decoder.push(&stream).expect("valid batch");
+    let mut count = 0;
+    while decoder.next_frame().expect("frame").is_some() {
+        count += 1;
+    }
+    assert_eq!(count, 198);
 }

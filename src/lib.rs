@@ -197,9 +197,10 @@ pub use model::{
 };
 pub use native_messaging::{
     encode_frame, parse_message, ExtensionMessage, FrameDecoder, NativeMessagingError,
-    NavigationTransition, ProtocolSession, SessionEvent, MAX_NATIVE_FRAME_BYTES,
-    MAX_NATIVE_MESSAGES_PER_WINDOW, MAX_NATIVE_MESSAGE_DEPTH, MAX_NATIVE_MESSAGE_VALUES,
-    NATIVE_MESSAGING_PROTOCOL_VERSION, NATIVE_RATE_WINDOW, NATIVE_SESSION_IDLE_TIMEOUT,
+    NavigationTransition, ProtocolSession, SessionEvent, MAX_NATIVE_DECODER_BUFFER,
+    MAX_NATIVE_FRAME_BYTES, MAX_NATIVE_MESSAGES_PER_WINDOW, MAX_NATIVE_MESSAGE_DEPTH,
+    MAX_NATIVE_MESSAGE_VALUES, NATIVE_MESSAGING_PROTOCOL_VERSION, NATIVE_RATE_WINDOW,
+    NATIVE_SESSION_IDLE_TIMEOUT,
 };
 pub use ordering::{
     analyze_temporal_observations, compare_event_order, StableOrderKey, TemporalAnalysis,

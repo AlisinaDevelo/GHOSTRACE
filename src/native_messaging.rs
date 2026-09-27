@@ -19,6 +19,8 @@ use thiserror::Error;
 pub const NATIVE_MESSAGING_PROTOCOL_VERSION: u32 = 1;
 /// Largest inbound frame body accepted from an extension.
 pub const MAX_NATIVE_FRAME_BYTES: usize = 64 * 1024;
+/// Most bytes the decoder buffers: two maximal frames with their prefixes.
+pub const MAX_NATIVE_DECODER_BUFFER: usize = 2 * (4 + MAX_NATIVE_FRAME_BYTES);
 /// Deepest JSON nesting accepted in a message.
 pub const MAX_NATIVE_MESSAGE_DEPTH: usize = 8;
 /// Most JSON values (objects, arrays, scalars) accepted in one message.
@@ -36,6 +38,8 @@ pub enum NativeMessagingError {
     FrameTooLarge,
     #[error("frame is empty")]
     EmptyFrame,
+    #[error("buffered input exceeds the decoder bound; drain frames before pushing more")]
+    BufferFull,
     #[error("stream ended inside a frame")]
     Truncated,
     #[error("data arrived after the session ended")]
@@ -78,13 +82,10 @@ impl FrameDecoder {
     /// Append received bytes. The buffer never holds more than one prefix and
     /// one maximum-size body.
     pub fn push(&mut self, bytes: &[u8]) -> Result<(), NativeMessagingError> {
-        if self.buffer.len() >= 4 {
-            let declared = frame_length(&self.buffer)?;
-            if self.buffer.len() + bytes.len() > 4 + declared + 4 + MAX_NATIVE_FRAME_BYTES {
-                // More than the current frame and the next prefix plus a
-                // maximal body: the caller must drain frames first.
-                return Err(NativeMessagingError::FrameTooLarge);
-            }
+        // Never hold more than two maximal frames, whatever the chunk size or
+        // decoder state; the caller drains complete frames between pushes.
+        if self.buffer.len().saturating_add(bytes.len()) > MAX_NATIVE_DECODER_BUFFER {
+            return Err(NativeMessagingError::BufferFull);
         }
         self.buffer.extend_from_slice(bytes);
         if self.buffer.len() >= 4 {
