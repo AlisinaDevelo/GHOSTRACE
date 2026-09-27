@@ -1,8 +1,8 @@
 //! Frontmost-application identity and session semantics.
 
 use ghostrace::{
-    FrontmostApp, FrontmostAppKind, FrontmostAppLocation, FrontmostNormalizer,
-    FrontmostObservation, FrontmostRawObservation, FrontmostSessionTracker,
+    FrontmostApp, FrontmostAppKind, FrontmostAppLocation, FrontmostBasis, FrontmostNormalizer,
+    FrontmostObservation, FrontmostRawObservation, FrontmostRecord, FrontmostSessionTracker,
     FrontmostSigningIdentity, FrontmostTransition, FrontmostUnknownReason,
     FRONTMOST_IDENTITY_CORPUS_JSON, FRONTMOST_SCHEMA_JSON, FRONTMOST_TRANSIENT_DWELL_MS,
 };
@@ -179,9 +179,9 @@ fn session_sequences_produce_bounded_dwell_and_transient_marks() {
     for sequence in &corpus.session_sequences {
         let mut tracker = FrontmostSessionTracker::new(FrontmostNormalizer::new(salt(&corpus)));
         for (index, (step, expected)) in sequence.steps.iter().enumerate() {
-            let observation = tracker.observe(&raw(step));
-            assert_eq!(observation.is_some(), expected.emitted, "{} step {index}", sequence.id);
-            let Some(observation) = observation else { continue };
+            let records = tracker.observe(&raw(step));
+            assert_eq!(!records.is_empty(), expected.emitted, "{} step {index}", sequence.id);
+            let Some(FrontmostRecord::App(observation)) = records.last().cloned() else { continue };
             assert_eq!(observation.dwell_ms, expected.dwell_ms, "{} step {index}", sequence.id);
             assert_eq!(
                 Some(observation.transient),
@@ -242,6 +242,7 @@ fn every_normalized_identity_validates_against_the_schema() {
             app: normalizer.normalize(&raw),
             dwell_ms: None,
             transient: false,
+            basis: FrontmostBasis::Direct,
         };
         let json = serde_json::to_value(&observation).expect("JSON");
         assert!(validator.is_valid(&json), "{}", case.id);
@@ -253,6 +254,7 @@ fn every_normalized_identity_validates_against_the_schema() {
         app: normalizer.normalize(&raw(&corpus.identity_cases[0].raw)),
         dwell_ms: None,
         transient: false,
+        basis: FrontmostBasis::Direct,
     })
     .expect("JSON");
     injected["window_title"] = Value::from("private");

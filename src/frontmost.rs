@@ -11,6 +11,8 @@
 //! ID and start time. Activation is contextual evidence only: it never proves
 //! that the application caused a filesystem change.
 
+use std::collections::BTreeSet;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -142,6 +144,9 @@ pub enum FrontmostAppLocation {
 pub enum FrontmostUnknownReason {
     /// No bundle identifier, no valid signature, and no usable process.
     NoIdentity,
+    /// A private application or a user exclusion; identity is withheld
+    /// before persistence.
+    Excluded,
     /// The process identity was invalid, so no launch instance exists.
     NoProcess,
 }
@@ -182,6 +187,108 @@ pub struct FrontmostObservation {
     pub dwell_ms: Option<u64>,
     /// The ended session was shorter than [`FRONTMOST_TRANSIENT_DWELL_MS`].
     pub transient: bool,
+    /// Whether an NSWorkspace notification reported this transition or the
+    /// tracker closed the session at a later boundary.
+    pub basis: FrontmostBasis,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FrontmostBasis {
+    /// Reported by an activation, deactivation, or termination notification.
+    Direct,
+    /// Closed by the tracker at the next activation, suspension, or observer
+    /// boundary because the notification that should have ended it was not
+    /// seen. The dwell ends at that boundary, never later.
+    InferredClosure,
+}
+
+/// Session and power notifications that bound frontmost coverage.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FrontmostSystemEvent {
+    ObserverStarted,
+    ObserverStopped,
+    WillSleep,
+    DidWake,
+    ScreenLocked,
+    ScreenUnlocked,
+    /// Fast user switching moved this login session to the background.
+    SessionResignedActive,
+    SessionBecameActive,
+}
+
+impl FrontmostSystemEvent {
+    fn suspends(self) -> bool {
+        matches!(
+            self,
+            Self::ObserverStopped
+                | Self::WillSleep
+                | Self::ScreenLocked
+                | Self::SessionResignedActive
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FrontmostCoverageState {
+    /// Observation started cleanly.
+    Started,
+    /// Coverage stopped at a known boundary; activity after it is unobserved.
+    Suspended,
+    /// Coverage returned after a suspension.
+    Resumed,
+    /// The observer restarted without a clean stop; the interval since the
+    /// last observation is a gap and no session continues across it.
+    Interrupted,
+}
+
+/// A coverage boundary. `gap_started_at` is when coverage was lost, set on
+/// the boundary that ends a gap.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FrontmostCoverageBoundary {
+    pub schema_version: u32,
+    pub event: FrontmostSystemEvent,
+    pub state: FrontmostCoverageState,
+    pub observed_at: DateTime<Utc>,
+    pub gap_started_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "record", rename_all = "snake_case")]
+pub enum FrontmostRecord {
+    App(FrontmostObservation),
+    Coverage(FrontmostCoverageBoundary),
+}
+
+/// Bundle identifiers whose identity is withheld before persistence:
+/// private-context applications and user exclusions.
+#[derive(Clone, Debug, Default)]
+pub struct FrontmostExclusions {
+    bundle_ids: BTreeSet<String>,
+}
+
+impl FrontmostExclusions {
+    pub fn new<I, S>(bundle_ids: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        Self {
+            bundle_ids: bundle_ids
+                .into_iter()
+                .map(|bundle_id| bundle_id.as_ref().to_ascii_lowercase())
+                .collect(),
+        }
+    }
+
+    fn excludes(&self, raw: &FrontmostRawObservation) -> bool {
+        raw.bundle_identifier
+            .as_deref()
+            .is_some_and(|bundle_id| self.bundle_ids.contains(&bundle_id.to_ascii_lowercase()))
+    }
 }
 
 /// Normalizes raw observations with a per-journal salt so launch instances
@@ -271,66 +378,188 @@ fn signing_identity(input: Option<&FrontmostSigningInput>) -> FrontmostSigningId
     }
 }
 
-/// Tracks which launch instance is frontmost and turns raw notifications
-/// into session-level observations.
+/// Tracks which launch instance is frontmost and turns notifications into
+/// session records that never claim coverage the observer did not have.
 ///
-/// - A repeated activation of the already-frontmost instance is suppressed.
-/// - The event that ends a session carries its dwell time and is marked
+/// - A repeated activation of the frontmost instance is suppressed.
+/// - The record that ends a session carries its dwell time and is marked
 ///   transient when shorter than [`FRONTMOST_TRANSIENT_DWELL_MS`].
-/// - A deactivation or termination for an instance that is not frontmost
-///   carries no dwell time rather than an invented one.
-/// - Observations earlier than the current session start are clamped to a
-///   zero dwell instead of producing a negative duration.
+/// - An activation while another session is open closes that session by
+///   inference at the activation time, so a missed deactivation cannot
+///   extend it.
+/// - Sleep, lock, fast user switching, and observer stops close the open
+///   session at the boundary and suspend coverage until the matching resume.
+/// - An observer start without a clean stop is an interruption: the open
+///   session is dropped without a dwell and the interval since the last
+///   observation is reported as a gap.
+/// - Excluded and private applications keep no identity or launch instance.
+/// - A deactivation for an instance that is not frontmost carries no dwell,
+///   and a backwards clock is clamped to a zero dwell.
 pub struct FrontmostSessionTracker {
     normalizer: FrontmostNormalizer,
-    active: Option<(SnapshotDigest, DateTime<Utc>)>,
+    exclusions: FrontmostExclusions,
+    active: Option<ActiveSession>,
+    suspended_at: Option<DateTime<Utc>>,
+    observing: bool,
+    last_seen: Option<DateTime<Utc>>,
+}
+
+struct ActiveSession {
+    app: FrontmostApp,
+    instance: SnapshotDigest,
+    started: DateTime<Utc>,
 }
 
 impl FrontmostSessionTracker {
     pub fn new(normalizer: FrontmostNormalizer) -> Self {
-        Self { normalizer, active: None }
+        Self::with_exclusions(normalizer, FrontmostExclusions::default())
     }
 
-    pub fn observe(&mut self, raw: &FrontmostRawObservation) -> Option<FrontmostObservation> {
-        let app = self.normalizer.normalize(raw);
+    pub fn with_exclusions(
+        normalizer: FrontmostNormalizer,
+        exclusions: FrontmostExclusions,
+    ) -> Self {
+        Self {
+            normalizer,
+            exclusions,
+            active: None,
+            suspended_at: None,
+            observing: false,
+            last_seen: None,
+        }
+    }
+
+    pub fn observe(&mut self, raw: &FrontmostRawObservation) -> Vec<FrontmostRecord> {
+        self.last_seen = Some(raw.observed_at);
+        let app = if self.exclusions.excludes(raw) {
+            FrontmostApp::Unknown { reason: FrontmostUnknownReason::Excluded }
+        } else {
+            self.normalizer.normalize(raw)
+        };
         let instance = app.launch_instance().cloned();
+        let mut records = Vec::new();
         match raw.transition {
             FrontmostTransition::Activated => {
                 if instance.is_some()
-                    && self.active.as_ref().map(|(active, _)| active) == instance.as_ref()
+                    && self.active.as_ref().map(|session| &session.instance) == instance.as_ref()
                 {
-                    return None;
+                    return records;
                 }
-                self.active = instance.map(|instance| (instance, raw.observed_at));
-                Some(observation(raw, app, None))
+                if let Some(previous) = self.active.take() {
+                    records.push(closure(previous, raw.observed_at));
+                }
+                self.active = instance.map(|instance| ActiveSession {
+                    app: app.clone(),
+                    instance,
+                    started: raw.observed_at,
+                });
+                records.push(FrontmostRecord::App(observation(
+                    raw.transition,
+                    raw.observed_at,
+                    app,
+                    None,
+                    FrontmostBasis::Direct,
+                )));
             }
             FrontmostTransition::Deactivated | FrontmostTransition::Terminated => {
                 let dwell = match (&self.active, &instance) {
-                    (Some((active, started)), Some(instance)) if active == instance => {
-                        let millis =
-                            raw.observed_at.signed_duration_since(*started).num_milliseconds();
+                    (Some(session), Some(instance)) if &session.instance == instance => {
+                        let dwell = dwell_ms(session.started, raw.observed_at);
                         self.active = None;
-                        Some(u64::try_from(millis).unwrap_or(0))
+                        Some(dwell)
                     }
                     _ => None,
                 };
-                Some(observation(raw, app, dwell))
+                records.push(FrontmostRecord::App(observation(
+                    raw.transition,
+                    raw.observed_at,
+                    app,
+                    dwell,
+                    FrontmostBasis::Direct,
+                )));
             }
         }
+        records
+    }
+
+    pub fn observe_system(
+        &mut self,
+        event: FrontmostSystemEvent,
+        observed_at: DateTime<Utc>,
+    ) -> Vec<FrontmostRecord> {
+        let mut records = Vec::new();
+        let boundary = |state, gap_started_at| {
+            FrontmostRecord::Coverage(FrontmostCoverageBoundary {
+                schema_version: FRONTMOST_SCHEMA_VERSION,
+                event,
+                state,
+                observed_at,
+                gap_started_at,
+            })
+        };
+        if event == FrontmostSystemEvent::ObserverStarted {
+            if self.observing || self.active.is_some() {
+                // No clean stop was seen: drop the open session without a
+                // dwell rather than stretch it across the outage.
+                self.active = None;
+                records.push(boundary(
+                    FrontmostCoverageState::Interrupted,
+                    self.last_seen.or(self.suspended_at),
+                ));
+            } else if let Some(suspended_at) = self.suspended_at {
+                records.push(boundary(FrontmostCoverageState::Resumed, Some(suspended_at)));
+            } else {
+                records.push(boundary(FrontmostCoverageState::Started, None));
+            }
+            self.observing = true;
+            self.suspended_at = None;
+        } else if event.suspends() {
+            if let Some(previous) = self.active.take() {
+                records.push(closure(previous, observed_at));
+            }
+            if self.suspended_at.is_none() {
+                self.suspended_at = Some(observed_at);
+            }
+            if event == FrontmostSystemEvent::ObserverStopped {
+                self.observing = false;
+            }
+            records.push(boundary(FrontmostCoverageState::Suspended, None));
+        } else {
+            records.push(boundary(FrontmostCoverageState::Resumed, self.suspended_at.take()));
+        }
+        self.last_seen = Some(observed_at);
+        records
     }
 }
 
+fn closure(session: ActiveSession, at: DateTime<Utc>) -> FrontmostRecord {
+    FrontmostRecord::App(observation(
+        FrontmostTransition::Deactivated,
+        at,
+        session.app,
+        Some(dwell_ms(session.started, at)),
+        FrontmostBasis::InferredClosure,
+    ))
+}
+
+fn dwell_ms(started: DateTime<Utc>, ended: DateTime<Utc>) -> u64 {
+    u64::try_from(ended.signed_duration_since(started).num_milliseconds()).unwrap_or(0)
+}
+
 fn observation(
-    raw: &FrontmostRawObservation,
+    transition: FrontmostTransition,
+    observed_at: DateTime<Utc>,
     app: FrontmostApp,
     dwell_ms: Option<u64>,
+    basis: FrontmostBasis,
 ) -> FrontmostObservation {
     FrontmostObservation {
         schema_version: FRONTMOST_SCHEMA_VERSION,
-        transition: raw.transition,
-        observed_at: raw.observed_at,
+        transition,
+        observed_at,
         app,
         dwell_ms,
         transient: dwell_ms.is_some_and(|dwell| dwell < FRONTMOST_TRANSIENT_DWELL_MS),
+        basis,
     }
 }
