@@ -89,14 +89,14 @@ pub enum GitAdapterError {
     InvalidSnapshot,
 }
 
-struct Output {
-    status: Option<i32>,
-    stdout: Vec<u8>,
+pub(crate) struct Output {
+    pub(crate) status: Option<i32>,
+    pub(crate) stdout: Vec<u8>,
 }
 
 /// Runs Git on behalf of an explicit snapshot request.
 pub struct GitSnapshotAdapter {
-    git: PathBuf,
+    runner: GitRunner,
     policy: PolicyProfile,
 }
 
@@ -107,7 +107,7 @@ impl GitSnapshotAdapter {
         if !policy.is_source_enabled(EventSource::Git) {
             return Err(GitAdapterError::PolicyDenied);
         }
-        Ok(Self { git: git.into(), policy })
+        Ok(Self { runner: GitRunner::new(git), policy })
     }
 
     /// Take a metadata-only snapshot of the repository containing `path`.
@@ -123,20 +123,22 @@ impl GitSnapshotAdapter {
         {
             return Err(GitAdapterError::PolicyDenied);
         }
-        let bare = self.flag(path, "--is-bare-repository")?;
-        let shallow = self.flag(path, "--is-shallow-repository")?;
-        let object_format = match self.single_line(path, &["rev-parse", "--show-object-format"])? {
-            line if line == b"sha1" => GitObjectFormat::Sha1,
-            line if line == b"sha256" => GitObjectFormat::Sha256,
-            _ => return Err(GitAdapterError::UnexpectedOutput),
-        };
-        let common_dir = self.path_line(path, "--git-common-dir")?;
-        let git_dir = self.path_line(path, "--git-dir")?;
+        let bare = self.runner.flag(path, "--is-bare-repository")?;
+        let shallow = self.runner.flag(path, "--is-shallow-repository")?;
+        let object_format =
+            match self.runner.single_line(path, &["rev-parse", "--show-object-format"])? {
+                line if line == b"sha1" => GitObjectFormat::Sha1,
+                line if line == b"sha256" => GitObjectFormat::Sha256,
+                _ => return Err(GitAdapterError::UnexpectedOutput),
+            };
+        let common_dir = self.runner.path_line(path, "--git-common-dir")?;
+        let git_dir = self.runner.path_line(path, "--git-dir")?;
         let (worktree, superproject) = if bare {
             (None, false)
         } else {
-            let toplevel = self.path_line(path, "--show-toplevel")?;
+            let toplevel = self.runner.path_line(path, "--show-toplevel")?;
             let superproject = !self
+                .runner
                 .run(path, &["rev-parse", "--show-superproject-working-tree"])?
                 .stdout
                 .is_empty();
@@ -220,12 +222,14 @@ impl GitSnapshotAdapter {
     ) -> Result<GitAncestryProbe, GitAdapterError> {
         let previous = previous.hex().to_owned();
         let current = current.hex().to_owned();
-        let exists = self.run(path, &["cat-file", "-e", &format!("{previous}^{{commit}}")])?;
+        let exists =
+            self.runner.run(path, &["cat-file", "-e", &format!("{previous}^{{commit}}")])?;
         if exists.status != Some(0) {
             return Ok(GitAncestryProbe::PreviousObjectMissing);
         }
-        let shallow = self.flag(path, "--is-shallow-repository")?;
-        let answer = self.run(path, &["merge-base", "--is-ancestor", &previous, &current])?;
+        let shallow = self.runner.flag(path, "--is-shallow-repository")?;
+        let answer =
+            self.runner.run(path, &["merge-base", "--is-ancestor", &previous, &current])?;
         Ok(match answer.status {
             Some(0) => GitAncestryProbe::PreviousIsAncestor,
             Some(1) if shallow => GitAncestryProbe::ShallowBoundaryReached,
@@ -234,116 +238,13 @@ impl GitSnapshotAdapter {
         })
     }
 
-    fn command(&self, path: &Path, args: &[&str]) -> Command {
-        let mut command = Command::new(&self.git);
-        command
-            .args(HARDENING)
-            .args(args)
-            .current_dir(path)
-            .env_clear()
-            .env("PATH", "/usr/bin:/bin")
-            .env("HOME", "/nonexistent")
-            .env("LC_ALL", "C")
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .env("GIT_OPTIONAL_LOCKS", "0")
-            .env("GIT_NO_LAZY_FETCH", "1")
-            .env("GIT_PROTOCOL_FROM_USER", "0")
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-        command
-    }
-
-    fn run(&self, path: &Path, args: &[&str]) -> Result<Output, GitAdapterError> {
-        let mut child =
-            self.command(path, args).spawn().map_err(|_| GitAdapterError::GitUnavailable)?;
-        let mut stdout = child.stdout.take().expect("piped stdout");
-        let reader = thread::spawn(move || {
-            let mut buffer = Vec::new();
-            let mut chunk = [0u8; 64 * 1024];
-            loop {
-                match stdout.read(&mut chunk) {
-                    Ok(0) => return Ok(buffer),
-                    Ok(read) => {
-                        if buffer.len() + read > MAX_GIT_OUTPUT_BYTES {
-                            return Err(GitAdapterError::OutputTooLarge);
-                        }
-                        buffer.extend_from_slice(&chunk[..read]);
-                    }
-                    Err(_) => return Err(GitAdapterError::UnexpectedOutput),
-                }
-            }
-        });
-        let deadline = Instant::now() + GIT_COMMAND_TIMEOUT;
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) if Instant::now() >= deadline => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    let _ = reader.join();
-                    return Err(GitAdapterError::Timeout);
-                }
-                Ok(None) => thread::sleep(Duration::from_millis(5)),
-                Err(_) => return Err(GitAdapterError::GitUnavailable),
-            }
-        };
-        let stdout = match reader.join() {
-            Ok(result) => result?,
-            Err(_) => return Err(GitAdapterError::UnexpectedOutput),
-        };
-        Ok(Output { status: status.code(), stdout })
-    }
-
-    fn checked(&self, path: &Path, args: &[&str]) -> Result<Vec<u8>, GitAdapterError> {
-        let output = self.run(path, args)?;
-        match output.status {
-            Some(0) => Ok(output.stdout),
-            Some(128) => Err(GitAdapterError::NotARepository),
-            _ => Err(GitAdapterError::UnexpectedOutput),
-        }
-    }
-
-    fn single_line(&self, path: &Path, args: &[&str]) -> Result<Vec<u8>, GitAdapterError> {
-        let mut stdout = self.checked(path, args)?;
-        if stdout.last() != Some(&b'\n') {
-            return Err(GitAdapterError::UnexpectedOutput);
-        }
-        stdout.pop();
-        if stdout.contains(&b'\n') {
-            return Err(GitAdapterError::UnexpectedOutput);
-        }
-        Ok(stdout)
-    }
-
-    fn flag(&self, path: &Path, flag: &str) -> Result<bool, GitAdapterError> {
-        match self.single_line(path, &["rev-parse", flag])?.as_slice() {
-            b"true" => Ok(true),
-            b"false" => Ok(false),
-            _ => Err(GitAdapterError::UnexpectedOutput),
-        }
-    }
-
-    /// A directory Git reports, used only to read filesystem identity. A path
-    /// containing a newline cannot be told apart from two lines and is refused.
-    fn path_line(&self, path: &Path, flag: &str) -> Result<PathBuf, GitAdapterError> {
-        let line = self.single_line(path, &["rev-parse", "--path-format=absolute", flag])?;
-        let resolved = os_path(line);
-        if !resolved.is_dir() {
-            return Err(GitAdapterError::UnexpectedOutput);
-        }
-        Ok(resolved)
-    }
-
     fn object_id(
         &self,
         path: &Path,
         revision: &str,
         format: GitObjectFormat,
     ) -> Result<Option<GitObjectIdRef>, GitAdapterError> {
-        let output = self.run(path, &["rev-parse", "--verify", "--quiet", revision])?;
+        let output = self.runner.run(path, &["rev-parse", "--verify", "--quiet", revision])?;
         match output.status {
             Some(0) => {
                 let text = std::str::from_utf8(&output.stdout)
@@ -359,7 +260,7 @@ impl GitSnapshotAdapter {
     }
 
     fn branch_class(&self, path: &Path, has_head: bool) -> Result<GitBranchClass, GitAdapterError> {
-        let output = self.run(path, &["symbolic-ref", "--quiet", "HEAD"])?;
+        let output = self.runner.run(path, &["symbolic-ref", "--quiet", "HEAD"])?;
         // Only the namespace prefix is inspected; the ref name is discarded.
         let class = match output.status {
             Some(0) if !has_head => GitBranchClass::Unborn,
@@ -380,7 +281,7 @@ impl GitSnapshotAdapter {
     /// Filter drivers are repository configuration, so each configured driver
     /// is overridden with an empty command, which Git treats as no filter.
     fn filter_overrides(&self, path: &Path) -> Result<Vec<String>, GitAdapterError> {
-        let output = self.run(
+        let output = self.runner.run(
             path,
             &[
                 "config",
@@ -423,7 +324,7 @@ impl GitSnapshotAdapter {
             .map(str::to_owned),
         );
         let args = args.iter().map(String::as_str).collect::<Vec<_>>();
-        let stdout = self.checked(path, &args)?;
+        let stdout = self.runner.checked(path, &args)?;
         let (mut staged, mut unstaged, mut untracked, mut conflicted) = (0u64, 0u64, 0u64, 0u64);
         let mut records = stdout.split(|byte| *byte == 0).filter(|record| !record.is_empty());
         while let Some(record) = records.next() {
@@ -464,7 +365,7 @@ impl GitSnapshotAdapter {
 
     fn replace_refs(&self, path: &Path) -> Result<GitReplaceRefsState, GitAdapterError> {
         let output =
-            self.run(path, &["for-each-ref", "--count=1", "--format=x", "refs/replace/"])?;
+            self.runner.run(path, &["for-each-ref", "--count=1", "--format=x", "refs/replace/"])?;
         Ok(match output.status {
             Some(0) if output.stdout.is_empty() => GitReplaceRefsState::None,
             Some(0) => GitReplaceRefsState::Active,
@@ -473,7 +374,7 @@ impl GitSnapshotAdapter {
     }
 
     fn partial_clone(&self, path: &Path) -> Result<GitPartialCloneState, GitAdapterError> {
-        let promisor = self.run(
+        let promisor = self.runner.run(
             path,
             &[
                 "config",
@@ -487,6 +388,125 @@ impl GitSnapshotAdapter {
             Some(1) => GitPartialCloneState::Full,
             _ => GitPartialCloneState::Unknown,
         })
+    }
+}
+
+/// Runs Git with the hardening above. Shared by the snapshot adapter and the
+/// hook manager so every invocation uses the same environment and overrides.
+pub(crate) struct GitRunner {
+    git: PathBuf,
+}
+
+impl GitRunner {
+    pub(crate) fn new(git: impl Into<PathBuf>) -> Self {
+        Self { git: git.into() }
+    }
+
+    fn command(&self, path: &Path, args: &[&str]) -> Command {
+        let mut command = Command::new(&self.git);
+        command
+            .args(HARDENING)
+            .args(args)
+            .current_dir(path)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("HOME", "/nonexistent")
+            .env("LC_ALL", "C")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_OPTIONAL_LOCKS", "0")
+            .env("GIT_NO_LAZY_FETCH", "1")
+            .env("GIT_PROTOCOL_FROM_USER", "0")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        command
+    }
+
+    pub(crate) fn run(&self, path: &Path, args: &[&str]) -> Result<Output, GitAdapterError> {
+        let mut child =
+            self.command(path, args).spawn().map_err(|_| GitAdapterError::GitUnavailable)?;
+        let mut stdout = child.stdout.take().expect("piped stdout");
+        let reader = thread::spawn(move || {
+            let mut buffer = Vec::new();
+            let mut chunk = [0u8; 64 * 1024];
+            loop {
+                match stdout.read(&mut chunk) {
+                    Ok(0) => return Ok(buffer),
+                    Ok(read) => {
+                        if buffer.len() + read > MAX_GIT_OUTPUT_BYTES {
+                            return Err(GitAdapterError::OutputTooLarge);
+                        }
+                        buffer.extend_from_slice(&chunk[..read]);
+                    }
+                    Err(_) => return Err(GitAdapterError::UnexpectedOutput),
+                }
+            }
+        });
+        let deadline = Instant::now() + GIT_COMMAND_TIMEOUT;
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) if Instant::now() >= deadline => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = reader.join();
+                    return Err(GitAdapterError::Timeout);
+                }
+                Ok(None) => thread::sleep(Duration::from_millis(5)),
+                Err(_) => return Err(GitAdapterError::GitUnavailable),
+            }
+        };
+        let stdout = match reader.join() {
+            Ok(result) => result?,
+            Err(_) => return Err(GitAdapterError::UnexpectedOutput),
+        };
+        Ok(Output { status: status.code(), stdout })
+    }
+
+    pub(crate) fn checked(&self, path: &Path, args: &[&str]) -> Result<Vec<u8>, GitAdapterError> {
+        let output = self.run(path, args)?;
+        match output.status {
+            Some(0) => Ok(output.stdout),
+            Some(128) => Err(GitAdapterError::NotARepository),
+            _ => Err(GitAdapterError::UnexpectedOutput),
+        }
+    }
+
+    pub(crate) fn single_line(
+        &self,
+        path: &Path,
+        args: &[&str],
+    ) -> Result<Vec<u8>, GitAdapterError> {
+        let mut stdout = self.checked(path, args)?;
+        if stdout.last() != Some(&b'\n') {
+            return Err(GitAdapterError::UnexpectedOutput);
+        }
+        stdout.pop();
+        if stdout.contains(&b'\n') {
+            return Err(GitAdapterError::UnexpectedOutput);
+        }
+        Ok(stdout)
+    }
+
+    pub(crate) fn flag(&self, path: &Path, flag: &str) -> Result<bool, GitAdapterError> {
+        match self.single_line(path, &["rev-parse", flag])?.as_slice() {
+            b"true" => Ok(true),
+            b"false" => Ok(false),
+            _ => Err(GitAdapterError::UnexpectedOutput),
+        }
+    }
+
+    /// A directory Git reports, used only to read filesystem identity. A path
+    /// containing a newline cannot be told apart from two lines and is refused.
+    pub(crate) fn path_line(&self, path: &Path, flag: &str) -> Result<PathBuf, GitAdapterError> {
+        let line = self.single_line(path, &["rev-parse", "--path-format=absolute", flag])?;
+        let resolved = os_path(line);
+        if !resolved.is_dir() {
+            return Err(GitAdapterError::UnexpectedOutput);
+        }
+        Ok(resolved)
     }
 }
 
