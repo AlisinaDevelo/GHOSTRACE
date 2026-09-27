@@ -41,6 +41,13 @@ fn every_url_class_has_an_explicit_outcome() {
         ("http://[fd00::1]/", "http://private-network"),
         ("http://[fe80::1]/", "http://private-network"),
         ("http://[::ffff:127.0.0.1]/", "http://private-network"),
+        ("http://localhost:3000/admin", "http://private-network:3000"),
+        ("http://app.localhost/", "http://private-network"),
+        ("http://nas.local/", "http://private-network"),
+        ("https://grafana.corp.internal/", "https://private-network"),
+        ("http://router.home.arpa/", "http://private-network"),
+        ("http://printer.lan/", "http://private-network"),
+        ("https://localhost.example.com/", "https://localhost.example.com"),
     ];
     for (raw, expected) in accepted {
         assert_eq!(origin(raw).as_deref(), Ok(expected), "{raw:?}");

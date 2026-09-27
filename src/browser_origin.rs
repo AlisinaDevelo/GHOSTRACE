@@ -134,7 +134,12 @@ impl CanonicalNavigation {
                 if domain.is_empty() {
                     return Err(NavigationRefusal::Invalid);
                 }
-                (NavigationHostClass::Domain, Some(domain.to_ascii_lowercase()))
+                let domain = domain.to_ascii_lowercase();
+                if is_private_name(&domain) {
+                    (NavigationHostClass::PrivateNetwork, None)
+                } else {
+                    (NavigationHostClass::Domain, Some(domain))
+                }
             }
             Some(Host::Ipv4(address)) => classify_ip(IpAddr::V4(address)),
             Some(Host::Ipv6(address)) => classify_ip(IpAddr::V6(address)),
@@ -159,6 +164,13 @@ impl CanonicalNavigation {
             None => format!("{}://{host}", self.scheme),
         }
     }
+}
+
+/// Names that only resolve on the local machine or network. Like private
+/// addresses, they can reveal internal services, so they are withheld.
+fn is_private_name(domain: &str) -> bool {
+    const PRIVATE_SUFFIXES: [&str; 5] = [".localhost", ".local", ".internal", ".home.arpa", ".lan"];
+    domain == "localhost" || PRIVATE_SUFFIXES.iter().any(|suffix| domain.ends_with(suffix))
 }
 
 fn classify_ip(address: IpAddr) -> (NavigationHostClass, Option<String>) {
