@@ -147,8 +147,9 @@ pub use git_history::{
     GIT_HISTORY_TRANSITION_SCHEMA_VERSION,
 };
 pub use git_hooks::{
-    GitHookAction, GitHookChange, GitHookError, GitHookHealth, GitHookManager, GitHookVerification,
-    GIT_HOOK_RECORD_NAME, GIT_HOOK_SHIM_VERSION, MANAGED_GIT_HOOKS,
+    GitHookAction, GitHookChange, GitHookError, GitHookHealth, GitHookManager, GitHookPlan,
+    GitHookVerification, GIT_HOOK_PRESERVED_SUFFIX, GIT_HOOK_RECORD_NAME, GIT_HOOK_SHIM_VERSION,
+    MANAGED_GIT_HOOKS,
 };
 pub use git_identity::{
     GitContinuity, GitFilesystemIdentity, GitIdentity, GitIdentityError, GitRepositoryKind,
