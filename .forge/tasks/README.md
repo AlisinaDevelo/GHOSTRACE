@@ -28,7 +28,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0022 | Add optional Parquet cold-archive export | M3 | backlog | explain-export | maintainer | — | 0020, 0021, 0090 |
 | 0023 | Add tamper-evident event chain and verifier | M3 | done | explain-export | maintainer | — | 0008, 0009, 0020, 0088, 0089 |
 | 0024 | Add explicit shell-wrapper metadata capture | M4 | done | shell-git | maintainer | — | 0007, 0018, 0091, 0092, 0093 |
-| 0025 | Add explicit Git snapshot integration | M4 | backlog | shell-git | maintainer | — | 0007, 0018, 0094, 0095, 0096 |
+| 0025 | Add explicit Git snapshot integration | M4 | done | shell-git | maintainer | — | 0007, 0018, 0094, 0095, 0096 |
 | 0026 | Add opt-in Git hook install and uninstall | M4 | backlog | shell-git | maintainer | — | 0025, 0097 |
 | 0027 | Implement NSWorkspace frontmost-app collector | M4 | backlog | frontmost | maintainer | — | 0006, 0007, 0010, 0012, 0098 |
 | 0028 | Add frontmost attribution and privacy tests | M4 | backlog | frontmost | maintainer | — | 0027, 0018, 0099, 0100 |
@@ -99,9 +99,9 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0093 | Red-team shell secret leakage | M4 | done | shell-git | security-auditor | 0024 | 0091 |
 | 0094 | Define stable Git repository and worktree identity | M4 | done | shell-git | git-specialist | 0025 | 0007, 0018 |
 | 0095 | Minimize Git refs, object IDs, and snapshot fields | M4 | done | shell-git | privacy-engineer | 0025 | 0094 |
-| 0096 | Represent Git rewrites and unavailable history as gaps | M4 | backlog | shell-git | git-specialist | 0025 | 0094, 0095 |
-| 0097 | Make Git hook installation verifiable and reversible | M4 | backlog | shell-git | git-specialist | 0026 | 0094, 0095 |
-| 0098 | Define frontmost application identity and session semantics | M4 | backlog | frontmost | macos-engineer | 0027 | 0006, 0007, 0010, 0012 |
+| 0096 | Represent Git rewrites and unavailable history as gaps | M4 | done | shell-git | git-specialist | 0025 | 0094, 0095 |
+| 0097 | Make Git hook installation verifiable and reversible | M4 | done | shell-git | git-specialist | 0026 | 0094, 0095 |
+| 0098 | Define frontmost application identity and session semantics | M4 | done | frontmost | macos-engineer | 0027 | 0006, 0007, 0010, 0012 |
 | 0099 | Test frontmost sleep, wake, and privacy transitions | M4 | backlog | frontmost | test-engineer | 0028 | 0018, 0098 |
 | 0100 | Evaluate developer-workflow cross-source explanations | M4 | backlog | frontmost | researcher | 0028 | 0092, 0096, 0099 |
 | 0101 | Build the browser integration threat corpus | M5 | backlog | browser | security-auditor | 0029 | 0002, 0004, 0005, 0012 |
