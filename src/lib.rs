@@ -21,7 +21,9 @@ pub mod frontmost;
 pub mod fsevents;
 pub mod fsevents_collector;
 pub mod fsevents_flags;
+pub mod git_adapter;
 pub mod git_history;
+pub mod git_hooks;
 pub mod git_identity;
 pub mod git_snapshot;
 pub mod integrity;
@@ -136,10 +138,17 @@ pub use fsevents_flags::{
     EVENT_FLAG_ROOT_CHANGED, EVENT_FLAG_UNMOUNT, EVENT_FLAG_USER_DROPPED,
     FSEVENTS_NORMALIZED_SCHEMA_VERSION,
 };
+pub use git_adapter::{
+    GitAdapterError, GitSnapshotAdapter, GIT_COMMAND_TIMEOUT, MAX_GIT_OUTPUT_BYTES,
+};
 pub use git_history::{
     GitAncestryInference, GitAncestryProbe, GitHistoryError, GitHistoryGap, GitHistoryGapReason,
     GitHistoryState, GitHistoryTransition, GitRefMovement, GIT_HISTORY_TRANSITIONS_JSON,
     GIT_HISTORY_TRANSITION_SCHEMA_VERSION,
+};
+pub use git_hooks::{
+    GitHookAction, GitHookChange, GitHookError, GitHookHealth, GitHookManager, GitHookVerification,
+    GIT_HOOK_RECORD_NAME, GIT_HOOK_SHIM_VERSION, MANAGED_GIT_HOOKS,
 };
 pub use git_identity::{
     GitContinuity, GitFilesystemIdentity, GitIdentity, GitIdentityError, GitRepositoryKind,
