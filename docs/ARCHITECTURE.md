@@ -344,7 +344,13 @@ denied after relocation through device/inode binding, while symlink redirects fa
 closed during canonicalization and selected-root containment. Exact transport duplicates are
 suppressed only when their source event ID, raw flags, and path digest all match a
 bounded event-ID window; the suppression count is exposed in collector status and
-never becomes a missing filesystem event. Source coalescing, repeated modification,
+never becomes a missing filesystem event. FSEvents does not promise ascending IDs
+across coalesced deliveries, so each drained batch is ordered by event ID (except a
+batch spanning an ID wraparound). A distinct delivery whose ID is still at or below
+the committed cursor cannot advance it: it is counted as `out_of_order_events` and
+recorded as an `fsevents_out_of_order` gap that recommends a rescan but, like
+`cursor_jump`, leaves the cursor valid, so collection continues instead of stopping
+with a cursor regression. Source coalescing, repeated modification,
 and the source's `OwnEvent` flag remain explicit path-free qualifiers; OwnEvent is
 accepted as evidence for unrelated paths rather than treated as a blanket drop rule.
 A rename is recorded with an unknown old-to-new pairing unless a future bounded
