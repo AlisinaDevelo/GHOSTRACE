@@ -102,6 +102,35 @@ shared-alternates, replace-ref, and submodule limitations; ancestry probes feedi
 the history-transition contract; and policy, missing-repository, and missing-Git
 refusals.
 
+## Repository-local hook lifecycle
+
+`GitHookManager` (`src/git_hooks.rs`) optionally installs a shim for
+`post-checkout`, `post-commit`, `post-merge`, and `post-rewrite` in the
+repository's own hooks directory (the common directory, so linked worktrees share
+it). Each shim is a fixed script that runs the configured absolute delegate as
+`<delegate> git-hook <name>` with standard input closed; hook arguments are not
+passed. No global Git configuration is read or written.
+
+| Operation | Behavior |
+|---|---|
+| `plan_install` | Lists the exact file and action (`create`, `replace`, `unchanged`) for every managed hook without writing. |
+| `install` | Applies the plan under a lock, creating new shims with exclusive create and replacing only recorded, intact shims atomically; repeating it is a no-op. A changed delegate or shim version is an upgrade (`replace`). |
+| `verify` | Reports each recorded shim as `intact`, `missing`, or `drifted` against its recorded SHA-256 digest and mode. |
+| `disable` / `enable` | Clears or restores execute bits on intact shims; Git skips non-executable hooks, and content is untouched. |
+| `uninstall` | Removes only shims whose content still matches the record, re-checking each immediately before removal, then the record. |
+
+The manager refuses the whole operation, before writing anything, when a managed
+hook already exists and is not a GHOSTRACE shim, when `core.hooksPath` is set in
+repository or worktree configuration (another hook manager owns hooks), when the
+hooks directory or a hook is a symlink or owned by another user, when any recorded
+shim drifted, when another hook operation holds the lock, or when a file appears
+during exclusive creation. The digest record is `hooks/ghostrace-hooks.json`.
+
+`tests/git_hook_lifecycle.rs` runs each operation against real repositories and
+checks that a real commit runs the delegate, that a disabled shim does not, that a
+user hook keeps its content and mode, that drifted shims survive uninstall, and
+that a linked worktree resolves to the same shims.
+
 ## History transitions and gaps
 
 Local Git history is mutable, so a later graph cannot prove what an earlier
