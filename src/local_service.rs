@@ -8,8 +8,6 @@
 //! handler sees it. Capabilities (read, export, policy, lifecycle, admin) are
 //! separate and denied unless the service granted them.
 
-#![cfg(unix)]
-
 use std::{
     collections::{BTreeSet, HashSet, VecDeque},
     fs,
