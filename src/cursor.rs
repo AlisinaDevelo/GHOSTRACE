@@ -194,7 +194,12 @@ impl CursorIdentity {
 #[serde(rename_all = "snake_case")]
 pub enum CursorKind {
     Opaque,
+    /// Contiguous positions: a skipped position means an event was missed.
     Sequence,
+    /// Strictly increasing but non-contiguous positions, such as FSEvents
+    /// event IDs, which are global across the system while a stream only
+    /// delivers events for its selected paths. A hole is not a loss.
+    Sparse,
     Reset,
     Wrap,
 }
@@ -204,6 +209,7 @@ impl CursorKind {
         match self {
             Self::Opaque => "opaque",
             Self::Sequence => "sequence",
+            Self::Sparse => "sparse",
             Self::Reset => "reset",
             Self::Wrap => "wrap",
         }
@@ -213,6 +219,7 @@ impl CursorKind {
         match value {
             "opaque" => Ok(Self::Opaque),
             "sequence" => Ok(Self::Sequence),
+            "sparse" => Ok(Self::Sparse),
             "reset" => Ok(Self::Reset),
             "wrap" => Ok(Self::Wrap),
             _ => Err(GhostraceError::MigrationLedger("cursor state kind is invalid".to_owned())),
@@ -293,12 +300,14 @@ impl CursorToken {
         match candidate.kind {
             CursorKind::Reset => CursorTransition::Reset,
             CursorKind::Wrap => CursorTransition::Wrap,
-            CursorKind::Opaque | CursorKind::Sequence => match self.compare(candidate) {
-                CursorOrder::Advance => CursorTransition::Advance,
-                CursorOrder::Regression => CursorTransition::Regression,
-                CursorOrder::Unknown => CursorTransition::Unknown,
-                CursorOrder::Equal => CursorTransition::Duplicate,
-            },
+            CursorKind::Opaque | CursorKind::Sequence | CursorKind::Sparse => {
+                match self.compare(candidate) {
+                    CursorOrder::Advance => CursorTransition::Advance,
+                    CursorOrder::Regression => CursorTransition::Regression,
+                    CursorOrder::Unknown => CursorTransition::Unknown,
+                    CursorOrder::Equal => CursorTransition::Duplicate,
+                }
+            }
         }
     }
 
@@ -393,6 +402,7 @@ fn parse_ordered(value: &str) -> Option<(CursorKind, u64, u128)> {
     let mut fields = value.split('-');
     let kind = match fields.next()? {
         "seq" => CursorKind::Sequence,
+        "sparse" => CursorKind::Sparse,
         "reset" => CursorKind::Reset,
         "wrap" => CursorKind::Wrap,
         _ => return None,

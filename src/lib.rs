@@ -5,6 +5,7 @@
 //! fixture ingestion into an encrypted local SQLite journal.
 
 pub mod authenticated;
+pub mod browser_origin;
 pub mod claims;
 pub mod consent;
 pub mod correlation;
@@ -49,6 +50,10 @@ pub mod writer;
 pub use authenticated::{
     AuthenticatedAnomaly, AuthenticatedDeletionMarker, AuthenticatedState,
     AuthenticatedStateReport, AUTHENTICATED_STATE_DOMAIN, AUTHENTICATED_STATE_SCHEMA_VERSION,
+};
+pub use browser_origin::{
+    CanonicalNavigation, NavigationHostClass, NavigationRefusal, PathSegmentClass, UrlShapePolicy,
+    MAX_RETAINED_PATH_SEGMENT,
 };
 pub use claims::{
     render_claim, ClaimLocale, ClaimTemplateDescriptor, ClaimTemplateId, EvidenceRequirement,

@@ -1045,31 +1045,10 @@ impl FseventsCollector {
                 })?;
                 continue;
             }
-            let source_cursor = SourceCursor::try_from(format!("cursor-{}", event.event_id))?;
-            if let Some(state) = self.journal.cursor_state(&self.replay_boundary.identity)? {
-                let current = CursorToken::new(state.token.raw().clone());
-                let candidate = CursorToken::new(source_cursor.clone());
-                if let (Some(current_position), Some(candidate_position)) =
-                    (current.position(), candidate.position())
-                {
-                    let missing =
-                        candidate_position.saturating_sub(current_position.saturating_add(1));
-                    if missing > 0 {
-                        let gap_cursor =
-                            SourceCursor::try_from(format!("cursor-{}", candidate_position - 1))?;
-                        self.submit_gap(GapSubmission {
-                            dropped_count: missing.min(u128::from(u64::MAX)) as u64,
-                            reason_code: "cursor_jump",
-                            source_cursor: Some(gap_cursor),
-                            from_cursor: Some(state.token.raw().clone()),
-                            to_cursor: Some(source_cursor.clone()),
-                            remediation: Some(GapRemediation::RescanSelectedRoots),
-                            root_ids: self.affected_root_ids(&event.path, &normalized),
-                            requires_reconciliation: false,
-                        })?;
-                    }
-                }
-            }
+            // FSEvents IDs are system-global, so consecutive deliveries for the
+            // selected roots are normally non-contiguous. A hole is not a loss:
+            // loss is reported only by the source's own drop and rescan flags.
+            let source_cursor = native_cursor(event.event_id)?;
             // Internal artifacts are checked before root policy, path digest,
             // and writer admission.  This blocks journal feedback loops while
             // leaving unrelated OwnEvent deliveries eligible for evidence.
@@ -1468,7 +1447,7 @@ impl FseventsCollector {
         ) {
             return (None, None, None, 0);
         }
-        let Ok(candidate) = SourceCursor::try_from(format!("cursor-{}", event.event_id)) else {
+        let Ok(candidate) = native_cursor(event.event_id) else {
             return (None, None, None, 0);
         };
         let Some(candidate_position) = CursorToken::new(candidate.clone()).position() else {
@@ -2002,6 +1981,12 @@ fn digest_path_scoped(
     let digest = hasher.finalize();
     let encoded = digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
     Ok(PathDigest::try_from(format!("sha256:{encoded}"))?)
+}
+
+/// The journal cursor for a native FSEvents event ID: a sparse, strictly
+/// increasing position in epoch 0.
+fn native_cursor(event_id: u64) -> Result<SourceCursor, GhostraceError> {
+    SourceCursor::try_from(format!("sparse-0-{event_id}"))
 }
 
 fn operation_for(event: &NormalizedFseventsEvent) -> Option<FileOperation> {
@@ -2581,6 +2566,101 @@ mod tests {
         let rendered = serde_json::to_string(&receipt).expect("receipt JSON");
         assert!(!rendered.contains(&root_path.to_string_lossy().to_string()));
         println!("event-storm-backpressure-receipt={rendered}");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn system_global_id_holes_are_not_recorded_as_lost_events() {
+        use crate::{
+            consent::ConsentPreview,
+            fsevents::{FseventsEvent, FseventsOptions},
+            fsevents_flags::{EVENT_FLAG_KERNEL_DROPPED, EVENT_FLAG_MUST_SCAN_SUB_DIRS},
+            model::EventSource,
+            policy::PolicyDocument,
+            DeterministicKeyProvider,
+        };
+        use chrono::{TimeZone, Utc};
+        use std::fs;
+        use tempfile::tempdir;
+
+        let directory = tempdir().expect("private root");
+        let root_path = directory.path().join("selected-root");
+        fs::create_dir(&root_path).expect("selected root");
+        let root = SelectedRoot::new("root-main", &root_path).expect("root");
+        let document = PolicyDocument::new(
+            "live-filesystem-v1",
+            1,
+            [EventSource::Filesystem, EventSource::Lifecycle],
+            ["root-main"],
+            false,
+        )
+        .expect("policy");
+        let confirmation = ConsentPreview::from_policy(
+            &document,
+            ["path_digest", "operation", "entry_kind"],
+            ["fsevents_coalescing", "no_process_attribution", "history_can_be_dropped"],
+        )
+        .expect("consent preview")
+        .confirm();
+        let journal =
+            Journal::in_memory(DeterministicKeyProvider::from_seed("sparse-ids")).expect("journal");
+        let config = FseventsCollectorConfig {
+            options: FseventsOptions {
+                latency: Duration::from_millis(20),
+                ..FseventsOptions::default()
+            },
+            writer: WriterConfig::default(),
+            collector_instance: "live-sparse-ids".to_owned(),
+            instance_label: "sparse-ids".to_owned(),
+            consent_at: Utc.timestamp_opt(1_750_000_000, 0).single().expect("timestamp"),
+            actor: "human".to_owned(),
+            reason: "root_opt_in".to_owned(),
+            history_timeout: Duration::from_secs(5),
+            internal_paths: InternalPathPolicy::default(),
+        };
+        let mut collector = FseventsCollector::new(confirmation, document, [root], journal, config)
+            .expect("collector");
+        let event = |id: u64, name: &str, flags: u32| FseventsEvent {
+            path: root_path.join(name),
+            event_id: id,
+            flags,
+        };
+        let created = EVENT_FLAG_ITEM_CREATED | EVENT_FLAG_ITEM_IS_FILE;
+        let enqueue = |collector: &FseventsCollector, events: Vec<FseventsEvent>| {
+            let mut pending =
+                collector.pending.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            pending.events.extend(events);
+        };
+        let gap_count = |collector: &FseventsCollector| {
+            collector
+                .journal
+                .events()
+                .expect("events")
+                .iter()
+                .filter(|stored| matches!(stored.event.payload, EventPayload::Gap(_)))
+                .count()
+        };
+
+        // Unrelated activity elsewhere on the system consumes most IDs.
+        enqueue(
+            &collector,
+            vec![
+                event(1_000, "a", created),
+                event(1_950, "b", created),
+                event(90_000, "c", created),
+            ],
+        );
+        assert_eq!(collector.drain_pending().expect("sparse deliveries").len(), 3);
+        assert_eq!(gap_count(&collector), 0, "an ID hole is not a lost event");
+        assert_eq!(collector.status().dropped_events, 0);
+
+        // The source's own drop signal is still a recorded loss.
+        enqueue(
+            &collector,
+            vec![event(90_100, "", EVENT_FLAG_KERNEL_DROPPED | EVENT_FLAG_MUST_SCAN_SUB_DIRS)],
+        );
+        collector.drain_pending().expect("drop signal");
+        assert_eq!(gap_count(&collector), 1, "a kernel drop is recorded as a gap");
     }
 
     #[cfg(target_os = "macos")]
