@@ -379,7 +379,10 @@ and a navigation from a private or incognito context is refused before parsing.
 The default shape is the origin: scheme, ASCII host (internationalized names as
 punycode, trailing dots folded), and a non-default port. Loopback, private,
 link-local, carrier-grade NAT, unique-local, and IPv4-mapped private addresses are
-recorded only as the `private_network` host class; the address is withheld. An
+recorded only as the `private_network` host class; the address is withheld.
+Local-only names (`localhost`, `*.localhost`, `.local`, `.internal`, `.home.arpa`,
+and `.lan`) are treated the same way, because they reveal internal services just as
+an address would. An
 opt-in `first_path_segment` policy keeps the first path segment only when it is a
 short lowercase word (at most 16 characters and one separator); anything else
 becomes an origin-scoped digest, so the same token on two origins is not
