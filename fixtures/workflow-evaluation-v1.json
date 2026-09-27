@@ -1,0 +1,342 @@
+{
+  "schema_version": 1,
+  "program": "ghostrace-workflow-evaluation-v1",
+  "privacy": {
+    "synthetic_only": true,
+    "user_data_included": false,
+    "network_required": false
+  },
+  "epoch": "2026-01-01T00:00:00Z",
+  "window_seconds": 60,
+  "labels": [
+    "supported",
+    "unsupported",
+    "conflicting",
+    "unknowable"
+  ],
+  "workflows": [
+    "build",
+    "test",
+    "checkout",
+    "rebase",
+    "editor_save",
+    "generated_files",
+    "concurrent_unrelated"
+  ],
+  "cases": [
+    {
+      "id": "build-artifact",
+      "workflow": "build",
+      "sources": "shell+filesystem",
+      "events": [
+        {
+          "kind": "shell_finished",
+          "at": 10,
+          "evidence": "direct"
+        },
+        {
+          "kind": "filesystem_changed",
+          "at": 12,
+          "evidence": "direct"
+        }
+      ],
+      "label": "supported",
+      "rationale": "The build command wrote its artifact two seconds after finishing its link step."
+    },
+    {
+      "id": "build-slow-link",
+      "workflow": "build",
+      "sources": "shell+filesystem",
+      "events": [
+        {
+          "kind": "shell_finished",
+          "at": 0,
+          "evidence": "direct"
+        },
+        {
+          "kind": "filesystem_changed",
+          "at": 90,
+          "evidence": "direct"
+        }
+      ],
+      "label": "supported",
+      "rationale": "A slow link step wrote the artifact 90 seconds later; the relation is real but outside the adjacency window."
+    },
+    {
+      "id": "test-fixture-write",
+      "workflow": "test",
+      "sources": "shell+filesystem",
+      "events": [
+        {
+          "kind": "shell_started",
+          "at": 0,
+          "evidence": "direct"
+        },
+        {
+          "kind": "filesystem_changed",
+          "at": 3,
+          "evidence": "direct"
+        }
+      ],
+      "label": "supported",
+      "rationale": "The test run wrote a snapshot file shortly after starting."
+    },
+    {
+      "id": "test-no-write",
+      "workflow": "test",
+      "sources": "shell+filesystem",
+      "events": [
+        {
+          "kind": "shell_finished",
+          "at": 0,
+          "evidence": "direct"
+        },
+        {
+          "kind": "filesystem_changed",
+          "at": 300,
+          "evidence": "direct"
+        }
+      ],
+      "label": "unsupported",
+      "rationale": "The test run wrote nothing; the file change five minutes later is unrelated."
+    },
+    {
+      "id": "checkout-worktree",
+      "workflow": "checkout",
+      "sources": "git+filesystem",
+      "events": [
+        {
+          "kind": "git_snapshot",
+          "at": 5,
+          "evidence": "direct"
+        },
+        {
+          "kind": "filesystem_changed",
+          "at": 6,
+          "evidence": "direct"
+        }
+      ],
+      "label": "supported",
+      "rationale": "A branch checkout rewrote a tracked file."
+    },
+    {
+      "id": "checkout-same-second",
+      "workflow": "checkout",
+      "sources": "git+filesystem",
+      "events": [
+        {
+          "kind": "git_snapshot",
+          "at": 5,
+          "evidence": "direct"
+        },
+        {
+          "kind": "filesystem_changed",
+          "at": 5,
+          "evidence": "direct"
+        }
+      ],
+      "label": "supported",
+      "rationale": "The checkout and the file rewrite fall in the same observed second, so order is not observable."
+    },
+    {
+      "id": "rebase-with-gap",
+      "workflow": "rebase",
+      "sources": "git+filesystem",
+      "events": [
+        {
+          "kind": "git_snapshot",
+          "at": 0,
+          "evidence": "direct"
+        },
+        {
+          "kind": "gap",
+          "at": 1,
+          "evidence": "direct"
+        },
+        {
+          "kind": "filesystem_changed",
+          "at": 2,
+          "evidence": "direct"
+        }
+      ],
+      "label": "unknowable",
+      "rationale": "A history-rewrite gap sits between the snapshot and the change."
+    },
+    {
+      "id": "rebase-clock-skew",
+      "workflow": "rebase",
+      "sources": "git+filesystem",
+      "events": [
+        {
+          "kind": "filesystem_changed",
+          "at": 10,
+          "evidence": "direct"
+        },
+        {
+          "kind": "git_snapshot",
+          "at": 8,
+          "evidence": "direct"
+        }
+      ],
+      "label": "unknowable",
+      "rationale": "The sources disagree about order; the clocks cannot be reconciled."
+    },
+    {
+      "id": "editor-save",
+      "workflow": "editor_save",
+      "sources": "frontmost+filesystem",
+      "events": [
+        {
+          "kind": "frontmost_app_changed",
+          "at": 0,
+          "evidence": "direct"
+        },
+        {
+          "kind": "filesystem_changed",
+          "at": 20,
+          "evidence": "direct"
+        }
+      ],
+      "label": "supported",
+      "rationale": "The editor was frontmost when the saved file changed."
+    },
+    {
+      "id": "editor-save-unknown-evidence",
+      "workflow": "editor_save",
+      "sources": "frontmost+filesystem",
+      "events": [
+        {
+          "kind": "frontmost_app_changed",
+          "at": 0,
+          "evidence": "direct"
+        },
+        {
+          "kind": "filesystem_changed",
+          "at": 4,
+          "evidence": "unknown"
+        }
+      ],
+      "label": "unknowable",
+      "rationale": "The filesystem observation has unknown evidence quality."
+    },
+    {
+      "id": "generated-by-watcher",
+      "workflow": "generated_files",
+      "sources": "shell+filesystem",
+      "events": [
+        {
+          "kind": "shell_finished",
+          "at": 0,
+          "evidence": "direct"
+        },
+        {
+          "kind": "filesystem_changed",
+          "at": 30,
+          "evidence": "direct"
+        }
+      ],
+      "label": "unsupported",
+      "rationale": "A background file watcher, not the shell command, generated the file 30 seconds later."
+    },
+    {
+      "id": "generated-by-codegen",
+      "workflow": "generated_files",
+      "sources": "shell+filesystem",
+      "events": [
+        {
+          "kind": "shell_finished",
+          "at": 0,
+          "evidence": "direct"
+        },
+        {
+          "kind": "filesystem_changed",
+          "at": 8,
+          "evidence": "direct"
+        }
+      ],
+      "label": "supported",
+      "rationale": "A code generator run through the shell wrote its output."
+    },
+    {
+      "id": "concurrent-sync",
+      "workflow": "concurrent_unrelated",
+      "sources": "frontmost+filesystem",
+      "events": [
+        {
+          "kind": "frontmost_app_changed",
+          "at": 0,
+          "evidence": "direct"
+        },
+        {
+          "kind": "filesystem_changed",
+          "at": 10,
+          "evidence": "direct"
+        }
+      ],
+      "label": "unsupported",
+      "rationale": "A cloud-sync client changed a file while an unrelated browser was frontmost."
+    },
+    {
+      "id": "concurrent-two-candidates",
+      "workflow": "concurrent_unrelated",
+      "sources": "shell+frontmost+filesystem",
+      "events": [
+        {
+          "kind": "shell_finished",
+          "at": 0,
+          "evidence": "direct"
+        },
+        {
+          "kind": "frontmost_app_changed",
+          "at": 1,
+          "evidence": "direct"
+        },
+        {
+          "kind": "filesystem_changed",
+          "at": 2,
+          "evidence": "direct"
+        }
+      ],
+      "label": "conflicting",
+      "rationale": "Both a shell command and an editor are plausible sources for the change."
+    },
+    {
+      "id": "commit-via-shell",
+      "workflow": "checkout",
+      "sources": "shell+git",
+      "events": [
+        {
+          "kind": "shell_finished",
+          "at": 0,
+          "evidence": "direct"
+        },
+        {
+          "kind": "git_snapshot",
+          "at": 1,
+          "evidence": "direct"
+        }
+      ],
+      "label": "supported",
+      "rationale": "A commit made through the shell moved HEAD."
+    },
+    {
+      "id": "unrelated-far-apart",
+      "workflow": "concurrent_unrelated",
+      "sources": "shell+git",
+      "events": [
+        {
+          "kind": "shell_finished",
+          "at": 0,
+          "evidence": "direct"
+        },
+        {
+          "kind": "git_snapshot",
+          "at": 400,
+          "evidence": "direct"
+        }
+      ],
+      "label": "unsupported",
+      "rationale": "The shell command and the Git snapshot are minutes apart and unrelated."
+    }
+  ]
+}
