@@ -366,3 +366,27 @@ empty patterns, versioned future-only updates, and repeated maximum-size matchin
 
 See [EVALUATION.md](EVALUATION.md) for the evidence expected before a live source is
 enabled.
+
+## Browser navigation shape
+
+A future navigation collector may retain only a `CanonicalNavigation`
+(`src/browser_origin.rs`). Parsing follows the WHATWG URL standard, so the
+recorded host is the one a browser would contact. Only `http` and `https` are
+navigations; `file`, `blob`, `data`, `about` and browser-internal pages,
+extension pages, script URLs, and opaque URLs are refused with an explicit reason,
+and a navigation from a private or incognito context is refused before parsing.
+
+The default shape is the origin: scheme, ASCII host (internationalized names as
+punycode, trailing dots folded), and a non-default port. Loopback, private,
+link-local, carrier-grade NAT, unique-local, and IPv4-mapped private addresses are
+recorded only as the `private_network` host class; the address is withheld. An
+opt-in `first_path_segment` policy keeps the first path segment only when it is a
+short lowercase word (at most 16 characters and one separator); anything else
+becomes an origin-scoped digest, so the same token on two origins is not
+linkable. The type has no field for userinfo, query, fragment, or private-context
+markers. `tests/browser_origin.rs` pins the outcome of each URL class and runs
+2,000 generated URLs carrying sentinel credentials, queries, fragments, and
+private markers to prove none of them serialize. This closes the retained-path,
+trailing-dot, and private-address findings recorded in the browser threat corpus
+for the navigation shape; no browser collector ships yet.
+
