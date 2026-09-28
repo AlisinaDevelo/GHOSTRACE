@@ -3,15 +3,14 @@
   "corpus": "ghostrace-workflow-evaluation-v1",
   "rule": "cross_source_temporal_adjacency",
   "cases": 16,
-  "precision": 0.6667,
+  "precision": 0.75,
   "coverage": 0.75,
-  "abstention_rate": 0.25,
-  "honest_abstention": 0.75,
+  "abstention_rate": 0.3125,
+  "honest_abstention": 1.0,
   "gap_visibility": 1.0,
   "false_positives": [
     "generated-by-watcher",
-    "concurrent-sync",
-    "concurrent-two-candidates"
+    "concurrent-sync"
   ],
   "false_negatives": [
     "build-slow-link",
@@ -153,10 +152,10 @@
       "workflow": "concurrent_unrelated",
       "sources": "shell+frontmost+filesystem",
       "label": "conflicting",
-      "prediction": "supported",
-      "reason": "bounded_cross_source_adjacency",
-      "evidence": "inferred",
-      "correct": false
+      "prediction": "abstain",
+      "reason": "competing_sources",
+      "evidence": "unknown",
+      "correct": true
     },
     {
       "id": "commit-via-shell",
