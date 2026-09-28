@@ -896,3 +896,29 @@ verified in constant time. A transcript from an earlier session, including one
 replayed after a host restart, therefore never verifies; ordering and replay
 within a session are enforced by `ProtocolSession`. HMAC is built on the crate's
 existing SHA-256 and checked against RFC 4231 vectors in `tests/browser_pairing.rs`.
+
+## Native host session
+
+`NativeHostSession` (`src/native_host.rs`) composes the browser pieces for one
+native-messaging connection. `hello` carries the pairing ID, extension ID, key and
+permission digests, and a 32-byte client nonce in hex; the session admits it
+against the stored `PairingRecord`, derives the session key with a fresh host
+nonce, and replies `welcome` with that nonce (or ends with a fixed `refused`
+code: `not_paired`, `revoked`, `re_pairing_required`, `unauthenticated`, or
+`protocol_error`). Every later message carries `mac`, HMAC-SHA256 under the
+session key over the message's sequence number and its canonical input:
+
+```text
+ghostrace-nm-v1\nnavigation\n<seq>\n<0|1 private_context>\n<transition>\n<url>
+ghostrace-nm-v1\nheartbeat\n<seq>
+ghostrace-nm-v1\ngoodbye\n<seq>
+```
+
+The browser serializes messages itself, so the MAC is defined over these typed
+fields rather than JSON text, and the extension builds the identical bytes. The
+MAC is verified before sequence handling, so an unauthenticated message cannot
+advance or disturb session state; then `ProtocolSession` applies its ordering,
+replay, deadline, and rate rules; then a navigation is reduced by
+`CanonicalNavigation` or counted as refused. The caller closes the connection on
+any error. `tests/native_host_session.rs` drives the full handshake from the
+extension's side.

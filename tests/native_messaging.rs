@@ -11,13 +11,19 @@ use sha2::{Digest, Sha256};
 
 const SENTINEL: &str = "SENTINEL-native-host-payload";
 
+const PAIRING: &str = r#""pairing_id":"00000000-0000-4000-8000-000000000001","extension_id":"abcdefghijklmnopabcdefghijklmnop","extension_key_digest":"aa","permissions_digest":"bb","client_nonce":"cc""#;
+
+fn hello_with(version: u32, seq: u64) -> Vec<u8> {
+    format!(r#"{{"type":"hello","protocol_version":{version},"seq":{seq},{PAIRING}}}"#).into_bytes()
+}
+
 fn hello() -> Vec<u8> {
-    br#"{"type":"hello","protocol_version":1,"seq":1}"#.to_vec()
+    hello_with(1, 1)
 }
 
 fn nav(seq: u64) -> Vec<u8> {
     format!(
-        r#"{{"type":"navigation","seq":{seq},"url":"https://example.com/","private_context":false,"transition":"committed"}}"#
+        r#"{{"type":"navigation","seq":{seq},"url":"https://example.com/","private_context":false,"transition":"committed","mac":"00"}}"#
     )
     .into_bytes()
 }
@@ -82,7 +88,7 @@ fn unknown_types_fields_and_hostile_structure_are_refused() {
     assert_eq!(parse_message(wide.as_bytes()), Err(NativeMessagingError::TooManyValues));
     // Brackets inside strings do not count as nesting.
     let quoted = format!(
-        r#"{{"type":"navigation","seq":2,"url":"https://e.com/{}","private_context":false,"transition":"committed"}}"#,
+        r#"{{"type":"navigation","seq":2,"url":"https://e.com/{}","private_context":false,"transition":"committed","mac":"00"}}"#,
         "[".repeat(40)
     );
     assert!(parse_message(quoted.as_bytes()).is_ok());
@@ -107,12 +113,15 @@ fn the_session_enforces_hello_version_sequence_and_shutdown() {
         session.receive(&nav(5), at(4)),
         Ok(SessionEvent::AcceptedAfterGap { missing: 2, .. })
     ));
-    assert_eq!(session.receive(br#"{"type":"goodbye","seq":6}"#, at(5)), Ok(SessionEvent::Closed));
+    assert_eq!(
+        session.receive(br#"{"type":"goodbye","seq":6,"mac":"00"}"#, at(5)),
+        Ok(SessionEvent::Closed)
+    );
     assert_eq!(session.receive(&nav(7), at(6)), Err(NativeMessagingError::TrailingData));
 
     let mut downgrade = ProtocolSession::new();
     assert_eq!(
-        downgrade.receive(br#"{"type":"hello","protocol_version":0,"seq":1}"#, at(0)),
+        downgrade.receive(&hello_with(0, 1), at(0)),
         Err(NativeMessagingError::UnsupportedVersion)
     );
     assert_eq!(downgrade.receive(&hello(), at(1)), Err(NativeMessagingError::TrailingData));
@@ -120,7 +129,7 @@ fn the_session_enforces_hello_version_sequence_and_shutdown() {
     let mut renegotiate = ProtocolSession::new();
     renegotiate.receive(&hello(), at(0)).expect("hello");
     assert_eq!(
-        renegotiate.receive(br#"{"type":"hello","protocol_version":1,"seq":2}"#, at(1)),
+        renegotiate.receive(&hello_with(1, 2), at(1)),
         Err(NativeMessagingError::DuplicateHello)
     );
     assert_eq!(renegotiate.receive(&nav(3), at(2)), Err(NativeMessagingError::TrailingData));
@@ -153,7 +162,7 @@ fn idle_sessions_time_out_and_floods_are_rate_limited() {
 
 #[test]
 fn deterministic_fuzz_never_panics_or_echoes_input() {
-    let valid = [hello(), nav(2), br#"{"type":"heartbeat","seq":3}"#.to_vec()];
+    let valid = [hello(), nav(2), br#"{"type":"heartbeat","seq":3,"mac":"00"}"#.to_vec()];
     let mut state = 0u64;
     let mut next = || {
         state += 1;
