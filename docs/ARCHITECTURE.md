@@ -118,8 +118,7 @@ caller can treat a partially validated body as a complete export.
 
 [`schemas/parquet-archive-profile-v1.json`](../schemas/parquet-archive-profile-v1.json)
 and its [golden profile](../fixtures/parquet-archive-profile-v1.golden.json) define
-the contract for a future optional Parquet cold archive. The profile is not a writer
-and does not replace the encrypted journal or JSONL export: it describes a derived,
+the contract for the optional Parquet cold archive. The archive does not replace the encrypted journal or JSONL export: it describes a derived,
 explicit plaintext boundary that must be validated before publication. Version `1`
 has exactly 23 columns. Event identity, both timestamps, source/kind, provenance,
 policy identity, evidence, causal parent, and canonical payload JSON are retained
@@ -134,10 +133,28 @@ new profile version, while undeclared columns are rejected. Streaming validation
 bounded to 23 columns, 1 MiB per row, 10 million rows, and 64 KiB of profile metadata.
 The profile requires Zstandard compression, disables dictionary encoding, column
 statistics, and page indexes to reduce metadata leakage, and records that Parquet
-encryption is not assumed. A future writer must use mode `0600` temporary files,
-atomic publication, cleanup on failure, and leave the source journal untouched.
-Automatic archive creation is forbidden, and deletion semantics explicitly stop at
-the external-copy boundary.
+encryption is not assumed. Automatic archive creation is forbidden, and deletion
+semantics explicitly stop at the external-copy boundary.
+
+The writer (`src/parquet_archive.rs`) is behind the opt-in `parquet` cargo feature,
+built on the `parquet` crate without Arrow, so default and release builds do not
+link it. It reads only a JSONL export that passes `validate_export`, never the
+journal. Columns are flat, in profile order: `utf8` is `BYTE_ARRAY` (String),
+`uint32` and `uint64` are unsigned `INT32`/`INT64`, and timestamps are `INT64`
+nanoseconds since the epoch, adjusted to UTC. Nullable columns are `OPTIONAL`, the
+rest `REQUIRED`. Row groups hold at most 16,384 rows or 64 MiB of row JSON.
+
+The footer's key-value metadata, all under `ghostrace.archive.`, records
+`profile_schema_id`, `profile_version`, `profile_sha256` (of the golden profile),
+`source_manifest_sha256` (of the export's manifest line),
+`source_event_body_sha256` (the export's event body digest), `row_count`,
+`rows_sha256` (SHA-256 over each row's canonical JSON plus a newline, in order),
+and the plaintext warning. The file is written to a `0600` temporary beside the
+destination and synced. Every row is then read back, rebuilt into its JSONL event
+record, and compared with the export after both pass through `EventEnvelope`, and
+the footer counts and digests are recomputed. Only then is the file renamed into
+place without replacing an existing file. Any failure removes the temporary.
+`verify_parquet_archive` repeats the same comparison later.
 
 ### Explicit shell-wrapper metadata
 

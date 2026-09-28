@@ -154,7 +154,9 @@ encryption or key-management claim.
 | ghostrace preview/export --fixture ... | Available in-memory shortcut with the same explicit confirmation gate |
 | ghostrace validate --export ... | Available; rejects incomplete, mixed-version, or digest-drifted JSONL before consumption |
 | ghostrace schema | Available |
-| ghostrace parquet-profile | Available; prints and validates the strict v1 profile for a future derived Parquet archive; no archive is created |
+| ghostrace parquet-profile | Available; prints and validates the strict v1 profile for the derived Parquet archive |
+| ghostrace archive --export ... --output ... --yes | Opt-in (`--features parquet`); writes a plaintext Parquet cold archive from a validated JSONL export, reads it back and compares every record before an atomic 0600 publish, and never replaces an existing file |
+| ghostrace verify-archive --archive ... --export ... | Opt-in; rechecks an archive against its footer digests and its source export |
 | ghostrace shell-schema | Available; prints the strict v1 metadata-only contract for a future explicit shell wrapper; no shell is executed |
 | ghostrace capture | Refuses by design |
 | Local journal and bounded durable writer | Scaffolded for the fixture path; live ingestion is gated |
@@ -167,7 +169,7 @@ encryption or key-management claim.
 | Cross-source correlation rule registry | Available as a versioned, policy-bounded adjacency rule; unknown coverage, unsupported scope, and clock skew abstain instead of becoming positive evidence |
 | Explanation determinism and counterexamples | Available as an offline golden/property/mutation matrix; every claim template and evidence level is exercised, ordering/page permutations are compared, and required-observation removal must downgrade or remove a claim |
 | Export schema and manifest registry | Available as six strict v1 contracts with stable IDs, golden examples, version declarations, fail-closed streaming validation for mixed versions, counts, bytes, and body digests, and bounded record/metadata limits |
-| Derived Parquet archive profile | Available as a strict, lossless 23-column v1 contract with explicit gap/provenance/policy mappings, additive-nullable evolution gates, bounded rows/metadata, and privacy-safe storage defaults; a writer remains a later task |
+| Derived Parquet archive profile | Available as a strict, lossless 23-column v1 contract with explicit gap/provenance/policy mappings, additive-nullable evolution gates, bounded rows/metadata, and privacy-safe storage defaults; the opt-in writer follows it exactly |
 | Explicit shell metadata schema | Available as a strict v1 contract for wrapper session, executable identity, sanitized working-directory identity, timing, outcome, exit code, and signal; raw command state is structurally rejected |
 | Shell wrapper lifecycle contract | Available as synthetic reference tests for child status propagation and explicit incomplete-execution gaps; no shell executor is shipped |
 | Shell secret-leakage red-team contract | Available as synthetic negative tests for metadata, journal, diagnostics, exports, panic output, and documented OS exposure; no shell capture is shipped |
