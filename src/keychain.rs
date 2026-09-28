@@ -32,6 +32,23 @@ pub struct MacOsKeychainProvider {
     /// An explicit legacy keychain is only used by the device lifecycle
     /// harness. The normal provider path remains the protected data keychain.
     keychain_path: Option<PathBuf>,
+    /// Use the user's login keychain through the legacy keychain API. This is
+    /// an explicit opt-in for unsigned or ad-hoc-signed builds, which the
+    /// data-protection keychain refuses.
+    login_keychain: bool,
+}
+
+/// Which keychain holds the journal wrapping key.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyCustody {
+    /// Data-protection keychain, bound to the signed app's entitlements.
+    DataProtection,
+    /// The user's login keychain; the item's access list follows the binary's
+    /// code signature, so an unsigned rebuild must be re-approved.
+    LoginKeychain,
+    /// An explicitly opened keychain file, used by device test harnesses.
+    ExplicitKeychain,
 }
 
 impl fmt::Debug for MacOsKeychainProvider {
@@ -53,6 +70,29 @@ impl MacOsKeychainProvider {
             account: JOURNAL_KEYCHAIN_ACCOUNT.to_owned(),
             access_group: None,
             keychain_path: None,
+            login_keychain: false,
+        }
+    }
+
+    /// Opt in to the login keychain for the default journal identity.
+    pub fn login_keychain() -> Self {
+        Self { login_keychain: true, ..Self::new() }
+    }
+
+    /// Opt in to the login keychain for an explicit identity.
+    pub fn login_keychain_with_identity(
+        service: impl Into<String>,
+        account: impl Into<String>,
+    ) -> Result<Self, CryptoError> {
+        let provider = Self::with_identity(service, account, None::<String>)?;
+        Ok(Self { login_keychain: true, ..provider })
+    }
+
+    pub fn custody(&self) -> KeyCustody {
+        match (&self.keychain_path, self.login_keychain) {
+            (Some(_), _) => KeyCustody::ExplicitKeychain,
+            (None, true) => KeyCustody::LoginKeychain,
+            (None, false) => KeyCustody::DataProtection,
         }
     }
 
@@ -69,7 +109,7 @@ impl MacOsKeychainProvider {
         if let Some(group) = access_group.as_deref() {
             validate_identity("access group", group)?;
         }
-        Ok(Self { service, account, access_group, keychain_path: None })
+        Ok(Self { service, account, access_group, keychain_path: None, login_keychain: false })
     }
 
     /// Construct a provider backed by an explicitly opened legacy keychain.
@@ -114,8 +154,7 @@ impl MacOsKeychainProvider {
             return Err(CryptoError::KeyProvider("keychain item already exists".to_owned()));
         }
 
-        if let Some(path) = self.keychain_path.as_deref() {
-            let keychain = self.open_explicit_keychain(path)?;
+        if let Some(keychain) = self.legacy_keychain()? {
             keychain
                 .add_generic_password(&self.service, &self.account, &key)
                 .map_err(|error| map_security_error("provision keychain item", error))?;
@@ -155,8 +194,7 @@ impl MacOsKeychainProvider {
     /// Delete the exact non-synchronizable item. This is intended for explicit
     /// key-destruction workflows and test cleanup, not implicit recovery.
     pub fn delete(&self) -> Result<(), CryptoError> {
-        if let Some(path) = self.keychain_path.as_deref() {
-            let keychain = self.open_explicit_keychain(path)?;
+        if let Some(keychain) = self.legacy_keychain()? {
             let (_, item) = keychain
                 .find_generic_password(&self.service, &self.account)
                 .map_err(|error| map_security_error("delete keychain item", error))?;
@@ -181,8 +219,7 @@ impl MacOsKeychainProvider {
     }
 
     fn search_items(&self) -> Result<Vec<Vec<u8>>, CryptoError> {
-        if let Some(path) = self.keychain_path.as_deref() {
-            let keychain = self.open_explicit_keychain(path)?;
+        if let Some(keychain) = self.legacy_keychain()? {
             return match keychain.find_generic_password(&self.service, &self.account) {
                 Ok((password, _item)) => Ok(vec![password.as_ref().to_vec()]),
                 Err(error) if error.code() == -25300 => Ok(Vec::new()),
@@ -214,6 +251,17 @@ impl MacOsKeychainProvider {
 
     fn open_explicit_keychain(&self, path: &Path) -> Result<SecKeychain, CryptoError> {
         SecKeychain::open(path).map_err(|error| map_security_error("open keychain", error))
+    }
+
+    /// The legacy keychain to use, if this provider is not data-protection.
+    fn legacy_keychain(&self) -> Result<Option<SecKeychain>, CryptoError> {
+        match (&self.keychain_path, self.login_keychain) {
+            (Some(path), _) => self.open_explicit_keychain(path).map(Some),
+            (None, true) => SecKeychain::default()
+                .map(Some)
+                .map_err(|error| map_security_error("open login keychain", error)),
+            (None, false) => Ok(None),
+        }
     }
 }
 
