@@ -33,6 +33,8 @@ pub mod journal;
 pub mod key_lifecycle;
 #[cfg(target_os = "macos")]
 pub mod keychain;
+#[cfg(target_os = "macos")]
+pub mod live;
 #[cfg(unix)]
 pub mod local_service;
 pub mod model;
