@@ -855,3 +855,22 @@ request ID must not have been seen in the replay window; and the requested
 capability (`read`, `export`, `policy`, `lifecycle`, `admin`) must have been
 granted when the service was bound. Nothing is granted by default, and refusals
 are fixed error values. `tests/local_service.rs` covers each check.
+
+## Native-host manifest registration
+
+`NativeHostInstaller` (`src/native_host_manifest.rs`) registers the GHOSTRACE
+native host for Chrome, Chrome Beta, Chromium, or Edge by writing
+`com.alisinadevelo.ghostrace.json` into that browser's per-user
+`NativeMessagingHosts` directory. The manifest is fixed: name, description, the
+absolute host binary path, `stdio`, and exactly one allowed origin,
+`chrome-extension://<32 letters a-p>/`; wildcards and malformed IDs are refused
+before anything is written. `plan` reports the exact file and action; `install`
+exclusive-creates or atomically replaces only a manifest whose digest matches the
+receipt beside it, so moving the host binary is an upgrade; `verify` reports
+intact, missing, drifted, or not installed; `uninstall` removes the manifest only
+while it is byte-identical to what was installed. Removing the manifest is how a
+browser stops launching the host, so there is no separate disable state. A
+manifest GHOSTRACE did not write, a symlinked or group/other-writable directory
+anywhere below the support root, a linked or foreign-owned manifest, and a
+manifest edited to admit another origin are all refused, and other hosts'
+manifests are never touched. `tests/native_host_manifest.rs` covers each case.
