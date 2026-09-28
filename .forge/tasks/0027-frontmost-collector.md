@@ -26,4 +26,5 @@ Record opt-in application focus transitions using the least invasive macOS inter
 Application attribution helps establish user context around changes without observing screen content or document-level activity.
 
 ## Notes
+The application name is the developer-set `CFBundleName` and the version is `CFBundleShortVersionString`, both read from the signed bundle's Info.plist; the localized display name and bundle path are never stored, because a user can rename them (see task 0098).
 No implementation notes yet.

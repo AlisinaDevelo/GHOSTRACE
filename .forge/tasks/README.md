@@ -43,7 +43,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0037 | Add launchd user-agent lifecycle and permission UX | M5 | backlog | service-ui | maintainer | — | 0013, 0027, 0030, 0035, 0114 |
 | 0038 | Harden release signing, notarization, SBOM, and dependencies | M6 | backlog | release-scale | maintainer | — | 0005, 0008, 0023, 0031, 0037, 0047, 0048, 0115, 0116, 0117, 0118 |
 | 0039 | Establish performance and resource benchmark gates | M6 | backlog | release-scale | maintainer | — | 0013, 0018, 0035, 0037, 0119, 0120, 0163 |
-| 0040 | Complete v1.0 compatibility, privacy, and incident readiness | M6 | backlog | release-scale | maintainer | — | 0020, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028, 0029, 0030, 0031, 0032, 0033, 0034, 0035, 0036, 0037, 0038, 0039, 0041, 0042, 0121, 0122, 0123, 0161, 0162 |
+| 0040 | Complete v1.0 compatibility, privacy, and incident readiness | M6 | backlog | release-scale | maintainer | — | 0020, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028, 0029, 0030, 0031, 0032, 0033, 0034, 0035, 0036, 0037, 0038, 0039, 0041, 0042, 0121, 0122, 0123, 0161, 0162, 0164, 0165, 0167, 0168, 0169, 0170 |
 | 0041 | Validate the project identity and package namespaces | M0 | done | foundation | maintainer | — | 0001 |
 | 0042 | Evaluate optional Endpoint Security actor attribution | M6 | backlog | release-scale | maintainer | — | 0017, 0019, 0037, 0124 |
 | 0043 | Build the prohibited-data privacy regression corpus | M0 | done | privacy | test-engineer | 0005 | 0004, 0006 |
@@ -105,7 +105,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0099 | Test frontmost sleep, wake, and privacy transitions | M4 | done | frontmost | test-engineer | 0028 | 0018, 0098 |
 | 0100 | Evaluate developer-workflow cross-source explanations | M4 | done | frontmost | researcher | 0028 | 0092, 0096, 0099 |
 | 0101 | Build the browser integration threat corpus | M5 | done | browser | security-auditor | 0029 | 0002, 0004, 0005, 0012 |
-| 0102 | Install and remove the native-host manifest safely | M5 | backlog | browser | macos-engineer | 0030 | 0008, 0010, 0029 |
+| 0102 | Install and remove the native-host manifest safely | M5 | done | browser | macos-engineer | 0030 | 0008, 0010, 0029 |
 | 0103 | Version and bound the native-messaging protocol | M5 | backlog | browser | api-designer | 0030 | 0102 |
 | 0104 | Implement explicit browser pairing and replay protection | M5 | backlog | browser | security-auditor | 0030 | 0102 |
 | 0105 | Define Chromium navigation permission and state handling | M5 | backlog | browser | browser-engineer | 0031 | 0007, 0029, 0103, 0104 |
@@ -114,7 +114,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0108 | Enforce private and incognito context refusal | M5 | backlog | browser | privacy-engineer | 0033 | 0105, 0107 |
 | 0109 | Fuzz hostile extension and native-host messages | M5 | backlog | browser | test-engineer | 0033 | 0103, 0104 |
 | 0110 | Run a Safari WebExtension parity gate | M5 | backlog | browser | macos-engineer | 0034 | 0029, 0108, 0109 |
-| 0111 | Authenticate the local Unix-socket protocol | M5 | backlog | service-ui | security-auditor | 0035 | 0010, 0018, 0020, 0029 |
+| 0111 | Authenticate the local Unix-socket protocol | M5 | done | service-ui | security-auditor | 0035 | 0010, 0018, 0020, 0029 |
 | 0112 | Bound and fuzz every local-service capability | M5 | backlog | service-ui | test-engineer | 0035 | 0111 |
 | 0113 | Design an accessible evidence and gap interface | M5 | backlog | service-ui | accessibility-specialist | 0036 | 0019, 0020, 0035 |
 | 0114 | Make launchd install, upgrade, and permission recovery reversible | M5 | backlog | service-ui | macos-engineer | 0037 | 0013, 0027, 0030, 0035 |
@@ -164,6 +164,12 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0158 | Commission an independent privacy and security audit | M11 | backlog | long-term | security-auditor | 0153 | 0146, 0154, 0155, 0156 |
 | 0159 | Run the v2 migration and rollback release candidate | M11 | backlog | long-term | release-engineer | 0153 | 0154, 0155, 0156, 0158 |
 | 0160 | Publish the 2032 research and sustainability decision | M11 | backlog | long-term | maintainer | 0153 | 0145, 0151, 0157 |
-| 0161 | Ship an explicit ghostrace run CLI over a Keychain journal | M4 | backlog | shell-git | macos-engineer | 0024 | 0024, 0054 |
+| 0161 | Ship an explicit ghostrace run CLI over a Keychain journal | M4 | backlog | shell-git | macos-engineer | 0024 | 0024, 0054, 0164, 0165 |
 | 0162 | Close interrupted shell runs with explicit gaps | M4 | done | shell-git | test-engineer | 0024 | 0024 |
 | 0163 | Bring the native FSEvents benchmark within its device bound | M6 | done | release-scale | performance-engineer | 0039 | 0017 |
+| 0164 | Offer opt-in login-keychain key custody for unsigned builds | M4 | backlog | storage | maintainer | — | 0054, 0055 |
+| 0165 | Operate a durable live journal from the CLI | M4 | backlog | foundation | maintainer | — | 0164, 0018, 0019, 0020 |
+| 0167 | Watch a selected folder from the CLI with explicit consent | M4 | backlog | filesystem | macos-engineer | — | 0165, 0013, 0016 |
+| 0168 | Record explicit Git snapshots from the CLI | M4 | backlog | shell-git | git-specialist | — | 0165, 0025, 0096 |
+| 0169 | Render an offline HTML timeline report | M4 | backlog | explain-export | frontend-specialist | — | 0165, 0019 |
+| 0170 | Publish a guided live demo | M4 | backlog | foundation | maintainer | — | 0161, 0167, 0168, 0169 |
