@@ -193,7 +193,9 @@ pub use key_lifecycle::{
     KEY_LIFECYCLE_SCHEMA_VERSION, MAX_KEY_GENERATIONS,
 };
 #[cfg(target_os = "macos")]
-pub use keychain::{MacOsKeychainProvider, JOURNAL_KEYCHAIN_ACCOUNT, JOURNAL_KEYCHAIN_SERVICE};
+pub use keychain::{
+    KeyCustody, MacOsKeychainProvider, JOURNAL_KEYCHAIN_ACCOUNT, JOURNAL_KEYCHAIN_SERVICE,
+};
 #[cfg(unix)]
 pub use local_service::{
     request as service_request, LocalService, ServiceCapability, ServiceError, ServiceHandler,

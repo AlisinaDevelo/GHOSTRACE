@@ -393,3 +393,22 @@ private markers to prove none of them serialize. This closes the retained-path,
 trailing-dot, and private-address findings recorded in the browser threat corpus
 for the navigation shape; no browser collector ships yet.
 
+
+## Key custody without Developer ID signing
+
+The data-protection keychain binds the journal key to a signed application's
+entitlements, and it refuses unsigned or ad-hoc-signed binaries. For those builds,
+`MacOsKeychainProvider::login_keychain()` is an explicit opt-in that keeps the
+same 32-byte wrapping key as a non-synchronizable generic password in the user's
+login keychain. It is never chosen implicitly, reading never creates an item, and
+an existing item is never replaced; `custody()` reports `login_keychain` so status
+output can say which backend holds the key. The journal encryption format is
+unchanged.
+
+The guarantee is weaker than data protection: the item is protected by the login
+keychain's password and an access list that follows the reading binary's code
+signature, so an unsigned rebuild asks the user to approve access again, and any
+process the user approves can read the key. Data protection remains the default
+for signed builds. `tests/login_keychain.rs` exercises provisioning, read-back,
+refusal to overwrite, a journal encrypted and reopened with the key, and deletion
+against the real login keychain when `GHOSTRACE_LOGIN_KEYCHAIN_TEST=1`.
