@@ -1,6 +1,6 @@
 # ADR 0005: Browser transport, pairing, and permissions
 
-- **Status:** Proposed (decision owned by task 0029)
+- **Status:** Accepted (task 0029)
 - **Date:** 2026-09-27
 - **Scope:** Browser integration trust boundary
 
@@ -13,23 +13,62 @@ without GHOSTRACE noticing. The threat corpus
 [`fixtures/browser-threat-corpus-v1.json`](../../fixtures/browser-threat-corpus-v1.json)
 fixes the expected outcome of each of these cases before any browser code ships.
 
-## Proposed decision
+## Decision
 
-- Transport is Chrome/Chromium native messaging to a GHOSTRACE native host that
-  owns framing, a versioned protocol, and pairing. No local network listener,
-  WebSocket, or browser-side storage of evidence.
-- Every frame is length-bounded and must be valid UTF-8 JSON of a known message
-  type for the negotiated version (tasks 0103).
-- The native host accepts messages only from an explicitly paired extension ID
-  and key. Pairing yields a per-session key; each message carries a monotonically
-  increasing sequence number and MAC. Duplicates and replays are rejected, and a
-  skipped sequence records a gap (task 0104).
-- URLs pass through `SanitizedUrl` before any other use. Origin canonicalization
-  and path minimization are task 0106; until then the retained path is an
-  accepted risk below.
-- Private and incognito contexts are refused before persistence (task 0108).
+- Transport has two hops and no network listener. The extension talks to a
+  GHOSTRACE native host through Chrome/Chromium native messaging (stdin/stdout of a
+  host process the browser launches). The native host relays accepted, already
+  canonicalized records to the GHOSTRACE local service over a Unix-domain socket
+  whose directory is owned by the user with mode 0700 and whose socket is mode
+  0600 (tasks 0035 and 0111). The native host never writes the journal itself; the
+  service remains the single writer.
+- **Localhost HTTP is rejected.** No TCP listener on loopback or any other
+  interface, no WebSocket, no local HTTP server, and no `externally_connectable`
+  web origin. A loopback port is reachable by every local process and by web
+  pages through DNS rebinding, and it gives no peer identity.
+- Message limits (task 0103, `src/native_messaging.rs`): inbound frames of at
+  most 64 KiB with a native-endian 4-byte length prefix, UTF-8 JSON with at most 8
+  levels of nesting and 256 values, four v1 message types (`hello`, `navigation`,
+  `heartbeat`, `goodbye`) with unknown types and fields refused, a 120-second idle
+  deadline, at most 200 messages per 10-second window, and nothing accepted after
+  `goodbye`.
+- Extension allowlist: the native-host manifest's `allowed_origins` lists exactly
+  one `chrome-extension://<id>/` origin per supported browser channel. Wildcards
+  and unknown origins are refused at install (task 0102), and the manifest digest
+  is checked at startup.
+- Pairing: manifest presence is not consent. The user approves a pairing that
+  shows browser, profile class, extension identity, event classes, retained
+  fields, and the private-context policy. Pairing binds the extension's public key
+  and yields a per-session key; each message carries a strictly increasing
+  sequence number and MAC. Duplicates and replays are rejected, a skipped sequence
+  records a gap, and a changed key, protocol version, permission set, or manifest
+  requires re-pairing (task 0104).
+- Minimum extension permissions: `nativeMessaging` and `webNavigation` only, with
+  top-level frames used. No host permissions, `<all_urls>`, `tabs` content access,
+  `history`, `cookies`, `webRequest`, `scripting`, content scripts, or
+  `externally_connectable`. Bookmark collection, if enabled, adds only `bookmarks`
+  (task 0107). Any broader permission is a permission-manifest change (task 0115).
+- Private-context policy: the extension manifest sets `incognito: "not_allowed"`,
+  so it never runs in private windows. As a second barrier every navigation
+  carries `private_context`, and `CanonicalNavigation::from_url` refuses a private
+  navigation before parsing its URL (task 0106); the refusal is counted in a
+  policy-blocked summary and nothing about the page is kept (task 0108).
+- URLs are reduced by `CanonicalNavigation` to a bounded origin (or an opt-in
+  first-path-segment class) before anything else sees them (task 0106).
 - Any change of extension key, protocol version, reviewed permission set, or
   native-host manifest requires re-pairing.
+
+## Alternatives considered
+
+1. **Localhost HTTP or WebSocket server:** rejected; reachable by any local process
+   and by web pages through DNS rebinding, with no peer identity.
+2. **Extension writes a file the service watches:** rejected; extensions cannot
+   write arbitrary files, and a shared file has no ordering, backpressure, or
+   authentication.
+3. **Native host writes the journal directly:** rejected; it would create a second
+   writer and give a browser-launched process journal key access.
+4. **Safari WebExtension with an app extension handler:** deferred to task 0034;
+   it ships only if it can meet the same limits and pairing.
 
 ## Layer outcomes
 

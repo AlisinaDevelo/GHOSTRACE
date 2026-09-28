@@ -814,3 +814,24 @@ not a loss. The journal's skipped-position check applies only to contiguous
 drop and rescan flags, and across a restart the replayed history covers the
 interval, with history unavailability reported by the existing startup gaps.
 Journals that committed the earlier `cursor-<id>` form continue forward.
+
+## Native-messaging protocol
+
+`src/native_messaging.rs` is the strict codec for the extension-to-host channel
+proposed in [ADR 0005](adr/0005-browser-transport-and-permissions.md); no native
+host binary or extension ships yet. `FrameDecoder` reads Chromium's 4-byte
+native-endian length prefix incrementally and refuses a zero, oversized (above
+64 KiB), or truncated frame before allocating its body. `parse_message` rejects
+invalid UTF-8, then scans structure (at most 8 levels of nesting and 256 JSON
+values, ignoring brackets inside strings) before strict typed deserialization of
+the four v1 message types (`hello`, `navigation`, `heartbeat`, `goodbye`); unknown
+types, fields, and transition values are refused.
+
+`ProtocolSession` requires `hello` first with exactly protocol version 1 and
+sequence 1, ends the session on any second `hello` (renegotiation or downgrade),
+rejects a repeated or backwards sequence number as a replay, reports skipped
+numbers as `AcceptedAfterGap` so the caller records a gap, times out after 120
+seconds of silence, limits a session to 200 messages per 10-second window, and
+refuses anything after `goodbye`. Errors are fixed values. `tests/native_messaging.rs`
+covers every refusal, arbitrary chunk boundaries, and 20,000 deterministic fuzzed
+frames with no panic and no echoed content.
