@@ -39,7 +39,7 @@ pub struct MacOsKeychainProvider {
 }
 
 /// Which keychain holds the journal wrapping key.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum KeyCustody {
     /// Data-protection keychain, bound to the signed app's entitlements.

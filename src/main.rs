@@ -15,7 +15,7 @@ use uuid::Uuid;
 const FIXTURE_CLI_KEY_SEED: &str = "fixture-cli-v1";
 
 #[derive(Debug, Parser)]
-#[command(name = "ghostrace", version, about = "Fixture-only local event journal")]
+#[command(name = "ghostrace", version, about = "Local macOS event provenance journal")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -23,6 +23,20 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Run one command and record its metadata (never its arguments, output, or environment).
+    Run {
+        /// GHOSTRACE home (default: ~/Library/Application Support/GHOSTRACE).
+        #[arg(long)]
+        home: Option<PathBuf>,
+        /// The command and its arguments, after `--`.
+        #[arg(trailing_var_arg = true, required = true, allow_hyphen_values = true)]
+        command: Vec<std::ffi::OsString>,
+    },
+    /// Live journal on this Mac: init, status, timeline, explain, watch, git-snapshot.
+    Live {
+        #[command(subcommand)]
+        command: LiveCommand,
+    },
     /// Create or open the durable fixture-only journal.
     Init {
         #[arg(long)]
@@ -174,8 +188,67 @@ enum Command {
     Capture,
 }
 
+#[derive(Debug, Subcommand)]
+enum LiveCommand {
+    /// Create a private GHOSTRACE home with its key in your login keychain.
+    Init {
+        #[arg(long)]
+        home: Option<PathBuf>,
+    },
+    /// Show key custody, event counts by source, and gaps.
+    Status {
+        #[arg(long)]
+        home: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List recent events as evidence-labelled statements.
+    Timeline {
+        #[arg(long)]
+        home: Option<PathBuf>,
+        #[arg(long, default_value_t = 30)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Explain one event with its cited evidence and coverage warnings.
+    Explain {
+        #[arg(long)]
+        home: Option<PathBuf>,
+        event: Uuid,
+    },
+    /// Watch one folder you choose, after confirming what is recorded.
+    Watch {
+        folder: PathBuf,
+        #[arg(long)]
+        home: Option<PathBuf>,
+        /// Stop after this many seconds (default: until Ctrl-C).
+        #[arg(long)]
+        seconds: Option<u64>,
+        /// Skip the confirmation prompt.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Delete the journal key and the home. The journal becomes unreadable.
+    Forget {
+        #[arg(long)]
+        home: Option<PathBuf>,
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Record a metadata-only snapshot of a Git repository.
+    GitSnapshot {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        #[arg(long)]
+        home: Option<PathBuf>,
+    },
+}
+
 fn run(cli: Cli) -> Result<(), GhostraceError> {
     match cli.command {
+        Command::Run { home, command } => live::run(home, command),
+        Command::Live { command } => live::dispatch(command),
         Command::Init { journal } => {
             let journal = open_fixture_journal(journal)?;
             journal.initialize_authenticated_state()?;
@@ -525,6 +598,215 @@ fn open_export_input(
             Ok((open_fixture_journal(journal_path)?, policy, true))
         }
         _ => unreachable!("clap enforces exactly one export input"),
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod live {
+    use std::{
+        io::{BufRead, Write},
+        path::PathBuf,
+        sync::atomic::{AtomicBool, Ordering},
+        time::Duration,
+    };
+
+    use ghostrace::{live::LiveHome, GhostraceError};
+
+    use super::LiveCommand;
+
+    static STOP: AtomicBool = AtomicBool::new(false);
+
+    extern "C" fn request_stop(_: libc::c_int) {
+        STOP.store(true, Ordering::SeqCst);
+    }
+
+    fn fail(error: impl std::fmt::Display) -> GhostraceError {
+        GhostraceError::InvalidEvent(error.to_string())
+    }
+
+    fn home(dir: Option<PathBuf>) -> Result<PathBuf, GhostraceError> {
+        match dir {
+            Some(dir) => Ok(dir),
+            None => LiveHome::default_dir().map_err(fail),
+        }
+    }
+
+    /// Open the home and read its key, telling the user if macOS is waiting
+    /// for keychain approval.
+    fn open(dir: Option<PathBuf>) -> Result<LiveHome, GhostraceError> {
+        let live = LiveHome::open(&home(dir)?).map_err(fail)?;
+        let hint = keychain_hint();
+        let unlocked = live.unlock();
+        hint.store(true, Ordering::SeqCst);
+        unlocked.map_err(fail)?;
+        Ok(live)
+    }
+
+    /// If reading the key blocks, macOS is showing a keychain access dialog
+    /// (after an upgrade, an unsigned binary has a new signature). Say so
+    /// instead of appearing to hang.
+    fn keychain_hint() -> std::sync::Arc<AtomicBool> {
+        let done = std::sync::Arc::new(AtomicBool::new(false));
+        let flag = done.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(2));
+            if !flag.load(Ordering::SeqCst) {
+                eprintln!(
+                    "ghostrace: waiting for keychain access. If macOS asks, allow `ghostrace` to\n\
+                     use its GHOSTRACE journal key (choose Always Allow after an upgrade)."
+                );
+            }
+        });
+        done
+    }
+
+    pub fn run(
+        dir: Option<PathBuf>,
+        command: Vec<std::ffi::OsString>,
+    ) -> Result<(), GhostraceError> {
+        let live = open(dir)?;
+        let (program, args) = command.split_first().ok_or_else(|| fail("no command given"))?;
+        let code = live.run(program, args).map_err(fail)?;
+        std::process::exit(code);
+    }
+
+    pub fn dispatch(command: LiveCommand) -> Result<(), GhostraceError> {
+        match command {
+            LiveCommand::Forget { home: dir, yes } => {
+                let dir = home(dir)?;
+                let live = LiveHome::open(&dir).map_err(fail)?;
+                if !yes {
+                    print!("Delete the journal key and {}? The journal cannot be read afterwards. [y/N] ", dir.display());
+                    std::io::stdout().flush().map_err(fail)?;
+                    let mut answer = String::new();
+                    std::io::stdin().lock().read_line(&mut answer).map_err(fail)?;
+                    if !matches!(answer.trim(), "y" | "Y" | "yes") {
+                        println!("Nothing was deleted.");
+                        return Ok(());
+                    }
+                }
+                live.forget().map_err(fail)?;
+                println!("Deleted the journal key and the GHOSTRACE home.");
+                Ok(())
+            }
+            LiveCommand::Init { home: dir } => {
+                let dir = home(dir)?;
+                LiveHome::init(&dir).map_err(fail)?;
+                println!("GHOSTRACE home created at {}", dir.display());
+                println!("Key custody: login keychain (explicit opt-in for unsigned builds).");
+                println!(
+                    "Nothing is recorded until you run `ghostrace run`, `ghostrace live watch`,"
+                );
+                println!("or `ghostrace live git-snapshot`.");
+                Ok(())
+            }
+            LiveCommand::Status { home: dir, json } => {
+                let status = open(dir)?.status().map_err(fail)?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&status)?);
+                } else {
+                    println!("key custody:    {:?}", status.custody);
+                    println!("events:         {}", status.events);
+                    println!("gaps:           {}", status.gaps);
+                    for (source, count) in &status.by_source {
+                        println!("  {source:<12} {count}");
+                    }
+                    println!("watched roots:  {}", status.watched_roots);
+                    if let Some(at) = status.last_event_at {
+                        println!("last event:     {}", at.format("%Y-%m-%d %H:%M:%S UTC"));
+                    }
+                }
+                Ok(())
+            }
+            LiveCommand::Timeline { home: dir, limit, json } => {
+                let entries = open(dir)?.timeline(limit).map_err(fail)?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&entries)?);
+                    return Ok(());
+                }
+                for entry in entries {
+                    println!(
+                        "{}  {:<10} {:<9} {}\n          {}",
+                        entry.observed_at.format("%H:%M:%S"),
+                        entry.source,
+                        format!("{:?}", entry.evidence).to_lowercase(),
+                        entry.statement,
+                        entry.event_id
+                    );
+                }
+                Ok(())
+            }
+            LiveCommand::Explain { home: dir, event } => {
+                println!("{}", open(dir)?.explain(event).map_err(fail)?);
+                Ok(())
+            }
+            LiveCommand::Watch { folder, home: dir, seconds, yes } => {
+                let mut live = open(dir)?;
+                println!("{}", live.watch_preview(&folder).map_err(fail)?);
+                if !yes {
+                    print!("\nStart watching? [y/N] ");
+                    std::io::stdout().flush().map_err(fail)?;
+                    let mut answer = String::new();
+                    std::io::stdin().lock().read_line(&mut answer).map_err(fail)?;
+                    if !matches!(answer.trim(), "y" | "Y" | "yes") {
+                        println!("Not started; nothing was recorded.");
+                        return Ok(());
+                    }
+                }
+                // SAFETY: the handler only stores to an atomic.
+                unsafe {
+                    libc::signal(
+                        libc::SIGINT,
+                        request_stop as extern "C" fn(libc::c_int) as libc::sighandler_t,
+                    );
+                }
+                println!("Watching. Press Ctrl-C to stop.");
+                let summary = live
+                    .watch(&folder, seconds.map(Duration::from_secs), &|| {
+                        STOP.load(Ordering::SeqCst)
+                    })
+                    .map_err(fail)?;
+                println!(
+                    "Stopped after {} s: {} change(s) recorded, {} outside scope, {} lost.",
+                    summary.seconds,
+                    summary.accepted_events,
+                    summary.blocked_events,
+                    summary.dropped_events
+                );
+                Ok(())
+            }
+            LiveCommand::GitSnapshot { path, home: dir } => {
+                let summary = open(dir)?.git_snapshot(&path).map_err(fail)?;
+                println!(
+                    "Recorded Git snapshot: {} worktree, {} branch, {} changed path(s).",
+                    summary.worktree_state, summary.branch_class, summary.changed
+                );
+                if let Some(movement) = summary.transition {
+                    println!("Since the previous snapshot: {movement}.");
+                }
+                if let Some(gap) = summary.gap {
+                    println!("History gap recorded: {gap} (earlier history cannot be re-proven).");
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+mod live {
+    use std::path::PathBuf;
+
+    use ghostrace::GhostraceError;
+
+    use super::LiveCommand;
+
+    pub fn run(_: Option<PathBuf>, _: Vec<std::ffi::OsString>) -> Result<(), GhostraceError> {
+        Err(GhostraceError::InvalidEvent("the live journal is supported on macOS only".to_owned()))
+    }
+
+    pub fn dispatch(_: LiveCommand) -> Result<(), GhostraceError> {
+        Err(GhostraceError::InvalidEvent("the live journal is supported on macOS only".to_owned()))
     }
 }
 
