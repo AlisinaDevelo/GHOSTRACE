@@ -253,8 +253,12 @@ pub fn request(
     socket_path: &Path,
     request: &ServiceRequest,
 ) -> Result<ServiceResponse, ServiceError> {
+    if request.deadline_ms == 0 || Duration::from_millis(request.deadline_ms) > MAX_SERVICE_DEADLINE
+    {
+        return Err(ServiceError::InvalidDeadline);
+    }
     let mut stream = UnixStream::connect(socket_path).map_err(|_| ServiceError::Io)?;
-    let deadline = Duration::from_millis(request.deadline_ms.max(1)).min(MAX_SERVICE_DEADLINE);
+    let deadline = Duration::from_millis(request.deadline_ms);
     stream.set_read_timeout(Some(deadline)).map_err(|_| ServiceError::Io)?;
     write_message(&mut stream, &serde_json::to_vec(request).map_err(|_| ServiceError::Malformed)?)?;
     let body = read_message(&mut stream)?;
