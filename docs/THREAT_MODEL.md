@@ -145,3 +145,18 @@ severity unless it changes evidence level or hides a gap.
 
 See [SECURITY.md](../SECURITY.md) for private reporting and
 [PRIVACY.md](PRIVACY.md) for the data inventory.
+
+## Browser integration threat corpus
+
+Before any browser code ships, [`fixtures/browser-threat-corpus-v1.json`](../fixtures/browser-threat-corpus-v1.json)
+fixes the outcome of spoofed origins, oversized and malformed frames, duplicate and
+replayed messages, Unicode and URL confusion, extension replacement and permission
+drift, downgrades, private-context messages, and native-host manifest tampering.
+Each case names the layer that validates it and whether it is rejected,
+canonicalized, recorded as a gap, or requires re-pairing. URL cases run against the
+shipped `SanitizedUrl` today; the others name the ledger task that must enforce
+them. Three open findings (retained paths, trailing-dot host aliases, and
+private-network hosts) stay visible until origin canonicalization (task 0106).
+[ADR 0005](adr/0005-browser-transport-and-permissions.md) links each accepted risk
+to its test case, permission, user control, and rollback path.
+

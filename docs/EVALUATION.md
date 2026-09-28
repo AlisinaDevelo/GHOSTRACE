@@ -442,3 +442,39 @@ Task 0063 retains its stream lifecycle receipt in
 device-local native callback run, the mock partial-initialization counts, the
 sanitizer result (or explicit no-go), and the protected-main rerun before the
 issue may close.
+
+## Developer-workflow explanation evaluation
+
+[`fixtures/workflow-evaluation-v1.json`](../fixtures/workflow-evaluation-v1.json)
+holds 16 synthetic cases across build, test, checkout, rebase, editor save,
+generated files, and concurrent unrelated activity, each labelled `supported`,
+`unsupported`, `conflicting`, or `unknowable` for its source combination (shell,
+Git, frontmost, and filesystem). `tests/workflow_evaluation.rs` scores the shipped
+cross-source temporal adjacency rule against those labels; a correct answer to a
+conflicting or unknowable case is an abstention. The full per-case report is
+[`docs/evaluation/workflow-explanations-v1.json`](evaluation/workflow-explanations-v1.json),
+and the test fails if it drifts from what the rule actually produces.
+
+| Metric | Value | Meaning |
+|---|---:|---|
+| Precision | 0.75 | Supported predictions that were truly related |
+| Coverage | 0.75 | Truly related pairs the rule supported |
+| Abstention rate | 0.3125 | Cases where the rule declined to answer |
+| Honest abstention | 1.0 | Conflicting or unknowable cases the rule abstained on |
+| Gap visibility | 1.0 | Cases with a coverage gap that never produced a supported claim |
+
+No cross-source result was stronger than `inferred`: temporal adjacency is never
+upgraded into observed attribution. The counterexamples are published rather than
+tuned away:
+
+- `generated-by-watcher` and `concurrent-sync`: an unrelated background writer
+  inside the 60-second window reads as adjacent. This is inherent to temporal
+  adjacency, which is why the claim grammar describes it as inferred adjacency
+  and never as cause.
+- `concurrent-two-candidates` was a false positive under rule version 1, which
+  paired the first two observations even when a third distinct source fell in the
+  window. Version 2 abstains with `competing_sources` in that case; it is now a
+  correct abstention, raising precision from 0.6667 to 0.75 and honest abstention
+  from 0.75 to 1.0 without reducing coverage.
+- `build-slow-link` and `checkout-same-second`: a real relation outside the window,
+  and two observations in the same second, are missed or abstained on by design.

@@ -78,6 +78,10 @@ cargo +1.88.0 test --quiet --locked --test frontmost_identity -- --nocapture
 echo "reproducibility: frontmost coverage transitions"
 cargo +1.88.0 test --quiet --locked --test frontmost_coverage -- --nocapture
 
+echo "reproducibility: schema and export compatibility matrix"
+python3 scripts/compatibility.py check
+cargo +1.88.0 test --quiet --locked --test compatibility_matrix -- --nocapture
+
 echo "reproducibility: deterministic demo"
 event_id=00000000-0000-4000-8000-000000000008
 cargo +1.88.0 run --quiet -- demo --fixture fixtures/causal-chain.jsonl --event "$event_id" > "$WORK_DIR/demo-a.json"

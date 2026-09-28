@@ -68,7 +68,7 @@
       "format": "json",
       "generator_version": "ghostrace-fixture-manifest-v1",
       "seed": "ghostrace-fixture-seed-v1",
-      "sha256": "f1a22b29ed81f1a272ac3d3e272e8e22f5df1a1aaf440e0c75fa65caf3f2f855",
+      "sha256": "44118426996e0037324877209a633f61f90d3210e3e74157e9f1a4595554dfdd",
       "bytes": 633
     },
     {
@@ -84,7 +84,7 @@
       "format": "json",
       "generator_version": "ghostrace-fixture-manifest-v1",
       "seed": "ghostrace-fixture-seed-v1",
-      "sha256": "b3e0de741a93350899464e2ac301985327e92b21d677948647ac601ec6f5b11a",
+      "sha256": "8afbdc1d42fae0ce0d8054af9d59d86020062ba62f5f7db52f7569f305b7334c",
       "bytes": 1197
     },
     {
@@ -206,6 +206,22 @@
       "seed": "ghostrace-fixture-seed-v1",
       "sha256": "f5f5288bff84668475dfbfde33e9e6e0ce1051b45d741fcfee6793b150a76579",
       "bytes": 19885
+    },
+    {
+      "path": "fixtures/browser-threat-corpus-v1.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "2970eb5544d72f34e147591d39acbf9a722cd9a2dab26a0187fb6f49dc5f41f7",
+      "bytes": 21608
+    },
+    {
+      "path": "fixtures/workflow-evaluation-v1.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "f33cb022fbb65bd3e8afa73bb7686ebebab31d199135f225eed87a7b9ffa9b4f",
+      "bytes": 8394
     }
   ],
   "privacy": {

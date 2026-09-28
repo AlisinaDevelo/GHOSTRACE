@@ -5,6 +5,8 @@
 //! fixture ingestion into an encrypted local SQLite journal.
 
 pub mod authenticated;
+pub mod browser_origin;
+pub mod browser_pairing;
 pub mod claims;
 pub mod consent;
 pub mod correlation;
@@ -31,7 +33,13 @@ pub mod journal;
 pub mod key_lifecycle;
 #[cfg(target_os = "macos")]
 pub mod keychain;
+#[cfg(unix)]
+pub mod local_service;
 pub mod model;
+pub mod native_host;
+#[cfg(unix)]
+pub mod native_host_manifest;
+pub mod native_messaging;
 pub mod ordering;
 pub mod parquet_profile;
 pub mod policy;
@@ -49,6 +57,14 @@ pub mod writer;
 pub use authenticated::{
     AuthenticatedAnomaly, AuthenticatedDeletionMarker, AuthenticatedState,
     AuthenticatedStateReport, AUTHENTICATED_STATE_DOMAIN, AUTHENTICATED_STATE_SCHEMA_VERSION,
+};
+pub use browser_origin::{
+    CanonicalNavigation, NavigationHostClass, NavigationRefusal, PathSegmentClass, UrlShapePolicy,
+    MAX_RETAINED_PATH_SEGMENT,
+};
+pub use browser_pairing::{
+    hmac_sha256_for_test, BrowserEventClass, ClientHello, PairedSession, PairingError,
+    PairingRecord, PairingRequest, ProfileClass, PAIRING_LIFETIME_DAYS,
 };
 pub use claims::{
     render_claim, ClaimLocale, ClaimTemplateDescriptor, ClaimTemplateId, EvidenceRequirement,
@@ -178,6 +194,12 @@ pub use key_lifecycle::{
 };
 #[cfg(target_os = "macos")]
 pub use keychain::{MacOsKeychainProvider, JOURNAL_KEYCHAIN_ACCOUNT, JOURNAL_KEYCHAIN_SERVICE};
+#[cfg(unix)]
+pub use local_service::{
+    request as service_request, LocalService, ServiceCapability, ServiceError, ServiceHandler,
+    ServiceRequest, ServiceResponse, LOCAL_SERVICE_PROTOCOL_VERSION, MAX_SERVICE_DEADLINE,
+    MAX_SERVICE_MESSAGE_BYTES, SERVICE_SOCKET_NAME,
+};
 pub use model::{
     AppChange, ApplicationId, BookmarkChange, BookmarkId, BranchName,
     BrowserBookmarkChangedPayload, BrowserName, BrowserNavigationPayload, BrowserUrl,
@@ -193,6 +215,19 @@ pub use model::{
     MAX_APP_IDENTIFIER_BYTES, MAX_BRANCH_BYTES, MAX_BROWSER_URL_BYTES, MAX_CURSOR_BYTES,
     MAX_EVENT_PAYLOAD_BYTES, MAX_IDENTIFIER_BYTES, PROVENANCE_VERSION, REPAIR_PROVENANCE_VERSION,
     SHA256_DIGEST_BYTES,
+};
+pub use native_host::{encode_hex, HostMessage, HostOutput, NativeHostSession, NativeSessionError};
+#[cfg(unix)]
+pub use native_host_manifest::{
+    exact_origin, NativeHostAction, NativeHostChange, NativeHostError, NativeHostHealth,
+    NativeHostInstaller, NATIVE_HOST_CHANNELS, NATIVE_HOST_NAME, NATIVE_HOST_RECEIPT_SUFFIX,
+};
+pub use native_messaging::{
+    encode_frame, parse_message, ExtensionMessage, FrameDecoder, NativeMessagingError,
+    NavigationTransition, ProtocolSession, SessionEvent, MAX_NATIVE_DECODER_BUFFER,
+    MAX_NATIVE_FRAME_BYTES, MAX_NATIVE_MESSAGES_PER_WINDOW, MAX_NATIVE_MESSAGE_DEPTH,
+    MAX_NATIVE_MESSAGE_VALUES, NATIVE_MESSAGING_PROTOCOL_VERSION, NATIVE_RATE_WINDOW,
+    NATIVE_SESSION_IDLE_TIMEOUT,
 };
 pub use ordering::{
     analyze_temporal_observations, compare_event_order, StableOrderKey, TemporalAnalysis,

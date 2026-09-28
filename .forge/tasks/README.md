@@ -29,10 +29,10 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0023 | Add tamper-evident event chain and verifier | M3 | done | explain-export | maintainer | — | 0008, 0009, 0020, 0088, 0089 |
 | 0024 | Add explicit shell-wrapper metadata capture | M4 | done | shell-git | maintainer | — | 0007, 0018, 0091, 0092, 0093 |
 | 0025 | Add explicit Git snapshot integration | M4 | done | shell-git | maintainer | — | 0007, 0018, 0094, 0095, 0096 |
-| 0026 | Add opt-in Git hook install and uninstall | M4 | backlog | shell-git | maintainer | — | 0025, 0097 |
+| 0026 | Add opt-in Git hook install and uninstall | M4 | done | shell-git | maintainer | — | 0025, 0097 |
 | 0027 | Implement NSWorkspace frontmost-app collector | M4 | backlog | frontmost | maintainer | — | 0006, 0007, 0010, 0012, 0098 |
 | 0028 | Add frontmost attribution and privacy tests | M4 | backlog | frontmost | maintainer | — | 0027, 0018, 0099, 0100 |
-| 0029 | Decide browser transport and permissions in security ADR | M5 | backlog | browser | maintainer | — | 0002, 0004, 0005, 0012, 0101 |
+| 0029 | Decide browser transport and permissions in security ADR | M5 | done | browser | maintainer | — | 0002, 0004, 0005, 0012, 0101 |
 | 0030 | Implement Native Messaging host and explicit pairing | M5 | backlog | browser | maintainer | — | 0008, 0010, 0029, 0102, 0103, 0104 |
 | 0031 | Implement Chromium top-level navigation collector | M5 | backlog | browser | maintainer | — | 0007, 0029, 0030, 0105, 0106 |
 | 0032 | Implement browser bookmark event and snapshot collector | M5 | backlog | browser | maintainer | — | 0007, 0030, 0031, 0107 |
@@ -102,9 +102,9 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0096 | Represent Git rewrites and unavailable history as gaps | M4 | done | shell-git | git-specialist | 0025 | 0094, 0095 |
 | 0097 | Make Git hook installation verifiable and reversible | M4 | done | shell-git | git-specialist | 0026 | 0094, 0095 |
 | 0098 | Define frontmost application identity and session semantics | M4 | done | frontmost | macos-engineer | 0027 | 0006, 0007, 0010, 0012 |
-| 0099 | Test frontmost sleep, wake, and privacy transitions | M4 | backlog | frontmost | test-engineer | 0028 | 0018, 0098 |
-| 0100 | Evaluate developer-workflow cross-source explanations | M4 | backlog | frontmost | researcher | 0028 | 0092, 0096, 0099 |
-| 0101 | Build the browser integration threat corpus | M5 | backlog | browser | security-auditor | 0029 | 0002, 0004, 0005, 0012 |
+| 0099 | Test frontmost sleep, wake, and privacy transitions | M4 | done | frontmost | test-engineer | 0028 | 0018, 0098 |
+| 0100 | Evaluate developer-workflow cross-source explanations | M4 | done | frontmost | researcher | 0028 | 0092, 0096, 0099 |
+| 0101 | Build the browser integration threat corpus | M5 | done | browser | security-auditor | 0029 | 0002, 0004, 0005, 0012 |
 | 0102 | Install and remove the native-host manifest safely | M5 | backlog | browser | macos-engineer | 0030 | 0008, 0010, 0029 |
 | 0103 | Version and bound the native-messaging protocol | M5 | backlog | browser | api-designer | 0030 | 0102 |
 | 0104 | Implement explicit browser pairing and replay protection | M5 | backlog | browser | security-auditor | 0030 | 0102 |
@@ -118,13 +118,13 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0112 | Bound and fuzz every local-service capability | M5 | backlog | service-ui | test-engineer | 0035 | 0111 |
 | 0113 | Design an accessible evidence and gap interface | M5 | backlog | service-ui | accessibility-specialist | 0036 | 0019, 0020, 0035 |
 | 0114 | Make launchd install, upgrade, and permission recovery reversible | M5 | backlog | service-ui | macos-engineer | 0037 | 0013, 0027, 0030, 0035 |
-| 0115 | Freeze release entitlements and permission drift | M6 | backlog | release-scale | security-auditor | 0038 | 0005, 0008, 0023 |
+| 0115 | Freeze release entitlements and permission drift | M6 | done | release-scale | security-auditor | 0038 | 0005, 0008, 0023 |
 | 0116 | Produce reproducible universal macOS artifacts | M6 | backlog | release-scale | devops-engineer | 0038 | 0115 |
 | 0117 | Publish SBOM and SLSA build provenance | M6 | backlog | release-scale | supply-chain-specialist | 0038 | 0116 |
 | 0118 | Automate notarization, stapling, and Gatekeeper verification | M6 | backlog | release-scale | release-engineer | 0038 | 0116, 0117 |
 | 0119 | Version the end-to-end performance methodology | M6 | backlog | release-scale | performance-engineer | 0039 | 0017, 0018, 0035 |
 | 0120 | Gate regressions with soak and resource-limit tests | M6 | backlog | release-scale | performance-engineer | 0039 | 0119 |
-| 0121 | Build the schema and export compatibility matrix | M6 | backlog | release-scale | test-engineer | 0040 | 0020, 0021, 0083, 0084 |
+| 0121 | Build the schema and export compatibility matrix | M6 | done | release-scale | test-engineer | 0040 | 0020, 0021, 0083, 0084 |
 | 0122 | Run the pre-v1 privacy and permission red-team | M6 | backlog | release-scale | security-auditor | 0040 | 0033, 0037, 0115 |
 | 0123 | Practice disaster recovery and incident response | M6 | backlog | release-scale | incident-responder | 0040 | 0023, 0037, 0089 |
 | 0124 | Build the Endpoint Security attribution evaluation harness | M6 | backlog | release-scale | security-researcher | 0042 | 0017, 0019, 0037 |
@@ -165,5 +165,5 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0159 | Run the v2 migration and rollback release candidate | M11 | backlog | long-term | release-engineer | 0153 | 0154, 0155, 0156, 0158 |
 | 0160 | Publish the 2032 research and sustainability decision | M11 | backlog | long-term | maintainer | 0153 | 0145, 0151, 0157 |
 | 0161 | Ship an explicit ghostrace run CLI over a Keychain journal | M4 | backlog | shell-git | macos-engineer | 0024 | 0024, 0054 |
-| 0162 | Close interrupted shell runs with explicit gaps | M4 | backlog | shell-git | test-engineer | 0024 | 0024 |
-| 0163 | Bring the native FSEvents benchmark within its device bound | M6 | backlog | release-scale | performance-engineer | 0039 | 0017 |
+| 0162 | Close interrupted shell runs with explicit gaps | M4 | done | shell-git | test-engineer | 0024 | 0024 |
+| 0163 | Bring the native FSEvents benchmark within its device bound | M6 | done | release-scale | performance-engineer | 0039 | 0017 |

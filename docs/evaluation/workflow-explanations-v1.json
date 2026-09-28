@@ -1,0 +1,181 @@
+{
+  "schema_version": 1,
+  "corpus": "ghostrace-workflow-evaluation-v1",
+  "rule": "cross_source_temporal_adjacency",
+  "cases": 16,
+  "precision": 0.75,
+  "coverage": 0.75,
+  "abstention_rate": 0.3125,
+  "honest_abstention": 1.0,
+  "gap_visibility": 1.0,
+  "false_positives": [
+    "generated-by-watcher",
+    "concurrent-sync"
+  ],
+  "false_negatives": [
+    "build-slow-link",
+    "checkout-same-second"
+  ],
+  "results": [
+    {
+      "id": "build-artifact",
+      "workflow": "build",
+      "sources": "shell+filesystem",
+      "label": "supported",
+      "prediction": "supported",
+      "reason": "bounded_cross_source_adjacency",
+      "evidence": "inferred",
+      "correct": true
+    },
+    {
+      "id": "build-slow-link",
+      "workflow": "build",
+      "sources": "shell+filesystem",
+      "label": "supported",
+      "prediction": "unsupported",
+      "reason": "outside_window",
+      "evidence": "unknown",
+      "correct": false
+    },
+    {
+      "id": "test-fixture-write",
+      "workflow": "test",
+      "sources": "shell+filesystem",
+      "label": "supported",
+      "prediction": "supported",
+      "reason": "bounded_cross_source_adjacency",
+      "evidence": "inferred",
+      "correct": true
+    },
+    {
+      "id": "test-no-write",
+      "workflow": "test",
+      "sources": "shell+filesystem",
+      "label": "unsupported",
+      "prediction": "unsupported",
+      "reason": "outside_window",
+      "evidence": "unknown",
+      "correct": true
+    },
+    {
+      "id": "checkout-worktree",
+      "workflow": "checkout",
+      "sources": "git+filesystem",
+      "label": "supported",
+      "prediction": "supported",
+      "reason": "bounded_cross_source_adjacency",
+      "evidence": "inferred",
+      "correct": true
+    },
+    {
+      "id": "checkout-same-second",
+      "workflow": "checkout",
+      "sources": "git+filesystem",
+      "label": "supported",
+      "prediction": "abstain",
+      "reason": "equal_observed_time",
+      "evidence": "unknown",
+      "correct": false
+    },
+    {
+      "id": "rebase-with-gap",
+      "workflow": "rebase",
+      "sources": "git+filesystem",
+      "label": "unknowable",
+      "prediction": "abstain",
+      "reason": "unknown_coverage",
+      "evidence": "unknown",
+      "correct": true
+    },
+    {
+      "id": "rebase-clock-skew",
+      "workflow": "rebase",
+      "sources": "git+filesystem",
+      "label": "unknowable",
+      "prediction": "abstain",
+      "reason": "clock_skew",
+      "evidence": "unknown",
+      "correct": true
+    },
+    {
+      "id": "editor-save",
+      "workflow": "editor_save",
+      "sources": "frontmost+filesystem",
+      "label": "supported",
+      "prediction": "supported",
+      "reason": "bounded_cross_source_adjacency",
+      "evidence": "inferred",
+      "correct": true
+    },
+    {
+      "id": "editor-save-unknown-evidence",
+      "workflow": "editor_save",
+      "sources": "frontmost+filesystem",
+      "label": "unknowable",
+      "prediction": "abstain",
+      "reason": "unknown_evidence",
+      "evidence": "unknown",
+      "correct": true
+    },
+    {
+      "id": "generated-by-watcher",
+      "workflow": "generated_files",
+      "sources": "shell+filesystem",
+      "label": "unsupported",
+      "prediction": "supported",
+      "reason": "bounded_cross_source_adjacency",
+      "evidence": "inferred",
+      "correct": false
+    },
+    {
+      "id": "generated-by-codegen",
+      "workflow": "generated_files",
+      "sources": "shell+filesystem",
+      "label": "supported",
+      "prediction": "supported",
+      "reason": "bounded_cross_source_adjacency",
+      "evidence": "inferred",
+      "correct": true
+    },
+    {
+      "id": "concurrent-sync",
+      "workflow": "concurrent_unrelated",
+      "sources": "frontmost+filesystem",
+      "label": "unsupported",
+      "prediction": "supported",
+      "reason": "bounded_cross_source_adjacency",
+      "evidence": "inferred",
+      "correct": false
+    },
+    {
+      "id": "concurrent-two-candidates",
+      "workflow": "concurrent_unrelated",
+      "sources": "shell+frontmost+filesystem",
+      "label": "conflicting",
+      "prediction": "abstain",
+      "reason": "competing_sources",
+      "evidence": "unknown",
+      "correct": true
+    },
+    {
+      "id": "commit-via-shell",
+      "workflow": "checkout",
+      "sources": "shell+git",
+      "label": "supported",
+      "prediction": "supported",
+      "reason": "bounded_cross_source_adjacency",
+      "evidence": "inferred",
+      "correct": true
+    },
+    {
+      "id": "unrelated-far-apart",
+      "workflow": "concurrent_unrelated",
+      "sources": "shell+git",
+      "label": "unsupported",
+      "prediction": "unsupported",
+      "reason": "outside_window",
+      "evidence": "unknown",
+      "correct": true
+    }
+  ]
+}

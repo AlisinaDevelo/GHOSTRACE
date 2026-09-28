@@ -311,6 +311,7 @@ docs/adr/            Immutable architecture decisions
 - [Threat model](docs/THREAT_MODEL.md) — assets, STRIDE analysis, and residual risk
 - [Event model](docs/EVENT_MODEL.md) — evidence levels, provenance, and gaps
 - [Product boundaries](docs/BOUNDARIES.md) — the event-journal boundary and portfolio comparison
+- [Compatibility](docs/COMPATIBILITY.md) — per-format accept/refuse matrix, proving tests, and deprecation rules
 - [Evaluation](docs/EVALUATION.md) — correctness, privacy, and performance gates
 - [FSEvents lifecycle corpus](fixtures/fsevents-lifecycle-corpus-v1.json) — ground truth, coalescing, gaps, and guarded device rows
 - [Temporal ordering fixture](fixtures/temporal-ordering-v1.json) — clock skew, delayed delivery, tie-breaking, and missing source time

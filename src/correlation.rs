@@ -21,7 +21,7 @@ use crate::{
 
 pub const CORRELATION_RULE_REGISTRY_VERSION: u32 = 1;
 pub const CORRELATION_RULE_SCHEMA_VERSION: u32 = 1;
-pub const CROSS_SOURCE_TEMPORAL_ADJACENCY_VERSION: u32 = 1;
+pub const CROSS_SOURCE_TEMPORAL_ADJACENCY_VERSION: u32 = 2;
 pub const MAX_CORRELATION_WINDOW_SECONDS: i64 = 60;
 pub const MAX_CORRELATION_INPUT_EVENTS: usize = 256;
 
@@ -241,6 +241,9 @@ pub enum CorrelationReason {
     UnknownCoverage,
     ClockSkew,
     EqualObservedTime,
+    /// More than two distinct sources fall inside the window, so no single
+    /// pair can be preferred.
+    CompetingSources,
     OutsideWindow,
     UnsupportedEventKind,
 }
@@ -407,6 +410,33 @@ pub fn evaluate(
             true,
             CorrelationReason::EqualObservedTime,
         ));
+    }
+    if delta >= 0 && delta <= descriptor.bounds.max_window_seconds {
+        // Version 2: a third distinct source inside the same window is a
+        // competing explanation. Abstain rather than prefer the first pair.
+        let window_end =
+            first.observed_at + chrono::Duration::seconds(descriptor.bounds.max_window_seconds);
+        let competing = visible
+            .iter()
+            .filter(|observation| observation.observed_at <= window_end)
+            .map(|observation| observation.source)
+            .collect::<BTreeSet<_>>();
+        if competing.len() > 2 {
+            let mut competing_ids = visible
+                .iter()
+                .filter(|observation| observation.observed_at <= window_end)
+                .map(|observation| observation.event_id)
+                .collect::<Vec<_>>();
+            competing_ids.sort_unstable();
+            return Ok(result(
+                descriptor,
+                query,
+                &competing_ids,
+                Evidence::Unknown,
+                true,
+                CorrelationReason::CompetingSources,
+            ));
+        }
     }
     if delta < 0 || delta > descriptor.bounds.max_window_seconds {
         return Ok(result(
