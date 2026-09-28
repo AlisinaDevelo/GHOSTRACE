@@ -35,9 +35,9 @@ pub mod keychain;
 #[cfg(unix)]
 pub mod local_service;
 pub mod model;
-pub mod native_messaging;
 #[cfg(unix)]
 pub mod native_host_manifest;
+pub mod native_messaging;
 pub mod ordering;
 pub mod parquet_profile;
 pub mod policy;
@@ -210,17 +210,17 @@ pub use model::{
     MAX_EVENT_PAYLOAD_BYTES, MAX_IDENTIFIER_BYTES, PROVENANCE_VERSION, REPAIR_PROVENANCE_VERSION,
     SHA256_DIGEST_BYTES,
 };
+#[cfg(unix)]
+pub use native_host_manifest::{
+    exact_origin, NativeHostAction, NativeHostChange, NativeHostError, NativeHostHealth,
+    NativeHostInstaller, NATIVE_HOST_CHANNELS, NATIVE_HOST_NAME, NATIVE_HOST_RECEIPT_SUFFIX,
+};
 pub use native_messaging::{
     encode_frame, parse_message, ExtensionMessage, FrameDecoder, NativeMessagingError,
     NavigationTransition, ProtocolSession, SessionEvent, MAX_NATIVE_DECODER_BUFFER,
     MAX_NATIVE_FRAME_BYTES, MAX_NATIVE_MESSAGES_PER_WINDOW, MAX_NATIVE_MESSAGE_DEPTH,
     MAX_NATIVE_MESSAGE_VALUES, NATIVE_MESSAGING_PROTOCOL_VERSION, NATIVE_RATE_WINDOW,
     NATIVE_SESSION_IDLE_TIMEOUT,
-};
-#[cfg(unix)]
-pub use native_host_manifest::{
-    exact_origin, NativeHostAction, NativeHostChange, NativeHostError, NativeHostHealth,
-    NativeHostInstaller, NATIVE_HOST_CHANNELS, NATIVE_HOST_NAME, NATIVE_HOST_RECEIPT_SUFFIX,
 };
 pub use ordering::{
     analyze_temporal_observations, compare_event_order, StableOrderKey, TemporalAnalysis,
