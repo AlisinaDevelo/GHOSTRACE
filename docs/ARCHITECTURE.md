@@ -855,3 +855,44 @@ request ID must not have been seen in the replay window; and the requested
 capability (`read`, `export`, `policy`, `lifecycle`, `admin`) must have been
 granted when the service was bound. Nothing is granted by default, and refusals
 are fixed error values. `tests/local_service.rs` covers each check.
+
+## Native-host manifest registration
+
+`NativeHostInstaller` (`src/native_host_manifest.rs`) registers the GHOSTRACE
+native host for Chrome, Chrome Beta, Chromium, or Edge by writing
+`com.alisinadevelo.ghostrace.json` into that browser's per-user
+`NativeMessagingHosts` directory. The manifest is fixed: name, description, the
+absolute host binary path, `stdio`, and exactly one allowed origin,
+`chrome-extension://<32 letters a-p>/`; wildcards and malformed IDs are refused
+before anything is written. `plan` reports the exact file and action; `install`
+exclusive-creates or atomically replaces only a manifest whose digest matches the
+receipt beside it, so moving the host binary is an upgrade; `verify` reports
+intact, missing, drifted, or not installed; `uninstall` removes the manifest only
+while it is byte-identical to what was installed. Removing the manifest is how a
+browser stops launching the host, so there is no separate disable state. A
+manifest GHOSTRACE did not write, a symlinked or group/other-writable directory
+anywhere below the support root, a linked or foreign-owned manifest, and a
+manifest edited to admit another origin are all refused, and other hosts'
+manifests are never touched. `tests/native_host_manifest.rs` covers each case.
+
+## Browser pairing
+
+`src/browser_pairing.rs` implements the pairing and message-authentication layer
+of [ADR 0005](adr/0005-browser-transport-and-permissions.md). A `PairingRequest`
+carries everything the user approves: browser channel, profile class, extension
+ID, SHA-256 of the extension's public key, SHA-256 of its reviewed permission set,
+event classes, retained fields, and the private-context policy. Approval creates a
+`PairingRecord` with a random 32-byte secret (handed to the extension once and
+redacted from `Debug`), a 90-day expiry, and a revocation flag.
+
+On connect the extension sends a `ClientHello` with its pairing ID, identity
+digests, and a fresh client nonce. A different extension ID or unknown pairing is
+refused as not paired; a changed key digest (replaced or sideloaded extension), a
+changed permission digest, or an expired approval requires re-pairing; a revoked
+pairing is refused. An admitted session derives its key as HMAC-SHA256 of the
+secret over a domain tag and both nonces, with a fresh host nonce per session, and
+every message carries HMAC-SHA256 over its sequence number and frame body,
+verified in constant time. A transcript from an earlier session, including one
+replayed after a host restart, therefore never verifies; ordering and replay
+within a session are enforced by `ProtocolSession`. HMAC is built on the crate's
+existing SHA-256 and checked against RFC 4231 vectors in `tests/browser_pairing.rs`.
