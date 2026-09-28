@@ -36,6 +36,7 @@ pub mod keychain;
 #[cfg(unix)]
 pub mod local_service;
 pub mod model;
+pub mod native_host;
 #[cfg(unix)]
 pub mod native_host_manifest;
 pub mod native_messaging;
@@ -215,6 +216,7 @@ pub use model::{
     MAX_EVENT_PAYLOAD_BYTES, MAX_IDENTIFIER_BYTES, PROVENANCE_VERSION, REPAIR_PROVENANCE_VERSION,
     SHA256_DIGEST_BYTES,
 };
+pub use native_host::{encode_hex, HostMessage, HostOutput, NativeHostSession, NativeSessionError};
 #[cfg(unix)]
 pub use native_host_manifest::{
     exact_origin, NativeHostAction, NativeHostChange, NativeHostError, NativeHostHealth,

@@ -146,10 +146,34 @@ pub fn encode_frame(body: &[u8]) -> Result<Vec<u8>, NativeMessagingError> {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ExtensionMessage {
-    Hello { protocol_version: u32, seq: u64 },
-    Navigation { seq: u64, url: String, private_context: bool, transition: NavigationTransition },
-    Heartbeat { seq: u64 },
-    Goodbye { seq: u64 },
+    /// Opens a session; carries the pairing identity and a fresh client
+    /// nonce (64 lowercase hex characters).
+    Hello {
+        protocol_version: u32,
+        seq: u64,
+        pairing_id: uuid::Uuid,
+        extension_id: String,
+        extension_key_digest: String,
+        permissions_digest: String,
+        client_nonce: String,
+    },
+    /// Every message after `hello` carries `mac`, the hex HMAC over
+    /// [`ExtensionMessage::mac_input`] under the session key.
+    Navigation {
+        seq: u64,
+        url: String,
+        private_context: bool,
+        transition: NavigationTransition,
+        mac: String,
+    },
+    Heartbeat {
+        seq: u64,
+        mac: String,
+    },
+    Goodbye {
+        seq: u64,
+        mac: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -162,12 +186,50 @@ pub enum NavigationTransition {
 }
 
 impl ExtensionMessage {
-    fn seq(&self) -> u64 {
+    pub fn seq(&self) -> u64 {
         match self {
             Self::Hello { seq, .. }
             | Self::Navigation { seq, .. }
-            | Self::Heartbeat { seq }
-            | Self::Goodbye { seq } => *seq,
+            | Self::Heartbeat { seq, .. }
+            | Self::Goodbye { seq, .. } => *seq,
+        }
+    }
+
+    /// The transmitted MAC, absent only for `hello`.
+    pub fn mac(&self) -> Option<&str> {
+        match self {
+            Self::Hello { .. } => None,
+            Self::Navigation { mac, .. }
+            | Self::Heartbeat { mac, .. }
+            | Self::Goodbye { mac, .. } => Some(mac),
+        }
+    }
+
+    /// The canonical bytes a MAC covers. The browser serializes messages
+    /// itself, so the MAC is defined over these typed fields rather than over
+    /// JSON text; the extension builds the identical string.
+    pub fn mac_input(&self) -> Option<Vec<u8>> {
+        let text = match self {
+            Self::Hello { .. } => return None,
+            Self::Navigation { seq, url, private_context, transition, .. } => format!(
+                "ghostrace-nm-v1\nnavigation\n{seq}\n{}\n{}\n{url}",
+                u8::from(*private_context),
+                transition.as_str()
+            ),
+            Self::Heartbeat { seq, .. } => format!("ghostrace-nm-v1\nheartbeat\n{seq}"),
+            Self::Goodbye { seq, .. } => format!("ghostrace-nm-v1\ngoodbye\n{seq}"),
+        };
+        Some(text.into_bytes())
+    }
+}
+
+impl NavigationTransition {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Committed => "committed",
+            Self::Replaced => "replaced",
+            Self::Redirected => "redirected",
+            Self::HistoryUpdated => "history_updated",
         }
     }
 }
@@ -309,7 +371,10 @@ impl ProtocolSession {
         self.last_activity = Some(now);
 
         match (&self.state, &message) {
-            (SessionState::AwaitingHello, ExtensionMessage::Hello { protocol_version, seq }) => {
+            (
+                SessionState::AwaitingHello,
+                ExtensionMessage::Hello { protocol_version, seq, .. },
+            ) => {
                 if *protocol_version != NATIVE_MESSAGING_PROTOCOL_VERSION {
                     self.state = SessionState::Closed;
                     return Err(NativeMessagingError::UnsupportedVersion);
