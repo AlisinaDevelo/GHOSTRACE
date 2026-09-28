@@ -32,7 +32,10 @@ pub mod journal;
 pub mod key_lifecycle;
 #[cfg(target_os = "macos")]
 pub mod keychain;
+#[cfg(unix)]
+pub mod local_service;
 pub mod model;
+pub mod native_messaging;
 pub mod ordering;
 pub mod parquet_profile;
 pub mod policy;
@@ -183,6 +186,12 @@ pub use key_lifecycle::{
 };
 #[cfg(target_os = "macos")]
 pub use keychain::{MacOsKeychainProvider, JOURNAL_KEYCHAIN_ACCOUNT, JOURNAL_KEYCHAIN_SERVICE};
+#[cfg(unix)]
+pub use local_service::{
+    request as service_request, LocalService, ServiceCapability, ServiceError, ServiceHandler,
+    ServiceRequest, ServiceResponse, LOCAL_SERVICE_PROTOCOL_VERSION, MAX_SERVICE_DEADLINE,
+    MAX_SERVICE_MESSAGE_BYTES, SERVICE_SOCKET_NAME,
+};
 pub use model::{
     AppChange, ApplicationId, BookmarkChange, BookmarkId, BranchName,
     BrowserBookmarkChangedPayload, BrowserName, BrowserNavigationPayload, BrowserUrl,
@@ -198,6 +207,13 @@ pub use model::{
     MAX_APP_IDENTIFIER_BYTES, MAX_BRANCH_BYTES, MAX_BROWSER_URL_BYTES, MAX_CURSOR_BYTES,
     MAX_EVENT_PAYLOAD_BYTES, MAX_IDENTIFIER_BYTES, PROVENANCE_VERSION, REPAIR_PROVENANCE_VERSION,
     SHA256_DIGEST_BYTES,
+};
+pub use native_messaging::{
+    encode_frame, parse_message, ExtensionMessage, FrameDecoder, NativeMessagingError,
+    NavigationTransition, ProtocolSession, SessionEvent, MAX_NATIVE_DECODER_BUFFER,
+    MAX_NATIVE_FRAME_BYTES, MAX_NATIVE_MESSAGES_PER_WINDOW, MAX_NATIVE_MESSAGE_DEPTH,
+    MAX_NATIVE_MESSAGE_VALUES, NATIVE_MESSAGING_PROTOCOL_VERSION, NATIVE_RATE_WINDOW,
+    NATIVE_SESSION_IDLE_TIMEOUT,
 };
 pub use ordering::{
     analyze_temporal_observations, compare_event_order, StableOrderKey, TemporalAnalysis,

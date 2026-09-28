@@ -814,3 +814,44 @@ not a loss. The journal's skipped-position check applies only to contiguous
 drop and rescan flags, and across a restart the replayed history covers the
 interval, with history unavailability reported by the existing startup gaps.
 Journals that committed the earlier `cursor-<id>` form continue forward.
+
+## Native-messaging protocol
+
+`src/native_messaging.rs` is the strict codec for the extension-to-host channel
+proposed in [ADR 0005](adr/0005-browser-transport-and-permissions.md); no native
+host binary or extension ships yet. `FrameDecoder` reads Chromium's 4-byte
+native-endian length prefix incrementally and refuses a zero, oversized (above
+64 KiB), or truncated frame before allocating its body. `parse_message` rejects
+invalid UTF-8, then scans structure (at most 8 levels of nesting and 256 JSON
+values, ignoring brackets inside strings) before strict typed deserialization of
+the four v1 message types (`hello`, `navigation`, `heartbeat`, `goodbye`); unknown
+types, fields, and transition values are refused.
+
+`ProtocolSession` requires `hello` first with exactly protocol version 1 and
+sequence 1, ends the session on any second `hello` (renegotiation or downgrade),
+rejects a repeated or backwards sequence number as a replay, reports skipped
+numbers as `AcceptedAfterGap` so the caller records a gap, times out after 120
+seconds of silence, limits a session to 200 messages per 10-second window, and
+refuses anything after `goodbye`. Errors are fixed values. `tests/native_messaging.rs`
+covers every refusal, arbitrary chunk boundaries, and 20,000 deterministic fuzzed
+frames with no panic and no echoed content.
+
+## Local service socket
+
+`LocalService` (`src/local_service.rs`) is the only way a local client will reach
+the service; it exposes no methods of its own yet. It binds `ghostrace.sock` in a
+directory that must be a real directory owned by the current user with no group
+or other access (created with mode 0700 if absent, never followed through a
+symbolic link), sets the socket to mode 0600, and replaces only a stale socket it
+owns; any other file at that path is refused and kept. No TCP, UDP, or HTTP
+listener exists.
+
+Each connection is admitted in order: the peer must be the same effective user
+(`getpeereid` on macOS, `SO_PEERCRED` on Linux); the length-prefixed request must
+be at most 64 KiB of strict JSON; the protocol version must be 1; the request must
+name the service's per-start instance ID, so a client cannot talk to a different
+or restarted service by accident; the deadline must be between 1 ms and 30 s; the
+request ID must not have been seen in the replay window; and the requested
+capability (`read`, `export`, `policy`, `lifecycle`, `admin`) must have been
+granted when the service was bound. Nothing is granted by default, and refusals
+are fixed error values. `tests/local_service.rs` covers each check.
