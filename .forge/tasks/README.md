@@ -105,7 +105,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0099 | Test frontmost sleep, wake, and privacy transitions | M4 | done | frontmost | test-engineer | 0028 | 0018, 0098 |
 | 0100 | Evaluate developer-workflow cross-source explanations | M4 | done | frontmost | researcher | 0028 | 0092, 0096, 0099 |
 | 0101 | Build the browser integration threat corpus | M5 | done | browser | security-auditor | 0029 | 0002, 0004, 0005, 0012 |
-| 0102 | Install and remove the native-host manifest safely | M5 | backlog | browser | macos-engineer | 0030 | 0008, 0010, 0029 |
+| 0102 | Install and remove the native-host manifest safely | M5 | done | browser | macos-engineer | 0030 | 0008, 0010, 0029 |
 | 0103 | Version and bound the native-messaging protocol | M5 | backlog | browser | api-designer | 0030 | 0102 |
 | 0104 | Implement explicit browser pairing and replay protection | M5 | backlog | browser | security-auditor | 0030 | 0102 |
 | 0105 | Define Chromium navigation permission and state handling | M5 | backlog | browser | browser-engineer | 0031 | 0007, 0029, 0103, 0104 |
@@ -114,7 +114,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0108 | Enforce private and incognito context refusal | M5 | backlog | browser | privacy-engineer | 0033 | 0105, 0107 |
 | 0109 | Fuzz hostile extension and native-host messages | M5 | backlog | browser | test-engineer | 0033 | 0103, 0104 |
 | 0110 | Run a Safari WebExtension parity gate | M5 | backlog | browser | macos-engineer | 0034 | 0029, 0108, 0109 |
-| 0111 | Authenticate the local Unix-socket protocol | M5 | backlog | service-ui | security-auditor | 0035 | 0010, 0018, 0020, 0029 |
+| 0111 | Authenticate the local Unix-socket protocol | M5 | done | service-ui | security-auditor | 0035 | 0010, 0018, 0020, 0029 |
 | 0112 | Bound and fuzz every local-service capability | M5 | backlog | service-ui | test-engineer | 0035 | 0111 |
 | 0113 | Design an accessible evidence and gap interface | M5 | backlog | service-ui | accessibility-specialist | 0036 | 0019, 0020, 0035 |
 | 0114 | Make launchd install, upgrade, and permission recovery reversible | M5 | backlog | service-ui | macos-engineer | 0037 | 0013, 0027, 0030, 0035 |
