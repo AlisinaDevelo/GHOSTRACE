@@ -27,4 +27,5 @@ Add an explicit columnar archive format for long-term analysis without changing 
 Parquet is a derived export, not the canonical store. Compatibility and checksums must make conversion errors detectable.
 
 ## Notes
+The writer ships behind an opt-in `parquet` cargo feature using the `parquet` crate without arrow, so default builds and the reviewed release binary do not change.
 No implementation notes yet.
