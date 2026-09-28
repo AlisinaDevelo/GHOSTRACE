@@ -4,7 +4,7 @@
   "rules": [
     {
       "id": "cross_source_temporal_adjacency",
-      "version": 1,
+      "version": 2,
       "fixtures": [
         {"id": "positive_cross_source_observations", "class": "positive"},
         {"id": "negative_same_source_observations", "class": "negative"},
