@@ -32,6 +32,8 @@ pub mod journal;
 pub mod key_lifecycle;
 #[cfg(target_os = "macos")]
 pub mod keychain;
+#[cfg(unix)]
+pub mod local_service;
 pub mod model;
 pub mod native_messaging;
 pub mod ordering;
@@ -184,6 +186,12 @@ pub use key_lifecycle::{
 };
 #[cfg(target_os = "macos")]
 pub use keychain::{MacOsKeychainProvider, JOURNAL_KEYCHAIN_ACCOUNT, JOURNAL_KEYCHAIN_SERVICE};
+#[cfg(unix)]
+pub use local_service::{
+    request as service_request, LocalService, ServiceCapability, ServiceError, ServiceHandler,
+    ServiceRequest, ServiceResponse, LOCAL_SERVICE_PROTOCOL_VERSION, MAX_SERVICE_DEADLINE,
+    MAX_SERVICE_MESSAGE_BYTES, SERVICE_SOCKET_NAME,
+};
 pub use model::{
     AppChange, ApplicationId, BookmarkChange, BookmarkId, BranchName,
     BrowserBookmarkChangedPayload, BrowserName, BrowserNavigationPayload, BrowserUrl,
