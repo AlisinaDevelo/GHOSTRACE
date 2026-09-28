@@ -180,8 +180,26 @@ enum Command {
     },
     /// Print the checked-in event envelope JSON Schema.
     Schema,
-    /// Print the checked-in strict v1 profile for a future Parquet-derived archive.
+    /// Print the checked-in strict v1 profile for a Parquet-derived archive.
     ParquetProfile,
+    /// Write a plaintext Parquet cold archive from a JSONL export. Needs a
+    /// build with `--features parquet` and an explicit `--yes`.
+    Archive {
+        #[arg(long)]
+        export: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        /// Confirm that the archive is an unencrypted copy.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Check a Parquet archive against its footer and its source JSONL export.
+    VerifyArchive {
+        #[arg(long)]
+        archive: PathBuf,
+        #[arg(long)]
+        export: PathBuf,
+    },
     /// Print the strict v1 metadata schema for a future explicit shell wrapper.
     ShellSchema,
     /// Live capture is intentionally unavailable in this vertical slice.
@@ -243,6 +261,44 @@ enum LiveCommand {
         #[arg(long)]
         home: Option<PathBuf>,
     },
+}
+
+#[cfg(feature = "parquet")]
+fn archive(export: PathBuf, output: PathBuf, yes: bool) -> Result<(), GhostraceError> {
+    use ghostrace::parquet_archive::{write_parquet_archive, PARQUET_ARCHIVE_PLAINTEXT_WARNING};
+    eprintln!("{PARQUET_ARCHIVE_PLAINTEXT_WARNING}");
+    if !yes {
+        return Err(GhostraceError::ArchiveInvalid(
+            "rerun with --yes to write the unencrypted archive".to_owned(),
+        ));
+    }
+    let receipt = write_parquet_archive(export, output)?;
+    println!("{}", serde_json::to_string_pretty(&receipt)?);
+    Ok(())
+}
+
+#[cfg(feature = "parquet")]
+fn verify_archive(archive: PathBuf, export: PathBuf) -> Result<(), GhostraceError> {
+    let receipt = ghostrace::parquet_archive::verify_parquet_archive(archive, export)?;
+    println!("{}", serde_json::to_string_pretty(&receipt)?);
+    Ok(())
+}
+
+#[cfg(not(feature = "parquet"))]
+fn archive(_: PathBuf, _: PathBuf, _: bool) -> Result<(), GhostraceError> {
+    Err(parquet_unavailable())
+}
+
+#[cfg(not(feature = "parquet"))]
+fn verify_archive(_: PathBuf, _: PathBuf) -> Result<(), GhostraceError> {
+    Err(parquet_unavailable())
+}
+
+#[cfg(not(feature = "parquet"))]
+fn parquet_unavailable() -> GhostraceError {
+    GhostraceError::ArchiveInvalid(
+        "this build has no Parquet writer; rebuild with --features parquet".to_owned(),
+    )
 }
 
 fn run(cli: Cli) -> Result<(), GhostraceError> {
@@ -495,6 +551,8 @@ fn run(cli: Cli) -> Result<(), GhostraceError> {
             journal.shutdown()?;
             Ok(())
         }
+        Command::Archive { export, output, yes } => archive(export, output, yes),
+        Command::VerifyArchive { archive, export } => verify_archive(archive, export),
         Command::Validate { export } => {
             let validated = validate_export(export)?;
             println!("validated {} event(s)", validated.event_count);

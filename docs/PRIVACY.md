@@ -177,10 +177,12 @@ destination without --force. An export may contain sensitive plaintext and is th
 user's responsibility once written outside the protected journal directory.
 GHOSTRACE does not upload or fetch a destination.
 
-The optional Parquet archive profile is a contract for a future user-requested
-derived copy, not an automatic export path. `ghostrace parquet-profile` prints the
-checked-in strict v1 profile and never reads a journal or creates an archive. The
-profile keeps the plaintext boundary explicit, requires mode `0600` temporary files
+The optional Parquet archive is a user-requested derived copy, not an automatic
+export path. It exists only in builds with the `parquet` feature, and
+`ghostrace archive` prints the plaintext warning and refuses unless `--yes` is
+given. It reads an existing JSONL export, not the journal, so it discloses nothing
+the export did not already contain. `ghostrace parquet-profile` prints the
+checked-in strict v1 profile. The profile keeps the plaintext boundary explicit, requires mode `0600` temporary files
 and atomic publication, and requires cleanup on failure. A writer must disable
 Parquet dictionary encoding, column statistics, and page indexes: compression can
 reduce size but does not provide confidentiality, while statistics and metadata can

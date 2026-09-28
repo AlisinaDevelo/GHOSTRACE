@@ -389,7 +389,7 @@ pub fn validate_export(path: impl AsRef<Path>) -> Result<ExportValidation, Ghost
 /// configured per-record bound. `BufRead::read_until` is intentionally not
 /// used because it can grow a vector to the size of an unterminated attacker
 /// line before reporting an error.
-fn read_bounded_line<R: BufRead>(
+pub(crate) fn read_bounded_line<R: BufRead>(
     reader: &mut R,
     path: &Path,
 ) -> Result<Option<Vec<u8>>, GhostraceError> {

@@ -43,6 +43,8 @@ pub mod native_host;
 pub mod native_host_manifest;
 pub mod native_messaging;
 pub mod ordering;
+#[cfg(feature = "parquet")]
+pub mod parquet_archive;
 pub mod parquet_profile;
 pub mod policy;
 pub mod query;

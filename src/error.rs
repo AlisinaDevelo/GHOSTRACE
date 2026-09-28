@@ -45,6 +45,12 @@ pub enum GhostraceError {
     #[error("export destination must differ from the source journal")]
     ExportSourceConflict,
 
+    #[error("archive destination already exists")]
+    ArchiveExists(PathBuf),
+
+    #[error("Parquet archive is invalid: {0}")]
+    ArchiveInvalid(String),
+
     #[error("export validation failed: {0}")]
     ExportInvalid(String),
 
