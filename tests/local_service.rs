@@ -11,6 +11,7 @@ use std::{
     },
     path::Path,
     thread,
+    time::Duration,
 };
 
 use ghostrace::{
@@ -46,13 +47,25 @@ fn request_for(service: &LocalService, capability: ServiceCapability) -> Service
     }
 }
 
-/// Serve one connection on a thread and send `request` to it.
+/// Serve one connection on a thread and send `request` to it. The client
+/// waits a fixed time rather than the request's own deadline, so a request
+/// the server must refuse for its deadline still gets its answer read.
 fn roundtrip(service: &mut LocalService, request: &ServiceRequest) -> ServiceResponse {
     let path = service.socket_path().to_path_buf();
-    let request = request.clone();
-    let client = thread::spawn(move || service_request(&path, &request));
+    let body = serde_json::to_vec(request).expect("request JSON");
+    let client = thread::spawn(move || {
+        let mut stream = UnixStream::connect(path).expect("connect");
+        stream.set_read_timeout(Some(Duration::from_secs(10))).expect("timeout");
+        stream.write_all(&(body.len() as u32).to_be_bytes()).expect("length");
+        stream.write_all(&body).expect("body");
+        let mut length = [0u8; 4];
+        stream.read_exact(&mut length).expect("response length");
+        let mut response = vec![0u8; u32::from_be_bytes(length) as usize];
+        stream.read_exact(&mut response).expect("response body");
+        serde_json::from_slice::<ServiceResponse>(&response).expect("response JSON")
+    });
     service.serve_one(&Echo).expect("serve");
-    client.join().expect("client").expect("response")
+    client.join().expect("client")
 }
 
 fn refused(response: ServiceResponse) -> ServiceError {
@@ -102,6 +115,21 @@ fn capabilities_are_separate_and_denied_by_default() {
     let mut nothing = LocalService::bind(&parent.path().join("svc"), []).expect("bind");
     let request = request_for(&nothing, ServiceCapability::Read);
     assert_eq!(refused(roundtrip(&mut nothing, &request)), ServiceError::CapabilityDenied);
+}
+
+#[test]
+fn the_client_refuses_an_invalid_deadline_before_connecting() {
+    let parent = private_parent();
+    let service =
+        LocalService::bind(&parent.path().join("svc"), [ServiceCapability::Read]).expect("bind");
+    let base = request_for(&service, ServiceCapability::Read);
+    for deadline_ms in [0, 60 * 60 * 1000] {
+        let request = ServiceRequest { deadline_ms, ..base.clone() };
+        assert_eq!(
+            service_request(service.socket_path(), &request),
+            Err(ServiceError::InvalidDeadline)
+        );
+    }
 }
 
 #[test]
