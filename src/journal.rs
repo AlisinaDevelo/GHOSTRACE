@@ -1906,7 +1906,8 @@ fn validate_cursor_transition(
             if !matches!(
                 event.kind,
                 EventKind::Gap | EventKind::CollectorStarted | EventKind::CollectorStopped
-            ) && current.token.epoch() == candidate.epoch()
+            ) && candidate.kind() != crate::cursor::CursorKind::Sparse
+                && current.token.epoch() == candidate.epoch()
                 && current.token.position().zip(candidate.position()).is_some_and(
                     |(current_position, candidate_position)| {
                         candidate_position > current_position.saturating_add(1)

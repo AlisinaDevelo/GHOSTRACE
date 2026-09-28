@@ -227,3 +227,30 @@ fn an_existing_preserved_copy_is_never_overwritten_and_global_config_is_untouche
     let config = fs::read_to_string(fixture.repo.join(".git/config")).expect("repo config");
     assert!(!config.contains("hooksPath"));
 }
+
+#[test]
+fn repeating_a_confirmed_chained_install_changes_nothing() {
+    if !git_available() {
+        return;
+    }
+    let fixture = Fixture::new();
+    fixture.user_hook("post-commit");
+    let plan = fixture.manager.plan_chained_install(&fixture.repo).expect("plan");
+    fixture.manager.install_chained(&fixture.repo, &plan.digest).expect("install");
+    let snapshot = |fixture: &Fixture| {
+        let mut files = fs::read_dir(fixture.hooks())
+            .expect("hooks")
+            .flatten()
+            .map(|entry| (entry.file_name(), fs::read(entry.path()).expect("read")))
+            .collect::<Vec<_>>();
+        files.sort();
+        files
+    };
+    let before = snapshot(&fixture);
+
+    let again = fixture.manager.plan_chained_install(&fixture.repo).expect("second plan");
+    assert!(again.changes.iter().all(|change| change.action == GitHookAction::Unchanged));
+    let applied = fixture.manager.install_chained(&fixture.repo, &again.digest).expect("repeat");
+    assert!(applied.iter().all(|change| change.action == GitHookAction::Unchanged));
+    assert_eq!(snapshot(&fixture), before, "a repeated install must not modify any hook file");
+}
