@@ -548,6 +548,7 @@ dependencies = [
  "chacha20poly1305",
  "chrono",
  "clap",
+ "core-foundation",
  "jsonschema",
  "libc",
  "parquet",
