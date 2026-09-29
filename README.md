@@ -159,6 +159,7 @@ encryption or key-management claim.
 | ghostrace verify-archive --archive ... --export ... | Opt-in; rechecks an archive against its footer digests and its source export |
 | ghostrace shell-schema | Available; prints the strict v1 metadata-only contract for a future explicit shell wrapper; no shell is executed |
 | ghostrace live report --output ... [--yes] | Available on macOS; writes the timeline as one offline HTML file (no scripts, fonts, or links; a CSP forbids loads) with gaps, abstentions, and evidence levels drawn distinctly; 0600, never overwrites, never inside the home |
+| ghostrace live export --output ... [--parquet ...] [--yes] | Available on macOS; exports the live journal through the same preview and confirmation as the fixture export, and with `--features parquet` also writes a verified Parquet archive; never inside the home, never overwrites, and never observed by a running watch |
 | ghostrace live consent-shell / revoke-shell | Available on macOS; persisted, revocable consent that `ghostrace run` requires before it starts anything |
 | ghostrace capture | Refuses by design |
 | Local journal and bounded durable writer | Scaffolded for the fixture path; live ingestion is gated |

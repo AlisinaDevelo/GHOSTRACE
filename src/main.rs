@@ -260,6 +260,20 @@ enum LiveCommand {
         #[arg(long)]
         home: Option<PathBuf>,
     },
+    /// Export the journal as validated JSONL after showing what it discloses,
+    /// and optionally a Parquet archive (builds with `--features parquet`).
+    Export {
+        #[arg(long)]
+        output: PathBuf,
+        /// Also write a Parquet cold archive from the export.
+        #[arg(long)]
+        parquet: Option<PathBuf>,
+        #[arg(long)]
+        home: Option<PathBuf>,
+        /// Skip the confirmation prompt.
+        #[arg(long)]
+        yes: bool,
+    },
     /// Write the timeline as one offline HTML file. It is an unencrypted copy.
     Report {
         #[arg(long)]
@@ -774,6 +788,49 @@ mod live {
                 }
                 live.grant_shell_consent().map_err(fail)?;
                 println!("Allowed. Revoke with `ghostrace live revoke-shell`.");
+                Ok(())
+            }
+            LiveCommand::Export { output, parquet, home: dir, yes } => {
+                let live = open(dir)?;
+                if parquet.is_some() && !cfg!(feature = "parquet") {
+                    return Err(fail(
+                        "this build has no Parquet writer; rebuild with --features parquet",
+                    ));
+                }
+                let mut asked = |preview: &ghostrace::ExportPreview| {
+                    let summary = serde_json::to_value(preview).unwrap_or_default();
+                    println!("{}", preview.warning());
+                    println!(
+                        "Events: {}  Sources: {}  Gaps: {}",
+                        summary["event_count"],
+                        summary["sources"],
+                        summary["gaps"].as_array().map_or(0, Vec::len)
+                    );
+                    println!(
+                        "Plan {}\nSnapshot {}",
+                        preview.plan_digest(),
+                        preview.snapshot_digest()
+                    );
+                    yes || confirmed("Write this plaintext export?").unwrap_or(false)
+                };
+                let Some(result) = live.export(&output, &mut asked).map_err(fail)? else {
+                    println!("No export was written.");
+                    return Ok(());
+                };
+                println!(
+                    "Exported {} event(s) to {}.",
+                    result.manifest.coverage.event_count,
+                    output.display()
+                );
+                #[cfg(feature = "parquet")]
+                if let Some(archive) = parquet {
+                    let receipt = live.archive(&output, &archive).map_err(fail)?;
+                    println!(
+                        "Archived {} row(s) to {} (verified against the export).",
+                        receipt.row_count,
+                        archive.display()
+                    );
+                }
                 Ok(())
             }
             LiveCommand::Report { output, home: dir, yes } => {

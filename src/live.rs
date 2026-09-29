@@ -28,9 +28,14 @@ use crate::{
     claims::{render_claim, ClaimLocale},
     consent::ConsentPreview,
     crypto::KeyProvider,
+    export::{
+        export_journal_with_confirmation, preview_export, ExportPreview, ExportRequest,
+        ExportResult,
+    },
     fsevents::FseventsOptions,
     fsevents_collector::{
-        FseventsCollector, FseventsCollectorConfig, InternalPathPolicy, SelectedRoot,
+        ArtifactRegistryDocument, FseventsCollector, FseventsCollectorConfig, InternalPathPolicy,
+        RegisteredArtifact, SelectedRoot,
     },
     git_adapter::GitSnapshotAdapter,
     git_history::GitHistoryTransition,
@@ -43,10 +48,16 @@ use crate::{
     },
     policy::{PolicyDocument, PolicyProfile},
     shell_wrapper::{ShellRunEvidence, ShellWrapper, ShellWrapperConfig},
+    wal::WalPolicy,
     writer::{Writer, WriterConfig, WriterOutcome},
 };
 
 const CONFIG_NAME: &str = "config.json";
+/// Output files GHOSTRACE wrote outside the home, which a running watch must
+/// not report as user changes.
+const ARTIFACTS_NAME: &str = "artifacts.json";
+/// How long a live journal write waits for another GHOSTRACE process.
+const LIVE_BUSY_TIMEOUT_MS: u64 = 10_000;
 const JOURNAL_NAME: &str = "journal.sqlite3";
 const GIT_STATE_DIR: &str = "git-state";
 const POLICY_ID: &str = "live-v1";
@@ -266,7 +277,12 @@ impl LiveHome {
     pub fn journal(&self) -> Result<Journal, LiveError> {
         let provider = self.provider()?;
         provider.key().map_err(op("read key from login keychain"))?;
-        Journal::open_fixture(self.dir.join(JOURNAL_NAME), provider).map_err(op("open journal"))
+        // Several GHOSTRACE processes may share this journal (a watch, a run,
+        // an export). Each write verifies the authenticated state under the
+        // write lock, so wait for another writer rather than failing fast.
+        let policy = WalPolicy { busy_timeout_ms: LIVE_BUSY_TIMEOUT_MS, ..WalPolicy::default() };
+        Journal::open_fixture_with_policy(self.dir.join(JOURNAL_NAME), provider, policy)
+            .map_err(op("open journal"))
     }
 
     /// The policy that authorizes live recording: shell, Git, filesystem, and
@@ -440,7 +456,8 @@ impl LiveHome {
                 // (journal, configuration, Git state) is a user change.
                 internal_paths: InternalPathPolicy::new()
                     .with_directory(self.dir.clone())
-                    .map_err(op("exclude the GHOSTRACE home"))?,
+                    .map_err(op("exclude the GHOSTRACE home"))?
+                    .with_registry(self.dir.join(ARTIFACTS_NAME)),
             },
         )
         .map_err(op("start watcher"))?;
@@ -678,23 +695,7 @@ impl LiveHome {
     /// must be outside the home. The file is created 0600 beside `output`
     /// and renamed into place. Returns the number of events rendered.
     pub fn write_report(&self, output: &Path) -> Result<usize, LiveError> {
-        let parent = match output.parent() {
-            Some(parent) if !parent.as_os_str().is_empty() => parent,
-            _ => Path::new("."),
-        };
-        let parent = fs::canonicalize(parent).map_err(op("resolve report folder"))?;
-        if parent.starts_with(&self.dir) {
-            return Err(LiveError::Operation(
-                "report",
-                "the report must be written outside the GHOSTRACE home".to_owned(),
-            ));
-        }
-        if output.exists() {
-            return Err(LiveError::Operation(
-                "report",
-                "the destination already exists".to_owned(),
-            ));
-        }
+        let (parent, _) = self.register_output(output, ".ghostrace-report-")?;
         let journal = self.journal()?;
         let events = journal
             .events()
@@ -712,6 +713,93 @@ impl LiveHome {
         temporary.as_file().sync_all().map_err(op("write report"))?;
         temporary.persist_noclobber(output).map_err(|error| op("write report")(error.error))?;
         Ok(events.len())
+    }
+
+    /// Refuse a destination inside the home or one that exists, then record
+    /// it (and the prefix of the temporary files written beside it) in the
+    /// artifact registry before anything is written, so a running watch never
+    /// reports GHOSTRACE's own output as a user change. Returns the resolved
+    /// folder and destination.
+    fn register_output(
+        &self,
+        output: &Path,
+        temporary_prefix: &str,
+    ) -> Result<(PathBuf, PathBuf), LiveError> {
+        let parent = match output.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent,
+            _ => Path::new("."),
+        };
+        let parent = fs::canonicalize(parent).map_err(op("resolve output folder"))?;
+        if parent.starts_with(&self.dir) {
+            return Err(LiveError::Operation(
+                "output",
+                "files must be written outside the GHOSTRACE home".to_owned(),
+            ));
+        }
+        if output.exists() {
+            return Err(LiveError::Operation(
+                "output",
+                "the destination already exists".to_owned(),
+            ));
+        }
+        let name = output
+            .file_name()
+            .ok_or_else(|| LiveError::Operation("output", "no file name".to_owned()))?;
+        let destination = parent.join(name);
+        let registry = self.dir.join(ARTIFACTS_NAME);
+        let mut document = ArtifactRegistryDocument::load(&registry);
+        document.add(RegisteredArtifact {
+            path: destination.clone(),
+            temporary_prefix: Some(temporary_prefix.to_owned()),
+        });
+        let temporary = self.dir.join(format!("{ARTIFACTS_NAME}.tmp"));
+        let _ = fs::remove_file(&temporary);
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temporary)
+            .map_err(op("register output"))?;
+        file.write_all(&serde_json::to_vec(&document).map_err(|_| LiveError::Config)?)
+            .map_err(op("register output"))?;
+        file.sync_all().map_err(op("register output"))?;
+        fs::rename(&temporary, &registry).map_err(op("register output"))?;
+        Ok((parent, destination))
+    }
+
+    /// Export the whole live journal as validated JSONL, after `confirm`
+    /// accepts the preview of exactly what will be disclosed. Returns `None`
+    /// when the preview is declined; nothing is written then.
+    pub fn export(
+        &self,
+        output: &Path,
+        confirm: &mut dyn FnMut(&ExportPreview) -> bool,
+    ) -> Result<Option<ExportResult>, LiveError> {
+        let journal = self.journal()?;
+        let policy = PolicyProfile::from_document(&self.policy_document()?)
+            .map_err(op("build export policy"))?;
+        let preview = preview_export(&journal, &policy, &ExportRequest::default(), output)
+            .map_err(op("preview export"))?;
+        if !confirm(&preview) {
+            journal.shutdown().map_err(op("close journal"))?;
+            return Ok(None);
+        }
+        self.register_output(output, ".ghostrace-export-incomplete-")?;
+        let result = export_journal_with_confirmation(&journal, output, preview.confirm(), &policy)
+            .map_err(op("export"))?;
+        journal.shutdown().map_err(op("close journal"))?;
+        Ok(Some(result))
+    }
+
+    /// Write a Parquet archive from a validated export, registering it first.
+    #[cfg(feature = "parquet")]
+    pub fn archive(
+        &self,
+        export: &Path,
+        output: &Path,
+    ) -> Result<crate::parquet_archive::ParquetArchiveReceipt, LiveError> {
+        self.register_output(output, ".ghostrace-archive-")?;
+        crate::parquet_archive::write_parquet_archive(export, output).map_err(op("archive"))
     }
 
     pub fn explain(&self, event: Uuid) -> Result<String, LiveError> {

@@ -145,3 +145,63 @@ fn watching_a_folder_that_contains_the_home_never_records_the_home() {
     let outside = watch(&|| std::fs::write(folder.join("outside.txt"), b"x").expect("write"));
     assert!(!outside.contains(" 0 change(s) recorded"), "{outside}");
 }
+
+#[test]
+fn live_export_validates_and_is_never_seen_by_a_running_watch() {
+    if !enabled() {
+        eprintln!("set GHOSTRACE_LOGIN_KEYCHAIN_TEST=1 to run the live CLI end to end");
+        return;
+    }
+    let directory = tempfile::tempdir().expect("tempdir");
+    let folder = directory.path().canonicalize().expect("canonical");
+    let home = folder.join("home").to_str().expect("utf8").to_owned();
+    struct Forget(String);
+    impl Drop for Forget {
+        fn drop(&mut self) {
+            let _ = ghostrace(&["live", "forget", "--home", &self.0, "--yes"]);
+        }
+    }
+    assert!(ghostrace(&["live", "init", "--home", &home]).status.success());
+    let _forget = Forget(home.clone());
+    assert!(ghostrace(&["live", "consent-shell", "--home", &home, "--yes"]).status.success());
+    assert!(ghostrace(&["run", "--home", &home, "--", "/usr/bin/true"]).status.success());
+
+    let export = folder.join("export.jsonl");
+    let archive = folder.join("archive.parquet");
+    let report = folder.join("report.html");
+    let watch = Command::new(env!("CARGO_BIN_EXE_ghostrace"))
+        .args(["live", "watch", folder.to_str().unwrap(), "--home", &home, "--yes"])
+        .args(["--seconds", "6"])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("watch starts");
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+
+    let mut args = vec!["live", "export", "--home", &home, "--yes", "--output"];
+    args.push(export.to_str().unwrap());
+    if cfg!(feature = "parquet") {
+        args.extend(["--parquet", archive.to_str().unwrap()]);
+    }
+    let exported = ghostrace(&args);
+    assert!(exported.status.success(), "{}", String::from_utf8_lossy(&exported.stderr));
+    let stdout = String::from_utf8_lossy(&exported.stdout);
+    assert!(stdout.contains("Exported "), "{stdout}");
+    let report_args = ["live", "report", "--home", &home, "--yes", "--output"];
+    assert!(ghostrace(&[&report_args[..], &[report.to_str().unwrap()]].concat()).status.success());
+
+    let output = watch.wait_with_output().expect("watch ends");
+    let summary = String::from_utf8(output.stdout).expect("utf8");
+    assert!(summary.contains(" 0 change(s) recorded"), "{summary}");
+
+    assert!(ghostrace(&["validate", "--export", export.to_str().unwrap()]).status.success());
+    if cfg!(feature = "parquet") {
+        let verify = ["verify-archive", "--archive", archive.to_str().unwrap()];
+        let verify = [&verify[..], &["--export", export.to_str().unwrap()]].concat();
+        assert!(ghostrace(&verify).status.success());
+    }
+    // A second export to the same destination, or one inside the home, is refused.
+    assert!(!ghostrace(&args).status.success());
+    let inside = format!("{home}/export.jsonl");
+    let inside_args = ["live", "export", "--home", &home, "--yes", "--output", inside.as_str()];
+    assert!(!ghostrace(&inside_args).status.success());
+}
