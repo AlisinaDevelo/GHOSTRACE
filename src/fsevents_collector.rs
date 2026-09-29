@@ -105,6 +105,90 @@ struct InternalPathEntry {
 #[derive(Clone, Default)]
 pub struct InternalPathPolicy {
     entries: Vec<InternalPathEntry>,
+    registry: Option<Arc<ArtifactRegistry>>,
+}
+
+/// Most entries an output-artifact registry may hold.
+pub const MAX_REGISTERED_ARTIFACTS: usize = 256;
+const MAX_ARTIFACT_REGISTRY_BYTES: u64 = 256 * 1024;
+
+/// One output file GHOSTRACE writes outside its home (an export, archive, or
+/// report), and the prefix of the temporary files written beside it before it
+/// is published.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RegisteredArtifact {
+    pub path: PathBuf,
+    pub temporary_prefix: Option<String>,
+}
+
+/// The registry file's contents.
+#[derive(Clone, Debug, Default, Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactRegistryDocument {
+    pub schema_version: u32,
+    pub artifacts: Vec<RegisteredArtifact>,
+}
+
+impl ArtifactRegistryDocument {
+    /// Read a registry file; a missing, oversized, or unreadable one is empty.
+    pub fn load(path: &Path) -> Self {
+        let Ok(metadata) = std::fs::metadata(path) else { return Self::default() };
+        if metadata.len() > MAX_ARTIFACT_REGISTRY_BYTES {
+            return Self::default();
+        }
+        std::fs::read(path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Self>(&bytes).ok())
+            .filter(|document| document.schema_version == 1)
+            .unwrap_or_default()
+    }
+
+    /// Add an artifact, keeping only the newest entries within the bound.
+    pub fn add(&mut self, artifact: RegisteredArtifact) {
+        self.schema_version = 1;
+        self.artifacts.retain(|existing| existing.path != artifact.path);
+        self.artifacts.push(artifact);
+        let excess = self.artifacts.len().saturating_sub(MAX_REGISTERED_ARTIFACTS);
+        self.artifacts.drain(..excess);
+    }
+}
+
+/// A registry file another process appends to while a collector runs. It is
+/// re-read when its size or modification time changes, at the moment an event
+/// is checked, so an artifact registered before it is written is never
+/// reported as a user change.
+struct ArtifactRegistry {
+    path: PathBuf,
+    cache: Mutex<RegistryCache>,
+}
+
+/// The registry file's (modification time, size) when it was last read, and
+/// what it listed.
+type RegistryCache = (Option<(std::time::SystemTime, u64)>, Vec<RegisteredArtifact>);
+
+impl ArtifactRegistry {
+    fn matches(&self, canonical_path: &Path) -> bool {
+        let Ok(mut cache) = self.cache.lock() else { return false };
+        let stamp = std::fs::metadata(&self.path)
+            .ok()
+            .map(|metadata| (metadata.modified().unwrap_or(std::time::UNIX_EPOCH), metadata.len()));
+        if cache.0 != stamp {
+            *cache = (stamp, ArtifactRegistryDocument::load(&self.path).artifacts);
+        }
+        let parent = canonical_path.parent();
+        let name = canonical_path.file_name().map(|name| name.to_string_lossy());
+        cache.1.iter().any(|artifact| {
+            artifact.path == canonical_path
+                || (parent == artifact.path.parent()
+                    && match (&artifact.temporary_prefix, &name) {
+                        (Some(prefix), Some(name)) => {
+                            !prefix.is_empty() && name.starts_with(prefix.as_str())
+                        }
+                        _ => false,
+                    })
+        })
+    }
 }
 
 impl fmt::Debug for InternalPathPolicy {
@@ -112,6 +196,7 @@ impl fmt::Debug for InternalPathPolicy {
         formatter
             .debug_struct("InternalPathPolicy")
             .field("entry_count", &self.entries.len())
+            .field("registry", &self.registry.is_some())
             .finish()
     }
 }
@@ -146,6 +231,16 @@ impl InternalPathPolicy {
     ) -> Result<Self, FseventsCollectorError> {
         self.register_artifact(path)?;
         Ok(self)
+    }
+
+    /// Also treat every artifact listed in the registry file at `path` as
+    /// internal, including ones added after the collector starts.
+    pub fn with_registry<P: Into<PathBuf>>(mut self, path: P) -> Self {
+        self.registry = Some(Arc::new(ArtifactRegistry {
+            path: path.into(),
+            cache: Mutex::new((None, Vec::new())),
+        }));
+        self
     }
 
     pub fn with_directory<P: Into<PathBuf>>(
@@ -214,6 +309,9 @@ impl InternalPathPolicy {
         let Ok((canonical_path, identity)) = canonicalize_for_comparison(path) else {
             return false;
         };
+        if self.registry.as_ref().is_some_and(|registry| registry.matches(&canonical_path)) {
+            return true;
+        }
         self.entries.iter().any(|entry| {
             if canonical_path == entry.canonical_path
                 || (entry.kind == InternalPathKind::Directory

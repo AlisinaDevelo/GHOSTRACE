@@ -396,6 +396,17 @@ trailing-dot, and private-address findings recorded in the browser threat corpus
 for the navigation shape; no browser collector ships yet.
 
 
+## Live exports, archives, and reports
+
+`ghostrace live export`, `live export --parquet`, and `live report` write plaintext
+copies outside the GHOSTRACE home and refuse destinations inside it or ones that
+already exist. Before writing, each records its destination and the prefix of the
+temporary files written beside it in `artifacts.json` in the home (0600, at most 256
+entries). A running `live watch` consults that registry whenever it checks an event,
+so GHOSTRACE's own output is never recorded as a user change, even when it lands in
+the watched folder while the watch runs. The registry holds paths the user chose and
+never enters the journal.
+
 ## Key custody without Developer ID signing
 
 The data-protection keychain binds the journal key to a signed application's
