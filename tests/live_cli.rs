@@ -205,3 +205,93 @@ fn live_export_validates_and_is_never_seen_by_a_running_watch() {
     let inside_args = ["live", "export", "--home", &home, "--yes", "--output", inside.as_str()];
     assert!(!ghostrace(&inside_args).status.success());
 }
+
+#[cfg(feature = "frontmost")]
+#[test]
+fn live_apps_records_a_focus_switch_with_name_version_and_dwell() {
+    let focus = std::env::var_os("GHOSTRACE_FRONTMOST_TEST").is_some_and(|value| value == "1");
+    if !enabled() || !focus {
+        eprintln!(
+            "set GHOSTRACE_LOGIN_KEYCHAIN_TEST=1 and GHOSTRACE_FRONTMOST_TEST=1 to switch focus"
+        );
+        return;
+    }
+    let directory = tempfile::tempdir().expect("tempdir");
+    let home = directory.path().join("home").to_str().expect("utf8").to_owned();
+    struct Forget(String);
+    impl Drop for Forget {
+        fn drop(&mut self) {
+            let _ = ghostrace(&["live", "forget", "--home", &self.0, "--yes"]);
+        }
+    }
+    assert!(ghostrace(&["live", "init", "--home", &home]).status.success());
+    let _forget = Forget(home.clone());
+
+    let declined = Command::new(env!("CARGO_BIN_EXE_ghostrace"))
+        .args(["live", "apps", "--home", &home])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("apps");
+    assert!(String::from_utf8_lossy(&declined.stdout).contains("Not started"));
+
+    let front = |bundle: &str| {
+        Command::new("/usr/bin/open").args(["-b", bundle]).status().expect("open");
+    };
+    let before = String::from_utf8(
+        Command::new("/usr/bin/lsappinfo")
+            .args(["info", "-only", "bundleid", "-app", "front"])
+            .output()
+            .expect("lsappinfo")
+            .stdout,
+    )
+    .expect("utf8");
+    let previous = before.rsplit('=').next().unwrap_or("").trim().trim_matches('"').to_owned();
+    let recorder = Command::new(env!("CARGO_BIN_EXE_ghostrace"))
+        .args(["live", "apps", "--home", &home, "--yes", "--seconds", "5"])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("apps starts");
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    front("com.apple.finder");
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    if !previous.is_empty() && previous != "com.apple.finder" {
+        front(&previous);
+    }
+    let output = recorder.wait_with_output().expect("apps ends");
+    assert!(output.status.success());
+    let summary = String::from_utf8_lossy(&output.stdout);
+    assert!(summary.contains("activation(s) recorded"), "{summary}");
+
+    let journal = ghostrace(&["live", "timeline", "--home", &home, "--limit", "100", "--json"]);
+    let entries: serde_json::Value = serde_json::from_slice(&journal.stdout).expect("timeline");
+    let kinds = entries
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|entry| {
+            (
+                entry["kind"].as_str().unwrap().to_owned(),
+                entry["statement"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        kinds.iter().any(
+            |(kind, text)| kind == "frontmost_app_changed" && text.contains("com.apple.finder")
+        ),
+        "{kinds:?}"
+    );
+    assert!(kinds.iter().any(|(kind, _)| kind == "collector_started"));
+    assert!(kinds.iter().any(|(kind, _)| kind == "collector_stopped"));
+    let text = String::from_utf8_lossy(&journal.stdout);
+    assert!(!text.contains("/Applications") && !text.contains("/System"));
+
+    // The payload keeps the name, version, and dwell, and nothing else of the app.
+    let export = directory.path().join("apps.jsonl");
+    let args = ["live", "export", "--home", &home, "--yes", "--output", export.to_str().unwrap()];
+    assert!(ghostrace(&args).status.success());
+    let exported = std::fs::read_to_string(&export).expect("export");
+    assert!(exported.contains("\"app_name\":\"Finder\""), "{exported}");
+    assert!(exported.contains("\"dwell_ms\":"));
+    assert!(!exported.contains("/Applications") && !exported.contains("/System"));
+}

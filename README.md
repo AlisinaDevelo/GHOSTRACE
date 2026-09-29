@@ -160,6 +160,7 @@ encryption or key-management claim.
 | ghostrace shell-schema | Available; prints the strict v1 metadata-only contract for a future explicit shell wrapper; no shell is executed |
 | ghostrace live report --output ... [--yes] | Available on macOS; writes the timeline as one offline HTML file (no scripts, fonts, or links; a CSP forbids loads) with gaps, abstentions, and evidence levels drawn distinctly; 0600, never overwrites, never inside the home |
 | ghostrace live export --output ... [--parquet ...] [--yes] | Available on macOS; exports the live journal through the same preview and confirmation as the fixture export, and with `--features parquet` also writes a verified Parquet archive; never inside the home, never overwrites, and never observed by a running watch |
+| ghostrace live apps [--seconds N] [--exclude ID] [--yes] | Opt-in (`--features frontmost`), macOS; after a consent preview, records which application is in front with its bundle ID, developer-set name and version, and dwell time; password managers and `--exclude` IDs are withheld; a locked screen or sleep is a gap |
 | ghostrace live consent-shell / revoke-shell | Available on macOS; persisted, revocable consent that `ghostrace run` requires before it starts anything |
 | ghostrace capture | Refuses by design |
 | Local journal and bounded durable writer | Scaffolded for the fixture path; live ingestion is gated |
@@ -182,7 +183,7 @@ encryption or key-management claim.
 | Repository-local Git hook lifecycle | Available as a library manager with plan, install/upgrade, verify, disable/enable, and digest-checked uninstall; foreign hooks, `core.hooksPath` managers, symlinks, drift, and concurrent edits are refused |
 | Explicit shell run wrapper | Available as a consent-gated library adapter; records executable basename token, working-directory class/digest, timing, and outcome for one deliberately wrapped command; arguments, environment, and terminal streams are never retained; no CLI command yet |
 | Frontmost-app identity and session contract | Available as a strict normalization boundary for bundle ID, signing class, app kind/location, salted launch instance, and session dwell/transient semantics; titles, documents, URLs, accessibility, menus, and screen content are structurally absent; the developer-set bundle name and version are kept when plain and bounded |
-| NSWorkspace frontmost-app adapter | Opt-in (`--features frontmost`); polls on the main thread with no Accessibility or Screen Recording permission; not yet wired to the CLI (0171) |
+| NSWorkspace frontmost-app adapter | Opt-in (`--features frontmost`); polls on the main thread with no Accessibility or Screen Recording permission; recorded by `ghostrace live apps` |
 | Ambient shell, Git, frontmost-app, or browser collectors | Not shipped |
 | Permission drift gate | Available as a reviewed manifest of entitlements, linked libraries, privacy-sensitive APIs, and network capability, checked against the signed release binary in macOS CI; new or broadened permissions fail until review evidence is updated |
 | macOS Keychain-backed production encryption | Not shipped |

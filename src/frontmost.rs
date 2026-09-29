@@ -356,8 +356,8 @@ impl FrontmostNormalizer {
         // neither even if an adapter supplied them.
         let (name, version) = if raw.bundled {
             (
-                raw.bundle_name.as_deref().and_then(app_name),
-                raw.bundle_version.as_deref().and_then(app_version),
+                raw.bundle_name.as_deref().and_then(plain_app_name),
+                raw.bundle_version.as_deref().and_then(plain_app_version),
             )
         } else {
             (None, None)
@@ -386,7 +386,7 @@ impl FrontmostNormalizer {
 
 /// Keep a bundle name only if it is short, printable text. Anything else is
 /// dropped whole: a truncated name could still carry what made it unusual.
-fn app_name(raw: &str) -> Option<String> {
+pub(crate) fn plain_app_name(raw: &str) -> Option<String> {
     let name = raw.trim();
     let valid = !name.is_empty()
         && name.chars().count() <= MAX_FRONTMOST_APP_NAME_CHARS
@@ -397,7 +397,7 @@ fn app_name(raw: &str) -> Option<String> {
 
 /// Keep a version only if it looks like one: ASCII letters, digits, and
 /// `. - _ + ( )` or spaces.
-fn app_version(raw: &str) -> Option<String> {
+pub(crate) fn plain_app_version(raw: &str) -> Option<String> {
     let version = raw.trim();
     let valid = !version.is_empty()
         && version.len() <= MAX_FRONTMOST_APP_VERSION_CHARS

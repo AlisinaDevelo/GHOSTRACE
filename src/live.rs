@@ -8,6 +8,11 @@
 //! user confirms the preview, and `git-snapshot` records one repository.
 //! Nothing records in the background.
 
+#[cfg(feature = "frontmost")]
+mod apps;
+#[cfg(feature = "frontmost")]
+pub use apps::{AppsSummary, APPS_CONSENT_PREVIEW, DEFAULT_APP_EXCLUSIONS};
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
@@ -99,6 +104,9 @@ pub struct LiveConfig {
     /// Present only while the user's consent to `ghostrace run` stands.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shell_consent: Option<ShellConsentReceipt>,
+    /// Hex salt for frontmost launch-instance digests, created on first use.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frontmost_salt: Option<String>,
 }
 
 /// The persisted record of consent to `ghostrace run`. It is bound to the
@@ -214,6 +222,7 @@ impl LiveHome {
                 policy_version: 1,
                 watched_roots: BTreeMap::new(),
                 shell_consent: None,
+                frontmost_salt: None,
             },
         };
         home.save()?;
