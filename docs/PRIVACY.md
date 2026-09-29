@@ -414,3 +414,17 @@ process the user approves can read the key. Data protection remains the default
 for signed builds. `tests/login_keychain.rs` exercises provisioning, read-back,
 refusal to overwrite, a journal encrypted and reopened with the key, and deletion
 against the real login keychain when `GHOSTRACE_LOGIN_KEYCHAIN_TEST=1`.
+
+`scripts/local-signing.sh` removes the approval prompt after every rebuild
+without a paid Developer ID. `create` makes a self-signed certificate valid only
+for code signing and imports it into the login keychain with a non-extractable
+private key; the temporary copy is deleted. `trust` marks it trusted for code
+signing, which macOS confirms with the user's password. `sign` signs a build with
+that identity and the identifier `com.alisinadevelo.ghostrace`, so every build has
+the same designated requirement and the key item's access list keeps matching.
+`remove` deletes the trust setting and the identity. A binary signed any other way
+still has to be approved. This does not make the build Developer ID signed: it
+changes nothing for Gatekeeper or the data-protection keychain. An ad-hoc signature
+with an identifier-only requirement would also avoid the prompt, but any program
+the user runs could then claim that identifier and read the key without asking, so
+GHOSTRACE does not use it.
