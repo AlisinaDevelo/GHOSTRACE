@@ -1,7 +1,7 @@
 ---
 id: 0027
 title: Implement NSWorkspace frontmost-app collector
-status: backlog
+status: done
 agent: maintainer
 model: human
 release: M4
@@ -18,9 +18,9 @@ platform: macos
 Record opt-in application focus transitions using the least invasive macOS interface and a deliberately narrow payload.
 
 ## Acceptance criteria
-- [ ] Collection is opt-in and stores bundle ID, application name, and version only.
-- [ ] The collector uses no Accessibility permission.
-- [ ] Window titles, document names, and root access are absent.
+- [x] Collection is opt-in and stores bundle ID, application name, and version only.
+- [x] The collector uses no Accessibility permission.
+- [x] Window titles, document names, and root access are absent.
 
 ## Context
 Application attribution helps establish user context around changes without observing screen content or document-level activity.

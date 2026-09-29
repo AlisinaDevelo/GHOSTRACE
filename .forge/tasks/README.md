@@ -30,7 +30,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0024 | Add explicit shell-wrapper metadata capture | M4 | done | shell-git | maintainer | — | 0007, 0018, 0091, 0092, 0093 |
 | 0025 | Add explicit Git snapshot integration | M4 | done | shell-git | maintainer | — | 0007, 0018, 0094, 0095, 0096 |
 | 0026 | Add opt-in Git hook install and uninstall | M4 | done | shell-git | maintainer | — | 0025, 0097 |
-| 0027 | Implement NSWorkspace frontmost-app collector | M4 | backlog | frontmost | maintainer | — | 0006, 0007, 0010, 0012, 0098 |
+| 0027 | Implement NSWorkspace frontmost-app collector | M4 | done | frontmost | maintainer | — | 0006, 0007, 0010, 0012, 0098 |
 | 0028 | Add frontmost attribution and privacy tests | M4 | backlog | frontmost | maintainer | — | 0027, 0018, 0099, 0100 |
 | 0029 | Decide browser transport and permissions in security ADR | M5 | done | browser | maintainer | — | 0002, 0004, 0005, 0012, 0101 |
 | 0030 | Implement Native Messaging host and explicit pairing | M5 | backlog | browser | maintainer | — | 0008, 0010, 0029, 0102, 0103, 0104 |
@@ -171,8 +171,8 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0165 | Operate a durable live journal from the CLI | M4 | done | foundation | maintainer | — | 0164, 0018, 0019, 0020 |
 | 0167 | Watch a selected folder from the CLI with explicit consent | M4 | done | filesystem | macos-engineer | — | 0165, 0013, 0016 |
 | 0168 | Record explicit Git snapshots from the CLI | M4 | done | shell-git | git-specialist | — | 0165, 0025, 0096 |
-| 0169 | Render an offline HTML timeline report | M4 | backlog | explain-export | frontend-specialist | — | 0165, 0019 |
-| 0170 | Publish a guided live demo | M4 | backlog | foundation | maintainer | — | 0161, 0167, 0168, 0169 |
+| 0169 | Render an offline HTML timeline report | M4 | done | explain-export | frontend-specialist | — | 0165, 0019 |
+| 0170 | Publish a guided live demo | M4 | done | foundation | maintainer | — | 0161, 0167, 0168, 0169 |
 | 0171 | Record frontmost-app changes from the CLI with explicit consent | M4 | backlog | frontmost | maintainer | — | 0027, 0165 |
 | 0172 | Keep login-keychain access stable across rebuilds without a Developer ID | M4 | backlog | storage | maintainer | — | 0164 |
 | 0173 | Export and archive a live journal | M4 | backlog | explain-export | maintainer | — | 0165, 0020, 0022 |
