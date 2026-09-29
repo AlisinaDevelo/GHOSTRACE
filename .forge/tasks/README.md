@@ -30,7 +30,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0024 | Add explicit shell-wrapper metadata capture | M4 | done | shell-git | maintainer | — | 0007, 0018, 0091, 0092, 0093 |
 | 0025 | Add explicit Git snapshot integration | M4 | done | shell-git | maintainer | — | 0007, 0018, 0094, 0095, 0096 |
 | 0026 | Add opt-in Git hook install and uninstall | M4 | done | shell-git | maintainer | — | 0025, 0097 |
-| 0027 | Implement NSWorkspace frontmost-app collector | M4 | backlog | frontmost | maintainer | — | 0006, 0007, 0010, 0012, 0098 |
+| 0027 | Implement NSWorkspace frontmost-app collector | M4 | done | frontmost | maintainer | — | 0006, 0007, 0010, 0012, 0098 |
 | 0028 | Add frontmost attribution and privacy tests | M4 | backlog | frontmost | maintainer | — | 0027, 0018, 0099, 0100 |
 | 0029 | Decide browser transport and permissions in security ADR | M5 | done | browser | maintainer | — | 0002, 0004, 0005, 0012, 0101 |
 | 0030 | Implement Native Messaging host and explicit pairing | M5 | backlog | browser | maintainer | — | 0008, 0010, 0029, 0102, 0103, 0104 |
@@ -43,7 +43,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0037 | Add launchd user-agent lifecycle and permission UX | M5 | backlog | service-ui | maintainer | — | 0013, 0027, 0030, 0035, 0114 |
 | 0038 | Harden release signing, notarization, SBOM, and dependencies | M6 | backlog | release-scale | maintainer | — | 0005, 0008, 0023, 0031, 0037, 0047, 0048, 0115, 0116, 0117, 0118 |
 | 0039 | Establish performance and resource benchmark gates | M6 | backlog | release-scale | maintainer | — | 0013, 0018, 0035, 0037, 0119, 0120, 0163 |
-| 0040 | Complete v1.0 compatibility, privacy, and incident readiness | M6 | backlog | release-scale | maintainer | — | 0020, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028, 0029, 0030, 0031, 0032, 0033, 0034, 0035, 0036, 0037, 0038, 0039, 0041, 0042, 0121, 0122, 0123, 0161, 0162, 0164, 0165, 0167, 0168, 0169, 0170, 0171, 0172, 0173, 0174 |
+| 0040 | Complete v1.0 compatibility, privacy, and incident readiness | M6 | backlog | release-scale | maintainer | — | 0020, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028, 0029, 0030, 0031, 0032, 0033, 0034, 0035, 0036, 0037, 0038, 0039, 0041, 0042, 0121, 0122, 0123, 0161, 0162, 0164, 0165, 0167, 0168, 0169, 0170, 0171, 0172, 0173, 0174, 0175 |
 | 0041 | Validate the project identity and package namespaces | M0 | done | foundation | maintainer | — | 0001 |
 | 0042 | Evaluate optional Endpoint Security actor attribution | M6 | backlog | release-scale | maintainer | — | 0017, 0019, 0037, 0124 |
 | 0043 | Build the prohibited-data privacy regression corpus | M0 | done | privacy | test-engineer | 0005 | 0004, 0006 |
@@ -171,9 +171,10 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0165 | Operate a durable live journal from the CLI | M4 | done | foundation | maintainer | — | 0164, 0018, 0019, 0020 |
 | 0167 | Watch a selected folder from the CLI with explicit consent | M4 | done | filesystem | macos-engineer | — | 0165, 0013, 0016 |
 | 0168 | Record explicit Git snapshots from the CLI | M4 | done | shell-git | git-specialist | — | 0165, 0025, 0096 |
-| 0169 | Render an offline HTML timeline report | M4 | backlog | explain-export | frontend-specialist | — | 0165, 0019 |
-| 0170 | Publish a guided live demo | M4 | backlog | foundation | maintainer | — | 0161, 0167, 0168, 0169 |
+| 0169 | Render an offline HTML timeline report | M4 | done | explain-export | frontend-specialist | — | 0165, 0019 |
+| 0170 | Publish a guided live demo | M4 | done | foundation | maintainer | — | 0161, 0167, 0168, 0169 |
 | 0171 | Record frontmost-app changes from the CLI with explicit consent | M4 | backlog | frontmost | maintainer | — | 0027, 0165 |
 | 0172 | Keep login-keychain access stable across rebuilds without a Developer ID | M4 | backlog | storage | maintainer | — | 0164 |
 | 0173 | Export and archive a live journal | M4 | backlog | explain-export | maintainer | — | 0165, 0020, 0022 |
 | 0174 | Report why the native filesystem benchmark test fails under load | M4 | backlog | filesystem | maintainer | — | 0076 |
+| 0175 | Make per-write authenticated-state verification incremental | M4 | backlog | storage | maintainer | — | 0088 |
