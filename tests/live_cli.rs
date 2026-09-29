@@ -31,6 +31,15 @@ fn init_run_timeline_and_forget_round_trip() {
     assert!(ghostrace(&["live", "init", "--home", home]).status.success());
     let _forget = Forget(home);
 
+    // Without consent, `run` refuses before spawning anything.
+    let marker = directory.path().join("spawned");
+    let touch = format!("touch {}", marker.display());
+    let refused = ghostrace(&["run", "--home", home, "--", "/bin/sh", "-c", &touch]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("consent-shell"));
+    assert!(!marker.exists(), "a refused run must not spawn the command");
+    assert!(ghostrace(&["live", "consent-shell", "--home", home, "--yes"]).status.success());
+
     let run = ghostrace(&["run", "--home", home, "--", "/bin/sh", "-c", "exit 7", "SENTINEL-ARG"]);
     assert_eq!(run.status.code(), Some(7), "the wrapped exit code is returned");
     let missing = ghostrace(&["run", "--home", home, "--", "/nonexistent/program"]);
@@ -53,8 +62,59 @@ fn init_run_timeline_and_forget_round_trip() {
     let status: serde_json::Value = serde_json::from_slice(&status.stdout).expect("status JSON");
     assert_eq!(status["custody"], "login_keychain");
     assert_eq!(status["gaps"], 1);
+    assert_eq!(status["shell_consent"], true);
+
+    // Revoking consent makes the next run refuse before spawning.
+    assert!(ghostrace(&["live", "revoke-shell", "--home", home]).status.success());
+    let refused = ghostrace(&["run", "--home", home, "--", "/bin/sh", "-c", &touch]);
+    assert!(!refused.status.success());
+    assert!(!marker.exists());
 
     assert!(ghostrace(&["live", "forget", "--home", home, "--yes"]).status.success());
     assert!(!std::path::Path::new(home).exists());
     assert!(!ghostrace(&["live", "status", "--home", home]).status.success());
+}
+
+#[test]
+fn watching_a_folder_that_contains_the_home_never_records_the_home() {
+    if !enabled() {
+        eprintln!("set GHOSTRACE_LOGIN_KEYCHAIN_TEST=1 to run the live CLI end to end");
+        return;
+    }
+    let directory = tempfile::tempdir().expect("tempdir");
+    let folder = directory.path().canonicalize().expect("canonical");
+    let home_path = folder.join("home");
+    let home = home_path.to_str().expect("utf8").to_owned();
+    struct Forget(String);
+    impl Drop for Forget {
+        fn drop(&mut self) {
+            let _ = ghostrace(&["live", "forget", "--home", &self.0, "--yes"]);
+        }
+    }
+    assert!(ghostrace(&["live", "init", "--home", &home]).status.success());
+    let _forget = Forget(home.clone());
+
+    let watch = |write: &dyn Fn()| {
+        let child = Command::new(env!("CARGO_BIN_EXE_ghostrace"))
+            .args(["live", "watch", folder.to_str().unwrap(), "--home", &home, "--yes"])
+            .args(["--seconds", "4"])
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("watch starts");
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        write();
+        let output = child.wait_with_output().expect("watch ends");
+        assert!(output.status.success());
+        String::from_utf8(output.stdout).expect("utf8")
+    };
+
+    let inside = watch(&|| {
+        for index in 0..3 {
+            std::fs::write(home_path.join(format!("scratch-{index}")), b"x").expect("write");
+        }
+    });
+    assert!(inside.contains(" 0 change(s) recorded"), "{inside}");
+
+    let outside = watch(&|| std::fs::write(folder.join("outside.txt"), b"x").expect("write"));
+    assert!(!outside.contains(" 0 change(s) recorded"), "{outside}");
 }

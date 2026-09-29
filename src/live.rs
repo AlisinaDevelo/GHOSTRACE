@@ -61,6 +61,8 @@ pub enum LiveError {
     AlreadyInitialized,
     #[error("the home directory is not private to this user")]
     UnsafeHome,
+    #[error("`ghostrace run` needs your consent first; run `ghostrace live consent-shell`")]
+    ShellConsentRequired,
     #[error("the configuration is unreadable")]
     Config,
     #[error("{0} failed: {1}")]
@@ -83,6 +85,32 @@ pub struct LiveConfig {
     pub keychain_account: String,
     pub policy_version: u32,
     pub watched_roots: BTreeMap<String, PathBuf>,
+    /// Present only while the user's consent to `ghostrace run` stands.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shell_consent: Option<ShellConsentReceipt>,
+}
+
+/// The persisted record of consent to `ghostrace run`. It is bound to the
+/// digest of the exact preview the user accepted, so a changed preview
+/// requires consent again.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ShellConsentReceipt {
+    pub granted_at: chrono::DateTime<Utc>,
+    pub preview_sha256: String,
+}
+
+/// What `ghostrace run` records, shown before consent is given.
+pub const SHELL_CONSENT_PREVIEW: &str = "`ghostrace run -- <command>` will record, for each \
+command you run through it:\n\
+  - the program's name as a normalized token, and the kind of working folder\n\
+    (as a salted digest, not a path)\n\
+  - when it started and finished, how it ended, and its exit code or signal\n\
+Never recorded: arguments, environment variables, input or output, or anything\n\
+you run without `ghostrace run`. Consent lasts until `ghostrace live revoke-shell`.";
+
+fn shell_preview_digest() -> String {
+    Sha256::digest(SHELL_CONSENT_PREVIEW.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
 }
 
 pub struct LiveHome {
@@ -108,6 +136,7 @@ pub struct LiveStatus {
     pub gaps: usize,
     pub by_source: BTreeMap<String, usize>,
     pub watched_roots: usize,
+    pub shell_consent: bool,
     pub last_event_at: Option<chrono::DateTime<Utc>>,
 }
 
@@ -173,6 +202,7 @@ impl LiveHome {
                 keychain_account: account,
                 policy_version: 1,
                 watched_roots: BTreeMap::new(),
+                shell_consent: None,
             },
         };
         home.save()?;
@@ -256,6 +286,10 @@ impl LiveHome {
         program: &std::ffi::OsStr,
         args: &[std::ffi::OsString],
     ) -> Result<i32, LiveError> {
+        let consent_at = match &self.config.shell_consent {
+            Some(receipt) if receipt.preview_sha256 == shell_preview_digest() => receipt.granted_at,
+            _ => return Err(LiveError::ShellConsentRequired),
+        };
         let document = self.policy_document()?;
         let confirmation = ConsentPreview::from_policy(
             &document,
@@ -272,7 +306,7 @@ impl LiveHome {
             ShellWrapperConfig {
                 writer: WriterConfig::default(),
                 collector_instance: "live-shell".to_owned(),
-                consent_at: Utc::now(),
+                consent_at,
                 actor: "human".to_owned(),
                 reason: "explicit_run".to_owned(),
                 workspace: None,
@@ -286,6 +320,29 @@ impl LiveHome {
             eprintln!("ghostrace: the command did not start ({reason_code}); recorded as a gap");
         }
         Ok(report.exit_code)
+    }
+
+    /// Persist consent to `ghostrace run` for the current preview.
+    pub fn grant_shell_consent(&mut self) -> Result<(), LiveError> {
+        self.config.shell_consent = Some(ShellConsentReceipt {
+            granted_at: Utc::now(),
+            preview_sha256: shell_preview_digest(),
+        });
+        self.save()
+    }
+
+    /// Withdraw consent; later `ghostrace run` calls refuse before spawning.
+    pub fn revoke_shell_consent(&mut self) -> Result<bool, LiveError> {
+        let had = self.config.shell_consent.take().is_some();
+        self.save()?;
+        Ok(had)
+    }
+
+    pub fn shell_consent_granted(&self) -> bool {
+        self.config
+            .shell_consent
+            .as_ref()
+            .is_some_and(|receipt| receipt.preview_sha256 == shell_preview_digest())
     }
 
     /// The preview a person confirms before `watch` starts.
@@ -375,7 +432,11 @@ impl LiveHome {
                 actor: "human".to_owned(),
                 reason: "explicit_watch".to_owned(),
                 history_timeout: Duration::from_secs(30),
-                internal_paths: InternalPathPolicy::default(),
+                // The home may sit inside the watched folder; nothing in it
+                // (journal, configuration, Git state) is a user change.
+                internal_paths: InternalPathPolicy::new()
+                    .with_directory(self.dir.clone())
+                    .map_err(op("exclude the GHOSTRACE home"))?,
             },
         )
         .map_err(op("start watcher"))?;
@@ -590,6 +651,7 @@ impl LiveHome {
             gaps: events.iter().filter(|stored| stored.event.kind == EventKind::Gap).count(),
             by_source,
             watched_roots: self.config.watched_roots.len(),
+            shell_consent: self.shell_consent_granted(),
             last_event_at: events.iter().map(|stored| stored.event.observed_at).max(),
         };
         journal.shutdown().map_err(op("close journal"))?;
