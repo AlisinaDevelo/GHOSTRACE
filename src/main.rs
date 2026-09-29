@@ -247,6 +247,19 @@ enum LiveCommand {
         #[arg(long)]
         yes: bool,
     },
+    /// Show what `ghostrace run` records and, once you agree, allow it.
+    ConsentShell {
+        #[arg(long)]
+        home: Option<PathBuf>,
+        /// Skip the confirmation prompt.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Withdraw consent to `ghostrace run`; later runs refuse before starting.
+    RevokeShell {
+        #[arg(long)]
+        home: Option<PathBuf>,
+    },
     /// Delete the journal key and the home. The journal becomes unreadable.
     Forget {
         #[arg(long)]
@@ -668,7 +681,10 @@ mod live {
         time::Duration,
     };
 
-    use ghostrace::{live::LiveHome, GhostraceError};
+    use ghostrace::{
+        live::{LiveHome, SHELL_CONSENT_PREVIEW},
+        GhostraceError,
+    };
 
     use super::LiveCommand;
 
@@ -728,8 +744,36 @@ mod live {
         std::process::exit(code);
     }
 
+    fn confirmed(question: &str) -> Result<bool, GhostraceError> {
+        print!("{question} [y/N] ");
+        std::io::stdout().flush().map_err(fail)?;
+        let mut answer = String::new();
+        std::io::stdin().lock().read_line(&mut answer).map_err(fail)?;
+        Ok(matches!(answer.trim(), "y" | "Y" | "yes"))
+    }
+
     pub fn dispatch(command: LiveCommand) -> Result<(), GhostraceError> {
         match command {
+            LiveCommand::ConsentShell { home: dir, yes } => {
+                let mut live = LiveHome::open(&home(dir)?).map_err(fail)?;
+                println!("{SHELL_CONSENT_PREVIEW}\n");
+                if !yes && !confirmed("Allow `ghostrace run`?")? {
+                    println!("Not allowed; `ghostrace run` will refuse.");
+                    return Ok(());
+                }
+                live.grant_shell_consent().map_err(fail)?;
+                println!("Allowed. Revoke with `ghostrace live revoke-shell`.");
+                Ok(())
+            }
+            LiveCommand::RevokeShell { home: dir } => {
+                let mut live = LiveHome::open(&home(dir)?).map_err(fail)?;
+                if live.revoke_shell_consent().map_err(fail)? {
+                    println!("Consent withdrawn; `ghostrace run` now refuses before starting.");
+                } else {
+                    println!("There was no consent to withdraw.");
+                }
+                Ok(())
+            }
             LiveCommand::Forget { home: dir, yes } => {
                 let dir = home(dir)?;
                 let live = LiveHome::open(&dir).map_err(fail)?;
@@ -753,9 +797,12 @@ mod live {
                 println!("GHOSTRACE home created at {}", dir.display());
                 println!("Key custody: login keychain (explicit opt-in for unsigned builds).");
                 println!(
-                    "Nothing is recorded until you run `ghostrace run`, `ghostrace live watch`,"
+                    "Nothing is recorded until you ask: `ghostrace live consent-shell` then\n\
+                     `ghostrace run -- <command>`, `ghostrace live watch <folder>`, or\n\
+                     `ghostrace live git-snapshot`. Never recorded: file contents or readable\n\
+                     file names, command arguments, environment, terminal input or output,\n\
+                     branch or remote names, or which app made a change."
                 );
-                println!("or `ghostrace live git-snapshot`.");
                 Ok(())
             }
             LiveCommand::Status { home: dir, json } => {
@@ -770,6 +817,8 @@ mod live {
                         println!("  {source:<12} {count}");
                     }
                     println!("watched roots:  {}", status.watched_roots);
+                    let consent = if status.shell_consent { "granted" } else { "not granted" };
+                    println!("run consent:    {consent}");
                     if let Some(at) = status.last_event_at {
                         println!("last event:     {}", at.format("%Y-%m-%d %H:%M:%S UTC"));
                     }
