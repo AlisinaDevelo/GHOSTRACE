@@ -31,9 +31,13 @@ fn policy() -> PolicyProfile {
 fn event(id: u128, cursor: &str) -> EventEnvelope {
     let origin =
         IngestionOrigin::fixture_instance("fixture-authenticated-test-source").expect("origin");
+    event_from(&origin, id, cursor)
+}
+
+fn event_from(origin: &IngestionOrigin, id: u128, cursor: &str) -> EventEnvelope {
     let timestamp = Utc.timestamp_opt(1_735_689_600 + id as i64, 0).single().expect("timestamp");
     EventEnvelope::new(
-        &origin,
+        origin,
         Uuid::from_u128(id),
         timestamp,
         timestamp,
@@ -311,4 +315,46 @@ fn cli_authentication_check_is_json_and_fails_closed_on_tamper() {
         .any(|value| { value == "event_edited" || value == "anchor_invalid" }));
     let error = open(&path).verify_authenticated_state().expect_err("must fail closed");
     assert!(matches!(error, GhostraceError::AuthenticatedStateInvalid(_)));
+}
+
+#[test]
+fn two_processes_writing_one_journal_never_see_each_other_as_tampering() {
+    // Two handles are two SQLite connections, as two GHOSTRACE processes would
+    // be. Before the pre-write check ran under the write lock, one writer
+    // could read the event count before the other's commit and the anchor
+    // after it, and report a valid journal as tampered with.
+    let (_directory, path) = private_path("concurrent.sqlite3");
+    open(&path).initialize_authenticated_state().expect("initialize");
+    let writers = (0..2u128)
+        .map(|writer| {
+            let path = path.clone();
+            std::thread::spawn(move || {
+                // Wait for the other writer the way the live CLI does.
+                let journal = Journal::open_fixture_with_policy(
+                    &path,
+                    DeterministicKeyProvider::from_seed("authenticated-state"),
+                    ghostrace::WalPolicy { busy_timeout_ms: 10_000, ..Default::default() },
+                )
+                .expect("journal");
+                let origin = IngestionOrigin::fixture_instance(format!(
+                    "fixture-concurrent-writer-{writer}"
+                ))
+                .expect("origin");
+                for index in 0..150u128 {
+                    let id = 1_000_000 * (writer + 1) + index;
+                    let event = event_from(&origin, id, &format!("cursor-{index:06}"));
+                    journal.ingest(&origin, &event, &policy()).expect("concurrent ingest");
+                    // Paced like a collector's batches, so the test measures
+                    // interleaving rather than lock starvation.
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    for writer in writers {
+        writer.join().expect("writer");
+    }
+    let journal = open(&path);
+    assert_eq!(journal.events().expect("events").len(), 300);
+    assert!(journal.authenticated_state_report().expect("report").valid);
 }
