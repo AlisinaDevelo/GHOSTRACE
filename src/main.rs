@@ -260,6 +260,16 @@ enum LiveCommand {
         #[arg(long)]
         home: Option<PathBuf>,
     },
+    /// Write the timeline as one offline HTML file. It is an unencrypted copy.
+    Report {
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        home: Option<PathBuf>,
+        /// Confirm that the report is an unencrypted copy.
+        #[arg(long)]
+        yes: bool,
+    },
     /// Delete the journal key and the home. The journal becomes unreadable.
     Forget {
         #[arg(long)]
@@ -683,6 +693,7 @@ mod live {
 
     use ghostrace::{
         live::{LiveHome, SHELL_CONSENT_PREVIEW},
+        report::REPORT_PLAINTEXT_NOTICE,
         GhostraceError,
     };
 
@@ -763,6 +774,17 @@ mod live {
                 }
                 live.grant_shell_consent().map_err(fail)?;
                 println!("Allowed. Revoke with `ghostrace live revoke-shell`.");
+                Ok(())
+            }
+            LiveCommand::Report { output, home: dir, yes } => {
+                let live = open(dir)?;
+                println!("{REPORT_PLAINTEXT_NOTICE}");
+                if !yes && !confirmed("Write the report?")? {
+                    println!("No report was written.");
+                    return Ok(());
+                }
+                let events = live.write_report(&output).map_err(fail)?;
+                println!("Wrote {} ({events} event(s)).", output.display());
                 Ok(())
             }
             LiveCommand::RevokeShell { home: dir } => {

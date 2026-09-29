@@ -51,6 +51,7 @@ pub mod parquet_profile;
 pub mod policy;
 pub mod query;
 pub mod recovery;
+pub mod report;
 pub mod residue;
 pub mod retention;
 pub mod shell_metadata;
