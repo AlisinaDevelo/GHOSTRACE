@@ -222,7 +222,11 @@ impl LiveHome {
         }
         let bytes = fs::read(dir.join(CONFIG_NAME)).map_err(|_| LiveError::NotInitialized)?;
         let config: LiveConfig = serde_json::from_slice(&bytes).map_err(|_| LiveError::Config)?;
-        Ok(Self { dir: dir.to_path_buf(), config })
+        // Compare against the resolved path: watch and report refusals and
+        // the watch exclusion would miss a home reached through a symlink
+        // such as /var -> /private/var.
+        let dir = fs::canonicalize(dir).map_err(|_| LiveError::NotInitialized)?;
+        Ok(Self { dir, config })
     }
 
     pub fn config(&self) -> &LiveConfig {
@@ -668,6 +672,46 @@ impl LiveHome {
             Err(error) => return Err(LiveError::Operation("delete key", error.to_string())),
         }
         fs::remove_dir_all(&self.dir).map_err(op("remove home"))
+    }
+
+    /// Write the offline HTML timeline to `output`, which must not exist and
+    /// must be outside the home. The file is created 0600 beside `output`
+    /// and renamed into place. Returns the number of events rendered.
+    pub fn write_report(&self, output: &Path) -> Result<usize, LiveError> {
+        let parent = match output.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent,
+            _ => Path::new("."),
+        };
+        let parent = fs::canonicalize(parent).map_err(op("resolve report folder"))?;
+        if parent.starts_with(&self.dir) {
+            return Err(LiveError::Operation(
+                "report",
+                "the report must be written outside the GHOSTRACE home".to_owned(),
+            ));
+        }
+        if output.exists() {
+            return Err(LiveError::Operation(
+                "report",
+                "the destination already exists".to_owned(),
+            ));
+        }
+        let journal = self.journal()?;
+        let events = journal
+            .events()
+            .map_err(op("read journal"))?
+            .into_iter()
+            .map(|stored| stored.event)
+            .collect::<Vec<_>>();
+        journal.shutdown().map_err(op("close journal"))?;
+        let html = crate::report::render_timeline_html(&events, Utc::now());
+        let mut temporary = tempfile::Builder::new()
+            .prefix(".ghostrace-report-")
+            .tempfile_in(&parent)
+            .map_err(op("write report"))?;
+        temporary.write_all(html.as_bytes()).map_err(op("write report"))?;
+        temporary.as_file().sync_all().map_err(op("write report"))?;
+        temporary.persist_noclobber(output).map_err(|error| op("write report")(error.error))?;
+        Ok(events.len())
     }
 
     pub fn explain(&self, event: Uuid) -> Result<String, LiveError> {

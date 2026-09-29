@@ -64,6 +64,33 @@ fn init_run_timeline_and_forget_round_trip() {
     assert_eq!(status["gaps"], 1);
     assert_eq!(status["shell_consent"], true);
 
+    // The HTML report carries no argument, environment, or path content.
+    let report = directory.path().join("report.html");
+    let written = Command::new(env!("CARGO_BIN_EXE_ghostrace"))
+        .args(["run", "--home", home, "--", "/bin/sh", "-c", "exit 0", "SENTINEL-ARG"])
+        .env("SENTINEL_ENV", "SENTINEL-ENV-VALUE")
+        .status()
+        .expect("run");
+    assert!(written.success());
+    let args = ["live", "report", "--home", home, "--yes", "--output", report.to_str().unwrap()];
+    assert!(ghostrace(&args).status.success());
+    let html = std::fs::read_to_string(&report).expect("report");
+    for sentinel in ["SENTINEL", directory.path().to_str().unwrap(), "/bin/sh", "exit 0"] {
+        assert!(!html.contains(sentinel), "report leaked {sentinel}");
+    }
+    assert!(html.contains("shell"));
+    assert!(!ghostrace(&args).status.success(), "an existing report is never replaced");
+    // Through the /var symlink, the home is still recognized.
+    let inside = format!("{home}/report.html");
+    assert!(home.starts_with("/var/") || home.starts_with("/private/"));
+    let inside_args = ["live", "report", "--home", home, "--yes", "--output", inside.as_str()];
+    assert!(!ghostrace(&inside_args).status.success(), "reports stay outside the home");
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&report).expect("metadata").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
     // Revoking consent makes the next run refuse before spawning.
     assert!(ghostrace(&["live", "revoke-shell", "--home", home]).status.success());
     let refused = ghostrace(&["run", "--home", home, "--", "/bin/sh", "-c", &touch]);
