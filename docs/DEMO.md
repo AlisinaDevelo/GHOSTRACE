@@ -31,6 +31,7 @@ use the key.
 cargo build --release --locked
 G=target/release/ghostrace
 $G live init
+$G live consent-shell   # shows what `run` records; asks once
 $G run -- make test
 $G live watch ~/Projects/something --seconds 60
 $G live git-snapshot ~/Projects/something
@@ -40,6 +41,9 @@ $G live forget
 ~~~
 
 ## Transcript
+
+Recorded before `ghostrace run` required `live consent-shell`; the output is
+otherwise unchanged.
 
 ~~~text
 $ ghostrace live init
