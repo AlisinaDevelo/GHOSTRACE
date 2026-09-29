@@ -1,7 +1,7 @@
 ---
 id: 0165
 title: Operate a durable live journal from the CLI
-status: backlog
+status: done
 agent: maintainer
 model: human
 release: M4
@@ -18,9 +18,9 @@ platform: macos
 Give a person a real journal on their Mac: create it, inspect its status, list a timeline, and explain events, without writing Rust.
 
 ## Acceptance criteria
-- [ ] `ghostrace init` creates a journal in a private directory with explicit key custody and prints what is and is not recorded.
-- [ ] `ghostrace status` and `ghostrace timeline` report sources, counts, coverage, and gaps without printing paths or payload secrets.
-- [ ] `ghostrace explain` works on live journals with the same claim grammar and gap warnings as the fixture path.
+- [x] `ghostrace init` creates a journal in a private directory with explicit key custody and prints what is and is not recorded.
+- [x] `ghostrace status` and `ghostrace timeline` report sources, counts, coverage, and gaps without printing paths or payload secrets.
+- [x] `ghostrace explain` works on live journals with the same claim grammar and gap warnings as the fixture path.
 
 ## Context
 The library adapters exist but only tests can drive them; a usable CLI is the first time GHOSTRACE runs for a person.

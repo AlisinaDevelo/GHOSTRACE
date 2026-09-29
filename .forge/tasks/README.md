@@ -25,7 +25,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0019 | Implement deterministic evidence-backed explain | M3 | done | explain-export | maintainer | — | 0017, 0018, 0080, 0081, 0082 |
 | 0020 | Define and ship JSONL export v1 with manifest | M3 | done | explain-export | maintainer | — | 0018, 0019, 0083, 0084, 0085 |
 | 0021 | Add retention, deletion, and integrity-check commands | M3 | done | explain-export | maintainer | — | 0009, 0018, 0020, 0086, 0087 |
-| 0022 | Add optional Parquet cold-archive export | M3 | backlog | explain-export | maintainer | — | 0020, 0021, 0090 |
+| 0022 | Add optional Parquet cold-archive export | M3 | done | explain-export | maintainer | — | 0020, 0021, 0090 |
 | 0023 | Add tamper-evident event chain and verifier | M3 | done | explain-export | maintainer | — | 0008, 0009, 0020, 0088, 0089 |
 | 0024 | Add explicit shell-wrapper metadata capture | M4 | done | shell-git | maintainer | — | 0007, 0018, 0091, 0092, 0093 |
 | 0025 | Add explicit Git snapshot integration | M4 | done | shell-git | maintainer | — | 0007, 0018, 0094, 0095, 0096 |
@@ -164,13 +164,13 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0158 | Commission an independent privacy and security audit | M11 | backlog | long-term | security-auditor | 0153 | 0146, 0154, 0155, 0156 |
 | 0159 | Run the v2 migration and rollback release candidate | M11 | backlog | long-term | release-engineer | 0153 | 0154, 0155, 0156, 0158 |
 | 0160 | Publish the 2032 research and sustainability decision | M11 | backlog | long-term | maintainer | 0153 | 0145, 0151, 0157 |
-| 0161 | Ship an explicit ghostrace run CLI over a Keychain journal | M4 | backlog | shell-git | macos-engineer | 0024 | 0024, 0054, 0164, 0165 |
+| 0161 | Ship an explicit ghostrace run CLI over a Keychain journal | M4 | done | shell-git | macos-engineer | 0024 | 0024, 0054, 0164, 0165 |
 | 0162 | Close interrupted shell runs with explicit gaps | M4 | done | shell-git | test-engineer | 0024 | 0024 |
 | 0163 | Bring the native FSEvents benchmark within its device bound | M6 | done | release-scale | performance-engineer | 0039 | 0017 |
-| 0164 | Offer opt-in login-keychain key custody for unsigned builds | M4 | backlog | storage | maintainer | — | 0054, 0055 |
-| 0165 | Operate a durable live journal from the CLI | M4 | backlog | foundation | maintainer | — | 0164, 0018, 0019, 0020 |
-| 0167 | Watch a selected folder from the CLI with explicit consent | M4 | backlog | filesystem | macos-engineer | — | 0165, 0013, 0016 |
-| 0168 | Record explicit Git snapshots from the CLI | M4 | backlog | shell-git | git-specialist | — | 0165, 0025, 0096 |
+| 0164 | Offer opt-in login-keychain key custody for unsigned builds | M4 | done | storage | maintainer | — | 0054, 0055 |
+| 0165 | Operate a durable live journal from the CLI | M4 | done | foundation | maintainer | — | 0164, 0018, 0019, 0020 |
+| 0167 | Watch a selected folder from the CLI with explicit consent | M4 | done | filesystem | macos-engineer | — | 0165, 0013, 0016 |
+| 0168 | Record explicit Git snapshots from the CLI | M4 | done | shell-git | git-specialist | — | 0165, 0025, 0096 |
 | 0169 | Render an offline HTML timeline report | M4 | backlog | explain-export | frontend-specialist | — | 0165, 0019 |
 | 0170 | Publish a guided live demo | M4 | backlog | foundation | maintainer | — | 0161, 0167, 0168, 0169 |
 | 0171 | Record frontmost-app changes from the CLI with explicit consent | M4 | backlog | frontmost | maintainer | — | 0027, 0165 |
