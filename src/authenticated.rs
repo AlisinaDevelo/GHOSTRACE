@@ -180,6 +180,17 @@ pub(crate) fn ensure_anchor(
     connection: &mut Connection,
     provider: &dyn KeyProvider,
 ) -> Result<(), GhostraceError> {
+    let transaction = connection.transaction()?;
+    ensure_anchor_in(&transaction, provider)?;
+    transaction.commit()?;
+    Ok(())
+}
+
+/// [`ensure_anchor`] inside a transaction the caller already holds.
+pub(crate) fn ensure_anchor_in(
+    connection: &Transaction<'_>,
+    provider: &dyn KeyProvider,
+) -> Result<(), GhostraceError> {
     let exists: Option<String> = connection
         .query_row(
             "SELECT state_key FROM authenticated_state WHERE state_key = 'journal'",
@@ -205,14 +216,12 @@ pub(crate) fn ensure_anchor(
     }
     let snapshot = canonical_snapshot(connection)?;
     let state = new_state(provider, snapshot, None, None)?;
-    let transaction = connection.transaction()?;
-    insert_state(&transaction, &state)?;
-    transaction.execute(
+    insert_state(connection, &state)?;
+    connection.execute(
         "UPDATE journal_metadata SET metadata_value = 'complete'
          WHERE metadata_key = 'authenticated_state_bootstrap'",
         [],
     )?;
-    transaction.commit()?;
     Ok(())
 }
 

@@ -1009,7 +1009,7 @@ impl Journal {
         self.faults.hit(FaultPoint::IngestBeforeTransaction)?;
         let mut connection = self.lock_connection()?;
         self.ensure_authenticated_for_write(&mut connection)?;
-        let transaction = connection.transaction()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         self.faults.hit(FaultPoint::IngestAfterTransaction)?;
         record_policy_profile(&transaction, policy)?;
         let sequences = insert_events(
@@ -1268,7 +1268,7 @@ impl Journal {
         self.faults.hit(FaultPoint::ControlBeforeTransaction)?;
         let mut connection = self.lock_connection()?;
         self.ensure_authenticated_for_write(&mut connection)?;
-        let transaction = connection.transaction()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         self.faults.hit(FaultPoint::ControlAfterTransaction)?;
         let changed = transaction.execute(
             "UPDATE cursors SET state = 'invalidated' WHERE source = ?1 AND collector_instance = ?2",
@@ -1303,7 +1303,7 @@ impl Journal {
         self.faults.hit(FaultPoint::ControlBeforeTransaction)?;
         let mut connection = self.lock_connection()?;
         self.ensure_authenticated_for_write(&mut connection)?;
-        let transaction = connection.transaction()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         self.faults.hit(FaultPoint::ControlAfterTransaction)?;
         record_policy_profile(&transaction, policy)?;
         let current: Option<(u64, Option<String>)> = transaction
@@ -1510,8 +1510,13 @@ impl Journal {
             // preserving the single key access at the encryption boundary.
             return Ok(());
         }
-        authenticated::ensure_anchor(connection, self.key_provider.as_ref())?;
-        authenticated::require_valid(connection, self.key_provider.as_ref())?;
+        // Hold the write lock while the snapshot and the anchor are read, so
+        // another process's commit cannot land between those reads and be
+        // mistaken for tampering.
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        authenticated::ensure_anchor_in(&transaction, self.key_provider.as_ref())?;
+        authenticated::require_valid(&transaction, self.key_provider.as_ref())?;
+        transaction.commit()?;
         Ok(())
     }
 }
