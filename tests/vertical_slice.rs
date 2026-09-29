@@ -808,6 +808,9 @@ fn published_json_schema_compiles_and_matches_fixture_envelopes() {
                 app_id: app("com.example.fixture"),
                 change: AppChange::Activated,
                 previous_app_id: None,
+                app_name: None,
+                app_version: None,
+                dwell_ms: None,
             }),
         ),
         fixture_event(

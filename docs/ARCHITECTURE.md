@@ -311,6 +311,15 @@ the polling interval before each read; observation times are the read time, with
 one interval of the switch. While the screen is locked, macOS reports
 `com.apple.loginwindow` as frontmost.
 
+`ghostrace live apps` (`src/live/apps.rs`) runs the probe on the main thread under
+its own `apps` policy (frontmost-app and lifecycle sources, root `frontmost`) with
+a per-journal salt kept in the home's private configuration. Each activation is a
+direct `frontmost_app_changed` event carrying the bundle ID, name, and version; the
+session it ends is closed by inference at that moment with its dwell time. The login
+window is treated as a screen lock, and coverage that resumes after a lock, sleep,
+or interrupted observer is recorded as a gap. Password managers and user-excluded
+bundle IDs are never identified.
+
 `FrontmostSessionTracker` suppresses repeated activations of the frontmost
 instance, puts the dwell time on the event that ends a session, marks sessions
 shorter than 500 ms as transient, gives no dwell to a deactivation it did not see

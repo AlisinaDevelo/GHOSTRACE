@@ -366,7 +366,10 @@
           "properties": {
             "app_id": { "$ref": "#/$defs/app_identifier" },
             "change": { "enum": ["launched", "activated", "deactivated", "terminated"] },
-            "previous_app_id": { "$ref": "#/$defs/nullable_app_identifier" }
+            "previous_app_id": { "$ref": "#/$defs/nullable_app_identifier" },
+            "app_name": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "app_version": { "type": "string", "minLength": 1, "maxLength": 32, "pattern": "^[A-Za-z0-9._+() -]+$" },
+            "dwell_ms": { "type": "integer", "minimum": 0 }
           }
         }
       }

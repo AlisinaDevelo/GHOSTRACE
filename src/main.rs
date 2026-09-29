@@ -284,6 +284,21 @@ enum LiveCommand {
         #[arg(long)]
         yes: bool,
     },
+    /// Record which application is in front, after confirming what is kept.
+    /// Needs a build with `--features frontmost`.
+    Apps {
+        #[arg(long)]
+        home: Option<PathBuf>,
+        /// Stop after this many seconds (default: until Ctrl-C).
+        #[arg(long)]
+        seconds: Option<u64>,
+        /// Never identify this bundle ID (repeatable).
+        #[arg(long = "exclude")]
+        exclude: Vec<String>,
+        /// Skip the confirmation prompt.
+        #[arg(long)]
+        yes: bool,
+    },
     /// Delete the journal key and the home. The journal becomes unreadable.
     Forget {
         #[arg(long)]
@@ -777,6 +792,57 @@ mod live {
         Ok(matches!(answer.trim(), "y" | "Y" | "yes"))
     }
 
+    #[cfg(feature = "frontmost")]
+    fn apps(
+        dir: Option<PathBuf>,
+        seconds: Option<u64>,
+        exclude: Vec<String>,
+        yes: bool,
+    ) -> Result<(), GhostraceError> {
+        use ghostrace::live::{APPS_CONSENT_PREVIEW, DEFAULT_APP_EXCLUSIONS};
+        let mut live = open(dir)?;
+        println!("{APPS_CONSENT_PREVIEW}");
+        println!(
+            "Excluded: {}",
+            DEFAULT_APP_EXCLUSIONS
+                .iter()
+                .copied()
+                .chain(exclude.iter().map(String::as_str))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        if !yes && !confirmed("\nStart recording?")? {
+            println!("Not started; nothing was recorded.");
+            return Ok(());
+        }
+        // SAFETY: the handler only stores to an atomic.
+        unsafe {
+            libc::signal(
+                libc::SIGINT,
+                request_stop as extern "C" fn(libc::c_int) as libc::sighandler_t,
+            );
+        }
+        println!("Recording. Press Ctrl-C to stop.");
+        let summary = live
+            .apps(seconds.map(Duration::from_secs), &exclude, &|| STOP.load(Ordering::SeqCst))
+            .map_err(fail)?;
+        println!(
+            "Stopped after {} s: {} activation(s) recorded, {} withheld, {} gap(s).",
+            summary.seconds, summary.activations, summary.withheld, summary.gaps
+        );
+        Ok(())
+    }
+
+    #[cfg(not(feature = "frontmost"))]
+    fn apps(
+        _: Option<PathBuf>,
+        _: Option<u64>,
+        _: Vec<String>,
+        _: bool,
+    ) -> Result<(), GhostraceError> {
+        Err(fail("this build has no frontmost adapter; rebuild with --features frontmost"))
+    }
+
     pub fn dispatch(command: LiveCommand) -> Result<(), GhostraceError> {
         match command {
             LiveCommand::ConsentShell { home: dir, yes } => {
@@ -843,6 +909,9 @@ mod live {
                 let events = live.write_report(&output).map_err(fail)?;
                 println!("Wrote {} ({events} event(s)).", output.display());
                 Ok(())
+            }
+            LiveCommand::Apps { home: dir, seconds, exclude, yes } => {
+                apps(dir, seconds, exclude, yes)
             }
             LiveCommand::RevokeShell { home: dir } => {
                 let mut live = LiveHome::open(&home(dir)?).map_err(fail)?;

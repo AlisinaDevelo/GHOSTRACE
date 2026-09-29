@@ -594,6 +594,15 @@ pub struct FrontmostAppChangedPayload {
     pub change: AppChange,
     #[serde(default)]
     pub previous_app_id: Option<ApplicationId>,
+    /// Developer-set bundle name, bounded and plain (see `frontmost`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_name: Option<String>,
+    /// Bundle short version, bounded and plain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_version: Option<String>,
+    /// How long the application was frontmost, on the record that ends it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dwell_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -866,6 +875,17 @@ impl EventPayload {
                     "previous_app_id",
                     payload.previous_app_id.as_ref().map(ApplicationId::as_str),
                 )?;
+                // A name or version must be exactly what the frontmost
+                // normalizer would keep; anything else is refused, not fixed.
+                if payload.app_name.as_deref().is_some_and(|name| {
+                    crate::frontmost::plain_app_name(name).as_deref() != Some(name)
+                }) || payload.app_version.as_deref().is_some_and(|version| {
+                    crate::frontmost::plain_app_version(version).as_deref() != Some(version)
+                }) {
+                    return Err(GhostraceError::InvalidEvent(
+                        "frontmost app name or version is not plain and bounded".to_owned(),
+                    ));
+                }
             }
             Self::ShellStarted(payload) => {
                 validate_identifier("session_id", payload.session_id.as_str())?;

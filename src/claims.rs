@@ -332,7 +332,18 @@ fn render_body(event: &EventEnvelope, locale: ClaimLocale) -> String {
             ),
         },
         EventPayload::FrontmostAppChanged(payload) => {
-            format!("frontmost application {} ({:?}).", debug_lower(payload.change), payload.app_id)
+            let app = match (&payload.app_name, &payload.app_version) {
+                (Some(name), Some(version)) => {
+                    format!("{name} {version} ({})", payload.app_id.as_str())
+                }
+                (Some(name), None) => format!("{name} ({})", payload.app_id.as_str()),
+                _ => payload.app_id.as_str().to_owned(),
+            };
+            let dwell = payload
+                .dwell_ms
+                .map(|dwell| format!(" after {:.1} s in front", dwell as f64 / 1000.0))
+                .unwrap_or_default();
+            format!("frontmost application {} {app}{dwell}.", debug_lower(payload.change))
         }
         EventPayload::ShellStarted(payload) => format!(
             "shell session started ({}, session {}).",
