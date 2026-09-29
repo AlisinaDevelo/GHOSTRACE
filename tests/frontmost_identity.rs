@@ -148,7 +148,7 @@ fn identity_cases_normalize_to_their_expected_outcomes() {
         let expected = &case.expected;
         match (&app, expected.identity.as_str()) {
             (
-                FrontmostApp::Known { bundle_id, signing, kind, location, launch_instance },
+                FrontmostApp::Known { bundle_id, signing, kind, location, launch_instance, .. },
                 "known",
             ) => {
                 assert_eq!(
@@ -260,4 +260,82 @@ fn every_normalized_identity_validates_against_the_schema() {
     injected["window_title"] = Value::from("private");
     assert!(!validator.is_valid(&injected));
     assert!(serde_json::from_value::<FrontmostObservation>(injected).is_err());
+}
+
+#[test]
+fn bundle_name_and_version_are_kept_only_when_plain_and_bounded() {
+    let normalizer = FrontmostNormalizer::new([7; 32]);
+    let observe = |name: Option<&str>, version: Option<&str>, bundled: bool| {
+        let raw = raw(&serde_json::json!({
+            "transition": "activated",
+            "observed_at": "2026-01-01T09:00:00Z",
+            "bundle_identifier": "com.example.editor",
+            "bundle_name": name,
+            "bundle_version": version,
+            "bundled": bundled,
+            "activation_policy": "regular",
+            "translocated": false,
+            "signing": null,
+            "process_id": 501,
+            "process_started_micros": 1_767_254_400_000_000_i64,
+        }));
+        let app = normalizer.normalize(&raw);
+        let json = serde_json::to_value(serde_json::json!({
+            "schema_version": 1, "transition": "activated", "observed_at": "2026-01-01T09:00:00Z",
+            "app": app, "dwell_ms": null, "transient": false, "basis": "direct",
+        }))
+        .expect("json");
+        assert!(validator().is_valid(&json), "{json}");
+        match app {
+            FrontmostApp::Known { name, version, .. } => (name, version),
+            FrontmostApp::Unknown { .. } => panic!("expected a known app"),
+        }
+    };
+    let kept = |name: &str, version: &str| (Some(name.to_owned()), Some(version.to_owned()));
+    assert_eq!(observe(Some("Editor"), Some("2.4.1"), true), kept("Editor", "2.4.1"));
+    assert_eq!(
+        observe(Some("  Editor Pro  "), Some("16.0 (1234)"), true),
+        kept("Editor Pro", "16.0 (1234)")
+    );
+    assert_eq!(observe(Some("Éditeur 日本"), Some("1.0b3"), true), kept("Éditeur 日本", "1.0b3"));
+    assert_eq!(observe(None, None, true), (None, None));
+    // An unbundled executable has no bundle name even if one was supplied.
+    assert_eq!(observe(Some("Editor"), Some("1.0"), false), (None, None));
+    for bad_name in [
+        "",
+        "   ",
+        "Users/alice/secret",
+        "back\\slash",
+        "line\nbreak",
+        "tab\there",
+        "rtl\u{202E}txt.exe",
+        "zero\u{200B}width",
+    ] {
+        assert_eq!(observe(Some(bad_name), None, true).0, None, "{bad_name:?}");
+    }
+    assert_eq!(observe(Some(&"x".repeat(65)), None, true).0, None);
+    assert_eq!(observe(Some(&"x".repeat(64)), None, true).0, Some("x".repeat(64)));
+    for bad_version in ["", "beta", "1.0; rm -rf", "1.0\n2.0", "１.０", &"1".repeat(33)] {
+        assert_eq!(observe(None, Some(bad_version), true).1, None, "{bad_version:?}");
+    }
+}
+
+#[test]
+fn records_without_name_or_version_serialize_as_before() {
+    let normalizer = FrontmostNormalizer::new([7; 32]);
+    let app = normalizer.normalize(&raw(&serde_json::json!({
+        "transition": "activated",
+        "observed_at": "2026-01-01T09:00:00Z",
+        "bundle_identifier": "com.example.editor",
+        "bundled": true,
+        "activation_policy": "regular",
+        "translocated": false,
+        "signing": null,
+        "process_id": 501,
+        "process_started_micros": 1_767_254_400_000_000_i64,
+    })));
+    let json = serde_json::to_string(&app).expect("json");
+    assert!(!json.contains("\"name\"") && !json.contains("\"version\""), "{json}");
+    let back: FrontmostApp = serde_json::from_str(&json).expect("round trip");
+    assert_eq!(back, app);
 }

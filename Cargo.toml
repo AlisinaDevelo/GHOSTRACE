@@ -35,8 +35,14 @@ uuid = { version = "1.10", features = ["serde", "v4"] }
 parquet = { version = "60", default-features = false, features = ["zstd"], optional = true }
 
 [features]
+# Opt-in NSWorkspace frontmost-app adapter. Links AppKit, so default builds do not.
+frontmost = ["dep:core-foundation"]
 # Opt-in Parquet cold-archive writer. Default and release builds do not link it.
 parquet = ["dep:parquet"]
+
+[[test]]
+name = "frontmost_macos"
+harness = false
 
 [dev-dependencies]
 jsonschema = { version = "0.57", default-features = false }
@@ -46,6 +52,7 @@ libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = { version = "3.7.0", default-features = false, features = ["OSX_10_15"] }
+core-foundation = { version = "0.10", optional = true }
 
 [profile.dev]
 debug = 1

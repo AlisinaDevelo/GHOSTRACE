@@ -278,22 +278,38 @@ shell executor or ambient capture path.
 
 ### Frontmost-application identity boundary
 
-`src/frontmost.rs` is the normalization contract for a future NSWorkspace
-activation adapter; no collector is shipped. `FrontmostRawObservation` is the only
+`src/frontmost.rs` is the normalization contract for the NSWorkspace adapter in
+`src/frontmost_macos.rs`. `FrontmostRawObservation` is the only
 input an adapter may pass: the transition (activated, deactivated, terminated),
-time, bundle identifier, whether the executable is bundled, activation policy,
+time, bundle identifier, the developer-set `CFBundleName` and
+`CFBundleShortVersionString` from the bundle's unlocalized Info.plist, whether the
+executable is bundled, activation policy,
 translocation flag, code-signing validity/ad-hoc/platform/team facts, and the
 process ID and start time. It has no field for window titles, document names,
 URLs, accessibility data, menu state, localized names, or screen content, and
 strict deserialization rejects them without echoing their values.
 
-`FrontmostNormalizer` keeps a lowercase bundle identifier (dropped if unsafe), a
-signing class (`developer` with a validated team ID, `platform`, `ad_hoc`,
+`FrontmostNormalizer` keeps a lowercase bundle identifier (dropped if unsafe), the
+bundle name (at most 64 printable characters with no path separators, control,
+zero-width, or direction-override characters) and version (at most 32 characters of
+ASCII letters, digits, and `. - _ + ( )`), each dropped whole rather than truncated
+and never kept for an unbundled executable, a signing class (`developer` with a validated team ID, `platform`, `ad_hoc`,
 `unsigned`, or `unknown`), a kind (`regular`, `helper`, `command_line`, `unknown`),
 a location (`installed` or `translocated`), and a launch-instance digest salted per
 journal in place of the process ID and start time. A bundle with no usable
 identifier and no verifiable signature, or an invalid process, becomes an explicit
 unknown app.
+
+The adapter (`frontmost_macos`, behind the opt-in `frontmost` cargo feature so
+default builds do not link AppKit) reads `NSWorkspace.frontmostApplication`, the
+bundle's `infoDictionary`, `proc_pidinfo` for the start time, and
+`SecCodeCopySigningInformation` for signing facts. It needs no Accessibility or
+Screen Recording permission. The bundle path is read only to recognize App
+Translocation and is not kept. `frontmostApplication` is updated through the main
+run loop, so `FrontmostProbe::poll` must run on the main thread, which it pumps for
+the polling interval before each read; observation times are the read time, within
+one interval of the switch. While the screen is locked, macOS reports
+`com.apple.loginwindow` as frontmost.
 
 `FrontmostSessionTracker` suppresses repeated activations of the frontmost
 instance, puts the dwell time on the event that ends a session, marks sessions

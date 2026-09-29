@@ -6,7 +6,9 @@
 //! API; that type has no field for a window title, document name, URL,
 //! accessibility data, menu state, or screen content, and strict
 //! deserialization rejects any such field. Normalization keeps a lowercase
-//! bundle identifier, a signing-identity class, an application kind and
+//! bundle identifier, the developer-set bundle name and short version from the
+//! bundle's own `Info.plist` (never the localized or user-renamed display
+//! name, and never the bundle path), a signing-identity class, an application kind and
 //! location class, and a salted launch-instance digest in place of the process
 //! ID and start time. Activation is contextual evidence only: it never proves
 //! that the application caused a filesystem change.
@@ -35,6 +37,10 @@ pub const FRONTMOST_IDENTITY_CORPUS_JSON: &str =
 
 const LAUNCH_INSTANCE_DOMAIN: &[u8] = b"ghostrace-frontmost-launch-instance-v1\0";
 const TEAM_ID_LEN: usize = 10;
+/// Longest bundle name kept; a longer one is dropped rather than truncated.
+pub const MAX_FRONTMOST_APP_NAME_CHARS: usize = 64;
+/// Longest bundle short version kept.
+pub const MAX_FRONTMOST_APP_VERSION_CHARS: usize = 32;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Error)]
 pub enum FrontmostError {
@@ -83,6 +89,12 @@ pub struct FrontmostRawObservation {
     pub transition: FrontmostTransition,
     pub observed_at: DateTime<Utc>,
     pub bundle_identifier: Option<String>,
+    /// `CFBundleName` from the bundle's unlocalized Info.plist.
+    #[serde(default)]
+    pub bundle_name: Option<String>,
+    /// `CFBundleShortVersionString` from the bundle's unlocalized Info.plist.
+    #[serde(default)]
+    pub bundle_version: Option<String>,
     /// Whether the executable lives inside an application bundle.
     pub bundled: bool,
     pub activation_policy: FrontmostActivationPolicy,
@@ -156,6 +168,12 @@ pub enum FrontmostUnknownReason {
 pub enum FrontmostApp {
     Known {
         bundle_id: Option<ApplicationId>,
+        /// Developer-set bundle name, when present and within bounds.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        /// Bundle short version, when present and within bounds.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        version: Option<String>,
         signing: FrontmostSigningIdentity,
         kind: FrontmostAppKind,
         location: FrontmostAppLocation,
@@ -334,8 +352,20 @@ impl FrontmostNormalizer {
         } else {
             FrontmostAppLocation::Installed
         };
+        // Name and version describe a bundle, so an unbundled executable has
+        // neither even if an adapter supplied them.
+        let (name, version) = if raw.bundled {
+            (
+                raw.bundle_name.as_deref().and_then(app_name),
+                raw.bundle_version.as_deref().and_then(app_version),
+            )
+        } else {
+            (None, None)
+        };
         FrontmostApp::Known {
             bundle_id,
+            name,
+            version,
             signing,
             kind,
             location,
@@ -352,6 +382,35 @@ impl FrontmostNormalizer {
         let hex = hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>();
         SnapshotDigest::try_from(format!("sha256:{hex}")).expect("sha256 digest is valid")
     }
+}
+
+/// Keep a bundle name only if it is short, printable text. Anything else is
+/// dropped whole: a truncated name could still carry what made it unusual.
+fn app_name(raw: &str) -> Option<String> {
+    let name = raw.trim();
+    let valid = !name.is_empty()
+        && name.chars().count() <= MAX_FRONTMOST_APP_NAME_CHARS
+        && !name.chars().any(|c| c.is_control() || matches!(c, '/' | '\\'))
+        && !name.chars().any(is_invisible_format);
+    valid.then(|| name.to_owned())
+}
+
+/// Keep a version only if it looks like one: ASCII letters, digits, and
+/// `. - _ + ( )` or spaces.
+fn app_version(raw: &str) -> Option<String> {
+    let version = raw.trim();
+    let valid = !version.is_empty()
+        && version.len() <= MAX_FRONTMOST_APP_VERSION_CHARS
+        && version.bytes().any(|byte| byte.is_ascii_digit())
+        && version.bytes().all(|byte| byte.is_ascii_alphanumeric() || b".-_+() ".contains(&byte));
+    valid.then(|| version.to_owned())
+}
+
+/// Bidirectional overrides and zero-width characters can make a name display
+/// as something else.
+fn is_invisible_format(c: char) -> bool {
+    matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}'
+        | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
 }
 
 fn signing_identity(input: Option<&FrontmostSigningInput>) -> FrontmostSigningIdentity {

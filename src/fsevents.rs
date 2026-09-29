@@ -604,7 +604,7 @@ impl<N: NativeLifecycle> Drop for LifecycleController<N> {
 }
 
 #[cfg(target_os = "macos")]
-mod ffi {
+pub(crate) mod ffi {
     use super::{c_char, c_void};
 
     pub type Boolean = u8;
