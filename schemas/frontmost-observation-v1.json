@@ -28,6 +28,8 @@
                 { "type": "null" }
               ]
             },
+            "name": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^/\\\\\\u0000-\\u001f\\u007f]+$" },
+            "version": { "type": "string", "minLength": 1, "maxLength": 32, "pattern": "^[A-Za-z0-9._+() -]+$" },
             "signing": {
               "oneOf": [
                 {

@@ -20,6 +20,8 @@ pub mod export_schema;
 pub mod fault;
 pub mod fixture;
 pub mod frontmost;
+#[cfg(all(target_os = "macos", feature = "frontmost"))]
+pub mod frontmost_macos;
 pub mod fsevents;
 pub mod fsevents_collector;
 pub mod fsevents_flags;
