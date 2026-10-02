@@ -475,8 +475,8 @@ impl LiveHome {
         while !stop() && deadline.is_none_or(|limit| started.elapsed() < limit) {
             collector.run_current_run_loop_for(Duration::from_millis(250)).map_err(op("watch"))?;
         }
-        let status = collector.status();
         collector.stop().map_err(op("stop watcher"))?;
+        let status = collector.status();
         drop(collector);
         journal.shutdown().map_err(op("close journal"))?;
         Ok(WatchSummary {

@@ -5,9 +5,10 @@
 
 use std::{
     fs,
-    io::Write,
+    io::{self, BufRead, BufReader, Write},
     path::Path,
-    process::{Command, Output, Stdio},
+    process::{Child, ChildStdout, Command, Output, Stdio},
+    time::{Duration, Instant},
 };
 
 fn enabled() -> bool {
@@ -33,6 +34,137 @@ fn ghostrace_with_input(args: &[String], input: &str) -> Output {
         .write_all(input.as_bytes())
         .expect("answer prompt");
     child.wait_with_output().expect("ghostrace ends")
+}
+
+struct LiveWatch {
+    child: Option<Child>,
+    prefix: Vec<u8>,
+    reader: Option<std::thread::JoinHandle<()>>,
+}
+
+fn read_watch_ready(stdout: ChildStdout) -> io::Result<(Vec<u8>, ChildStdout)> {
+    let mut reader = BufReader::new(stdout);
+    let mut prefix = Vec::new();
+    loop {
+        let mut line = String::new();
+        if reader.read_line(&mut line)? == 0 {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "watch exited before ready"));
+        }
+        prefix.extend_from_slice(line.as_bytes());
+        if prefix.len() > 64 * 1024 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "watch preview exceeded bound"));
+        }
+        if line.trim_end() == "Watching. Press Ctrl-C to stop." {
+            prefix.extend_from_slice(reader.buffer());
+            return Ok((prefix, reader.into_inner()));
+        }
+    }
+}
+
+fn stop_and_reap(mut child: Child) -> io::Result<Output> {
+    let stop = (|| {
+        if child.try_wait()?.is_none() {
+            // SAFETY: this is the still-owned, unreaped child process, not a
+            // PID discovered elsewhere. The watch handles SIGINT as Ctrl-C.
+            let signalled = unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGINT) };
+            if signalled != 0 {
+                let error = io::Error::last_os_error();
+                if error.raw_os_error() != Some(libc::ESRCH) {
+                    return Err(error);
+                }
+            }
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while child.try_wait()?.is_none() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            if child.try_wait()?.is_none() {
+                child.kill()?;
+            }
+        }
+        Ok(())
+    })();
+    if stop.is_err() {
+        let _ = child.kill();
+    }
+    let output = child.wait_with_output();
+    stop?;
+    output
+}
+
+impl LiveWatch {
+    fn start(folder: &Path, home: &str) -> Self {
+        let child = Command::new(env!("CARGO_BIN_EXE_ghostrace"))
+            .args(["live", "watch", folder.to_str().expect("utf8"), "--home", home, "--yes"])
+            .args(["--seconds", "30"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("watch starts");
+        let mut watch = Self { child: Some(child), prefix: Vec::new(), reader: None };
+        let stdout = watch.child.as_mut().expect("child").stdout.take().expect("watch stdout");
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        watch.reader = Some(std::thread::spawn(move || {
+            let _ = sender.send(read_watch_ready(stdout));
+        }));
+        let error = match receiver.recv_timeout(Duration::from_secs(10)) {
+            Ok(Ok((prefix, stdout))) => {
+                watch.prefix = prefix;
+                watch.child.as_mut().expect("child").stdout = Some(stdout);
+                watch.reader.take().expect("reader").join().expect("readiness thread");
+                return watch;
+            }
+            Ok(Err(error)) => error.to_string(),
+            Err(error) => error.to_string(),
+        };
+        let output = watch.into_output();
+        panic!("watch readiness failed: {error}; {}", String::from_utf8_lossy(&output.stderr));
+    }
+
+    fn into_output(mut self) -> Output {
+        let mut output = stop_and_reap(self.child.take().expect("child")).expect("watch ends");
+        if let Some(reader) = self.reader.take() {
+            reader.join().expect("readiness thread");
+        }
+        self.prefix.extend_from_slice(&output.stdout);
+        output.stdout = std::mem::take(&mut self.prefix);
+        output
+    }
+
+    fn finish(mut self) -> Output {
+        let exited = self.child.as_mut().expect("child").try_wait().expect("watch status");
+        let output = self.into_output();
+        assert!(exited.is_none(), "watch exited before requested stop: {}", output.status);
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(String::from_utf8_lossy(&output.stdout).contains("0 lost."));
+        output
+    }
+}
+
+impl Drop for LiveWatch {
+    fn drop(&mut self) {
+        if let Some(child) = self.child.take() {
+            let _ = stop_and_reap(child);
+        }
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
+        }
+    }
+}
+
+#[test]
+fn live_watch_guard_reaps_its_child_during_unwind() {
+    let child = Command::new("/bin/sleep").arg("30").spawn().expect("sleep starts");
+    let pid = child.id() as libc::pid_t;
+    let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        let _watch = LiveWatch { child: Some(child), prefix: Vec::new(), reader: None };
+        panic!("synthetic assertion failure");
+    }));
+    assert!(unwind.is_err());
+    // SAFETY: waitpid only checks whether the known child remains unreaped.
+    let waited = unsafe { libc::waitpid(pid, std::ptr::null_mut(), libc::WNOHANG) };
+    assert_eq!(waited, -1, "the guard must reap its child before home cleanup");
+    assert_eq!(io::Error::last_os_error().raw_os_error(), Some(libc::ECHILD));
 }
 
 fn assert_private_file(path: &Path) {
@@ -80,6 +212,20 @@ fn export_manifest(path: &Path) -> serde_json::Value {
     let text = fs::read_to_string(path).expect("export");
     let line = text.lines().next().expect("manifest line");
     serde_json::from_str(line).expect("manifest JSON")
+}
+
+fn assert_no_filesystem_events(home: &str) {
+    let timeline = ghostrace(&["live", "timeline", "--home", home, "--json"]);
+    assert!(timeline.status.success(), "{}", String::from_utf8_lossy(&timeline.stderr));
+    let entries: serde_json::Value = serde_json::from_slice(&timeline.stdout).expect("timeline");
+    assert!(
+        entries
+            .as_array()
+            .expect("entries")
+            .iter()
+            .all(|entry| { entry["kind"].as_str().expect("event kind") != "filesystem_changed" }),
+        "internal artifacts must not become filesystem events, including the final drain"
+    );
 }
 
 #[test]
@@ -191,16 +337,9 @@ fn watching_a_folder_that_contains_the_home_never_records_the_home() {
     let _forget = Forget(home.clone());
 
     let watch = |write: &dyn Fn()| {
-        let child = Command::new(env!("CARGO_BIN_EXE_ghostrace"))
-            .args(["live", "watch", folder.to_str().unwrap(), "--home", &home, "--yes"])
-            .args(["--seconds", "4"])
-            .stdout(std::process::Stdio::piped())
-            .spawn()
-            .expect("watch starts");
-        std::thread::sleep(std::time::Duration::from_millis(1500));
+        let child = LiveWatch::start(&folder, &home);
         write();
-        let output = child.wait_with_output().expect("watch ends");
-        assert!(output.status.success());
+        let output = child.finish();
         String::from_utf8(output.stdout).expect("utf8")
     };
 
@@ -210,6 +349,7 @@ fn watching_a_folder_that_contains_the_home_never_records_the_home() {
         }
     });
     assert!(inside.contains(" 0 change(s) recorded"), "{inside}");
+    assert_no_filesystem_events(&home);
 
     let outside = watch(&|| std::fs::write(folder.join("outside.txt"), b"x").expect("write"));
     assert!(!outside.contains(" 0 change(s) recorded"), "{outside}");
@@ -384,13 +524,7 @@ fn live_export_validates_and_is_never_seen_by_a_running_watch() {
     let export = folder.join("export.jsonl");
     let archive = folder.join("archive.parquet");
     let report = folder.join("report.html");
-    let watch = Command::new(env!("CARGO_BIN_EXE_ghostrace"))
-        .args(["live", "watch", folder.to_str().unwrap(), "--home", &home, "--yes"])
-        .args(["--seconds", "6"])
-        .stdout(std::process::Stdio::piped())
-        .spawn()
-        .expect("watch starts");
-    std::thread::sleep(std::time::Duration::from_millis(1500));
+    let watch = LiveWatch::start(&folder, &home);
 
     let mut args = vec!["live", "export", "--home", &home, "--yes", "--output"];
     args.push(export.to_str().unwrap());
@@ -404,9 +538,10 @@ fn live_export_validates_and_is_never_seen_by_a_running_watch() {
     let report_args = ["live", "report", "--home", &home, "--yes", "--output"];
     assert!(ghostrace(&[&report_args[..], &[report.to_str().unwrap()]].concat()).status.success());
 
-    let output = watch.wait_with_output().expect("watch ends");
+    let output = watch.finish();
     let summary = String::from_utf8(output.stdout).expect("utf8");
     assert!(summary.contains(" 0 change(s) recorded"), "{summary}");
+    assert_no_filesystem_events(&home);
 
     assert!(ghostrace(&["validate", "--export", export.to_str().unwrap()]).status.success());
     assert_private_file(&export);

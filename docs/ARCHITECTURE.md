@@ -403,7 +403,14 @@ checks the bounded internal-artifact policy, and then applies the filesystem del
 contract. The journal path and SQLite sidecars are registered automatically; callers
 register export, backup, and temporary directories explicitly. Internal matches are
 denied before path hashing or writer admission and produce a path-free
-`internal_storage_path` policy-blocked summary. Existing internal objects remain
+`internal_storage_path` policy-blocked summary after the native stream stops or is
+revoked. During observation only its bounded counter changes; emitting a summary
+into the observed journal would itself be internal storage activity and could
+invalidate an export's confirmed event snapshot. `internal_path_denials` remains
+available in collector status. A crash can lose the pending aggregate; it is not
+a completeness guarantee. Outside-scope summaries still persist during observation
+([ADR 0006](adr/0006-internal-denial-summaries.md)).
+Existing internal objects remain
 denied after relocation through device/inode binding, while symlink redirects fail
 closed during canonicalization and selected-root containment. Exact transport duplicates are
 suppressed only when their source event ID, raw flags, and path digest all match a

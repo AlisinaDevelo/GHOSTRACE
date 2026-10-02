@@ -1015,9 +1015,14 @@ mod live {
                         request_stop as extern "C" fn(libc::c_int) as libc::sighandler_t,
                     );
                 }
-                println!("Watching. Press Ctrl-C to stop.");
+                let announced = std::cell::Cell::new(false);
                 let summary = live
                     .watch(&folder, seconds.map(Duration::from_secs), &|| {
+                        // The first stop check runs after collector.start()
+                        // succeeds, so this line is an actual readiness signal.
+                        if !announced.replace(true) {
+                            println!("Watching. Press Ctrl-C to stop.");
+                        }
                         STOP.load(Ordering::SeqCst)
                     })
                     .map_err(fail)?;

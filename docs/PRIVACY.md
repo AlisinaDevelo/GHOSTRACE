@@ -159,7 +159,12 @@ the journal, its sidecars, or caller-registered export/backup/temporary paths be
 hashing or persistence. Existing internal objects remain denied after relocation by
 device/inode identity; symlink redirects are canonicalized and fail closed. An
 internal denial is represented only by a bounded `internal_storage_path` summary,
-never by a raw path or a filesystem payload. The CoreServices `OwnEvent` flag is
+never by a raw path or a filesystem payload. Its count is accumulated while the
+stream runs and summarized after a clean stop or revocation, so the summary cannot
+observe its own journal write or alter an export preview through internal storage
+activity. The live cumulative counter remains available in collector status; an
+abnormal exit can lose the not-yet-persisted aggregate. Other policy denials are
+not deferred. The CoreServices `OwnEvent` flag is
 retained as source evidence for unrelated paths and is not an unconditional drop
 rule.
 These checks reduce local path-confusion risk but cannot prevent a privileged process,

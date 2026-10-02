@@ -31,3 +31,8 @@ Completion requires the acceptance evidence above; issue closure alone is not ev
 Implemented in PR #406 and acceptance-tested in PR #409. The exact merged-main
 device rerun and retained artifact digests are recorded in
 [docs/evidence/0173-live-export-and-archive.md](../../docs/evidence/0173-live-export-and-archive.md).
+
+A follow-up native regression identified internal-denial summaries changing an
+active export preview. Those summaries now persist only after observation stops;
+watch acceptance uses actual startup and completed-journal checks. The retained
+failure and final protected-main reproduction are linked from issue #394.
