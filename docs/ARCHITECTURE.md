@@ -308,17 +308,21 @@ Screen Recording permission. The bundle path is read only to recognize App
 Translocation and is not kept. `frontmostApplication` is updated through the main
 run loop, so `FrontmostProbe::poll` must run on the main thread, which it pumps for
 the polling interval before each read; observation times are the read time, within
-one interval of the switch. While the screen is locked, macOS reports
-`com.apple.loginwindow` as frontmost.
+one interval of the switch. An observed `com.apple.loginwindow` is a lock hint,
+not proof that every lock/session or sleep/wake boundary was observed.
 
 `ghostrace live apps` (`src/live/apps.rs`) runs the probe on the main thread under
 its own `apps` policy (frontmost-app and lifecycle sources, root `frontmost`) with
 a per-journal salt kept in the home's private configuration. Each activation is a
 direct `frontmost_app_changed` event carrying the bundle ID, name, and version; the
-session it ends is closed by inference at that moment with its dwell time. The login
-window is treated as a screen lock, and coverage that resumes after a lock, sleep,
-or interrupted observer is recorded as a gap. Password managers and user-excluded
-bundle IDs are never identified.
+session it ends is closed by inference at that moment with its dwell time. An
+observed login window is treated as a screen-lock boundary; observing an app again
+resumes coverage with a gap. Observer start/stop boundaries are also supplied by
+the CLI. Password managers and user-excluded bundle IDs are never identified.
+The tracker can model sleep/wake, but the live CLI does not yet supply those
+events or a complete lock/session lifecycle. Dwell can span an unobserved boundary;
+synthetic tracker coverage is not proof of live lifecycle coverage. Task 0171/#392
+remains open for that integration and device verification.
 
 `FrontmostSessionTracker` suppresses repeated activations of the frontmost
 instance, puts the dwell time on the event that ends a session, marks sessions
@@ -333,8 +337,9 @@ Coverage is bounded as well as identity. Every app record carries a `basis`:
 `direct` when a notification reported it, or `inferred_closure` when the tracker
 ended a session because the notification that should have ended it was not seen.
 An activation while another session is open closes that session at the
-activation time. Sleep, screen lock, fast user switching, and observer stops close
-the open session at the boundary and emit a `suspended` coverage record; the
+activation time. When supplied to the tracker, sleep, screen lock, fast user
+switching, and observer-stop events close the open session at the boundary and
+emit a `suspended` coverage record; the
 matching wake, unlock, session return, or observer start emits `resumed` with the
 time coverage was lost. An observer start without a clean stop emits
 `interrupted`, drops the open session without a dwell, and reports the interval

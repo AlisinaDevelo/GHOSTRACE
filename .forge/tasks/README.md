@@ -175,6 +175,6 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0170 | Publish a guided live demo | M4 | done | foundation | maintainer | — | 0161, 0167, 0168, 0169 |
 | 0171 | Record frontmost-app changes from the CLI with explicit consent | M4 | backlog | frontmost | maintainer | — | 0027, 0165 |
 | 0172 | Keep login-keychain access stable across rebuilds without a Developer ID | M4 | backlog | storage | maintainer | — | 0164 |
-| 0173 | Export and archive a live journal | M4 | backlog | explain-export | maintainer | — | 0165, 0020, 0022 |
-| 0174 | Report why the native filesystem benchmark test fails under load | M4 | backlog | filesystem | maintainer | — | 0076 |
+| 0173 | Export and archive a live journal | M4 | done | explain-export | maintainer | — | 0165, 0020, 0022 |
+| 0174 | Report why the native filesystem benchmark test fails under load | M4 | done | filesystem | maintainer | — | 0076 |
 | 0175 | Make per-write authenticated-state verification incremental | M4 | backlog | storage | maintainer | — | 0088 |

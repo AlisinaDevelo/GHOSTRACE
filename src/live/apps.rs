@@ -3,9 +3,9 @@
 //!
 //! Samples come from the NSWorkspace adapter, which must run on the main
 //! thread. Each change of launch instance is an activation; the tracker closes
-//! the previous session at that moment by inference. While the screen is
-//! locked macOS reports the login window as frontmost, so that is recorded as
-//! a coverage boundary, never as time spent in an application.
+//! the previous session at that moment by inference. An observed login window
+//! becomes a coverage boundary, never time spent in an application. Polling does
+//! not establish complete lock/session or sleep/wake coverage.
 
 use std::time::{Duration, Instant};
 
@@ -51,8 +51,10 @@ until you stop it:\n\
   - its bundle ID, developer-set name and version, and signing class\n\
   - when it came to the front and how long it stayed\n\
 Never recorded: window titles, documents, web addresses, what you type or see, or\n\
-anything from password managers and the applications you exclude. While the screen\n\
-is locked or the Mac sleeps, nothing is recorded and the interval is marked as a gap.\n\
+anything from password managers and the applications you exclude. An observed login\n\
+window pauses application observations. Sleep/wake and complete lock-lifecycle detection\n\
+are not yet integrated; dwell can span an unobserved boundary. Stop collection before\n\
+locking or sleeping if those intervals must not enter an application's dwell.\n\
 No Accessibility or Screen Recording permission is used.";
 
 /// What an apps session recorded.
