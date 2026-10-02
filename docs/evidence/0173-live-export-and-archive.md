@@ -65,3 +65,28 @@ No journal, plaintext export, private path, or key is committed.
   sleep/wake, or notarization behavior.
 - The timing-sensitive native filesystem benchmark is tracked separately; this
   task adds no large-journal throughput or release-readiness claim.
+
+## Follow-up: internal-storage concurrency
+
+A further device rerun at `7446cb3be1867c3e1a6f4170b1904c4f7db00fe5` failed the
+running-watch export with `export journal snapshot changed after preview`.
+The refusal was correct: an excluded internal write can generate a denial-summary
+row between preview and publication. A native file-backed regression added to
+that unchanged production source independently reproduced the snapshot change.
+Both failures are retained, rather than discarded after a passing rerun.
+
+The correction accumulates only internal-path denials while observing and writes
+one path-free aggregate after stop or revocation. The live counter remains
+available; outside-scope denials and genuine event-snapshot refusal are unchanged.
+See [ADR 0006](../adr/0006-internal-denial-summaries.md). Watch acceptance now waits
+for actual startup, checks final-drain counters and the completed journal, and
+reaps the child before forgetting its home even on assertion failure.
+
+The exact corrected merged-main revision, reproduction, and artifact digests are
+recorded in the completion comment on issue #394. Earlier successful device runs
+remain historical evidence; they are not relabeled as tests of this correction.
+
+| Artifact | Result | SHA-256 | Bytes |
+| --- | --- | --- | ---: |
+| `export-final-main-native.log` | Watched-export snapshot refusal at `7446cb3`, exit 101 | `54682976619583a7e73f0f4c314d1e3eb9275ca13e768e0a6610fea52c8ed2eb` | 1866 |
+| `internal-snapshot-red.log` | Added native regression against unchanged `7446cb3` production code, exit 101 | `dbc5f4bf30ea931a2d3539032ba6b3e89aff598b594efe8e435588be2d14455a` | 1027 |

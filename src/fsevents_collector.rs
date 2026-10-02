@@ -1008,6 +1008,7 @@ impl FseventsCollector {
         self.stream.stop()?;
         self.set_accepting(false);
         let _ = self.drain_pending()?;
+        self.submit_internal_denial_summary()?;
         self.submit_lifecycle(EventKind::CollectorStopped)?;
         self.state = CollectorState::Stopped;
         Ok(())
@@ -1029,6 +1030,7 @@ impl FseventsCollector {
         if self.state == CollectorState::Running {
             self.stream.stop()?;
             self.pending.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).events.clear();
+            self.submit_internal_denial_summary()?;
             self.submit_lifecycle(EventKind::CollectorStopped)?;
         }
         if self.coverage_state == CollectorCoverageState::Replaying {
@@ -1573,13 +1575,21 @@ impl FseventsCollector {
             return Ok(());
         }
         self.blocked_events = 0;
-        let internal_count = std::mem::take(&mut self.blocked_internal_events);
         let scope_count = std::mem::take(&mut self.blocked_scope_events);
-        if internal_count > 0 {
-            self.submit_blocked_summary_event("internal_storage_path", internal_count)?;
-        }
         if scope_count > 0 {
             self.submit_blocked_summary_event("outside_selected_scope", scope_count)?;
+        }
+        Ok(())
+    }
+
+    // Called only after the native stream has stopped. Recording an internal
+    // denial while observing the journal can observe its own summary write and
+    // can invalidate export confirmation through unrelated storage activity.
+    // The cumulative receipt counter stays available while collection runs.
+    fn submit_internal_denial_summary(&mut self) -> Result<(), FseventsCollectorError> {
+        let count = std::mem::take(&mut self.blocked_internal_events);
+        if count > 0 {
+            self.submit_blocked_summary_event("internal_storage_path", count)?;
         }
         Ok(())
     }

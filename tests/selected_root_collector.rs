@@ -334,6 +334,110 @@ fn internal_storage_writes_are_denied_before_persistence_and_reported_path_free(
 
 #[cfg(target_os = "macos")]
 #[test]
+fn persistent_journal_does_not_record_feedback_from_internal_denials() {
+    for revoke in [false, true] {
+        let directory = tempdir().expect("tempdir");
+        let root_path = directory.path().join("selected-root");
+        let internal_path = root_path.join("private-home");
+        fs::create_dir(&root_path).expect("selected root");
+        fs::create_dir(&internal_path).expect("internal home");
+        fs::set_permissions(&internal_path, fs::Permissions::from_mode(0o700))
+            .expect("private home");
+        let journal = Journal::open_fixture(
+            internal_path.join("journal.sqlite3"),
+            DeterministicKeyProvider::from_seed("collector-internal-feedback"),
+        )
+        .expect("persistent journal");
+        let root = SelectedRoot::new("root-main", &root_path).expect("selected root");
+        let mut collector_config = config();
+        collector_config
+            .internal_paths
+            .register_directory(&internal_path)
+            .expect("internal path policy");
+        let mut collector = FseventsCollector::new(
+            confirmation(&policy()),
+            policy(),
+            [root],
+            journal,
+            collector_config,
+        )
+        .expect("collector");
+        collector.start().expect("start");
+        let export_path = directory.path().join("preview.jsonl");
+        let export_policy = ghostrace::PolicyProfile::from_document(&policy()).expect("policy");
+        let preview = ghostrace::preview_export(
+            &collector.journal(),
+            &export_policy,
+            &ghostrace::ExportRequest::default(),
+            &export_path,
+        )
+        .expect("preview before internal write");
+        fs::write(internal_path.join("excluded-write"), b"synthetic internal write")
+            .expect("internal write");
+        for _ in 0..100 {
+            collector.run_current_run_loop_for(Duration::from_millis(50)).expect("drive");
+            if collector.status().internal_path_denials > 0 {
+                break;
+            }
+        }
+        assert!(collector.status().internal_path_denials > 0, "internal write not observed");
+        let after_internal_write = ghostrace::preview_export(
+            &collector.journal(),
+            &export_policy,
+            &ghostrace::ExportRequest::default(),
+            &export_path,
+        )
+        .expect("preview after internal write");
+        assert_eq!(
+            after_internal_write.snapshot_digest(),
+            preview.snapshot_digest(),
+            "an internal denial must not invalidate the confirmed event snapshot while observing"
+        );
+
+        let before = collector.journal().events().expect("events before quiet interval").len();
+        for _ in 0..20 {
+            collector.run_current_run_loop_for(Duration::from_millis(50)).expect("drive quiet");
+        }
+        let active = collector.journal().events().expect("events after quiet interval");
+        assert_eq!(
+            active.len(),
+            before,
+            "a quiet journal must not gain events from its own denied writes"
+        );
+        assert!(
+            !active.iter().any(|stored| {
+                matches!(&stored.event.payload, EventPayload::PolicyBlockedSummary(payload)
+                if payload.reason_code.as_str() == "internal_storage_path")
+            }),
+            "internal denial summaries must wait until observation ends"
+        );
+
+        if revoke {
+            collector.revoke(Utc::now(), "human", "test_complete").expect("revoke");
+        } else {
+            collector.stop().expect("stop");
+        }
+        let status = collector.status();
+        let events = collector.journal().events().expect("final journal events");
+        let summaries = events
+            .iter()
+            .filter_map(|stored| match &stored.event.payload {
+                EventPayload::PolicyBlockedSummary(payload)
+                    if payload.reason_code.as_str() == "internal_storage_path" =>
+                {
+                    Some(payload)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(summaries.len(), 1, "one path-free final internal denial summary");
+        assert_eq!(summaries[0].count, status.internal_path_denials);
+        assert!(!events.iter().any(|stored| stored.event.kind == EventKind::FilesystemChanged));
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
 fn history_done_transitions_replaying_to_live_without_user_event() {
     let directory = tempdir().expect("tempdir");
     let root_path = directory.path().join("selected-root");
