@@ -3,7 +3,12 @@
 
 #![cfg(target_os = "macos")]
 
-use std::process::Command;
+use std::{
+    fs,
+    io::Write,
+    path::Path,
+    process::{Command, Output, Stdio},
+};
 
 fn enabled() -> bool {
     std::env::var_os("GHOSTRACE_LOGIN_KEYCHAIN_TEST").is_some_and(|value| value == "1")
@@ -11,6 +16,83 @@ fn enabled() -> bool {
 
 fn ghostrace(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_ghostrace")).args(args).output().expect("ghostrace runs")
+}
+
+fn ghostrace_with_input(args: &[String], input: &str) -> Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ghostrace"))
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("ghostrace starts");
+    child
+        .stdin
+        .take()
+        .expect("ghostrace stdin")
+        .write_all(input.as_bytes())
+        .expect("answer prompt");
+    child.wait_with_output().expect("ghostrace ends")
+}
+
+fn assert_private_file(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mode = fs::metadata(path).expect("output metadata").permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "{} must be private", path.display());
+}
+
+fn assert_no_export_temporary_files(folder: &Path) {
+    let leftovers = fs::read_dir(folder)
+        .expect("output folder")
+        .map(|entry| entry.expect("output entry").file_name().to_string_lossy().into_owned())
+        .filter(|name| {
+            name.starts_with(".ghostrace-export-incomplete-")
+                || name.starts_with(".ghostrace-archive-")
+        })
+        .collect::<Vec<_>>();
+    assert!(leftovers.is_empty(), "temporary export artifacts remain: {leftovers:?}");
+}
+
+fn live_preview(home: &Path, output: &Path) -> ghostrace::ExportPreview {
+    let live = ghostrace::live::LiveHome::open(home).expect("live home");
+    let policy =
+        ghostrace::PolicyProfile::from_document(&live.policy_document().expect("live policy"))
+            .expect("policy profile");
+    let journal = live.journal().expect("journal");
+    let preview =
+        ghostrace::preview_export(&journal, &policy, &ghostrace::ExportRequest::default(), output)
+            .expect("preview");
+    journal.shutdown().expect("close journal");
+    preview
+}
+
+fn preview_value(stdout: &str, prefix: &str) -> String {
+    stdout
+        .lines()
+        .find_map(|line| line.strip_prefix(prefix).map(str::trim))
+        .map(str::to_owned)
+        .unwrap_or_else(|| panic!("missing {prefix:?} line in output:\n{stdout}"))
+}
+
+fn preview_event_count(stdout: &str) -> u64 {
+    let line = stdout
+        .lines()
+        .find(|line| line.starts_with("Events:"))
+        .unwrap_or_else(|| panic!("missing Events line in output:\n{stdout}"));
+    line.strip_prefix("Events:")
+        .expect("Events prefix")
+        .split_whitespace()
+        .next()
+        .expect("preview event count")
+        .parse()
+        .expect("numeric preview event count")
+}
+
+fn export_manifest(path: &Path) -> serde_json::Value {
+    let text = fs::read_to_string(path).expect("export");
+    let line = text.lines().next().expect("manifest line");
+    serde_json::from_str(line).expect("manifest JSON")
 }
 
 #[test]
@@ -147,6 +229,144 @@ fn watching_a_folder_that_contains_the_home_never_records_the_home() {
 }
 
 #[test]
+fn live_export_interactive_decline_leaves_no_outputs_or_temporary_files() {
+    if !enabled() {
+        eprintln!("set GHOSTRACE_LOGIN_KEYCHAIN_TEST=1 to run the live CLI end to end");
+        return;
+    }
+    let directory = tempfile::tempdir().expect("tempdir");
+    let folder = directory.path().canonicalize().expect("canonical");
+    let home = folder.join("home");
+    let home_string = home.to_str().expect("utf8").to_owned();
+    struct Forget(String);
+    impl Drop for Forget {
+        fn drop(&mut self) {
+            let _ = ghostrace(&["live", "forget", "--home", &self.0, "--yes"]);
+        }
+    }
+    assert!(ghostrace(&["live", "init", "--home", &home_string]).status.success());
+    let _forget = Forget(home_string.clone());
+    assert!(ghostrace(&["live", "consent-shell", "--home", &home_string, "--yes"])
+        .status
+        .success());
+    assert!(ghostrace(&["run", "--home", &home_string, "--", "/usr/bin/true"]).status.success());
+
+    let export = folder.join("declined.jsonl");
+    let archive = folder.join("declined.parquet");
+    let mut args = vec![
+        "live".to_owned(),
+        "export".to_owned(),
+        "--home".to_owned(),
+        home_string,
+        "--output".to_owned(),
+        export.to_str().expect("utf8").to_owned(),
+    ];
+    if cfg!(feature = "parquet") {
+        args.extend(["--parquet".to_owned(), archive.to_str().expect("utf8").to_owned()]);
+    }
+
+    let declined = ghostrace_with_input(&args, "n\n");
+    assert!(declined.status.success(), "{}", String::from_utf8_lossy(&declined.stderr));
+    assert!(String::from_utf8_lossy(&declined.stdout).contains("No export was written."));
+    assert!(!export.exists(), "declining must not publish JSONL");
+    assert!(!archive.exists(), "declining must not publish Parquet");
+    assert_no_export_temporary_files(&folder);
+}
+
+#[test]
+fn live_export_interactive_preview_matches_manifest_and_writes_private_outputs() {
+    if !enabled() {
+        eprintln!("set GHOSTRACE_LOGIN_KEYCHAIN_TEST=1 to run the live CLI end to end");
+        return;
+    }
+    let directory = tempfile::tempdir().expect("tempdir");
+    let folder = directory.path().canonicalize().expect("canonical");
+    let home = folder.join("home");
+    let home_string = home.to_str().expect("utf8").to_owned();
+    struct Forget(String);
+    impl Drop for Forget {
+        fn drop(&mut self) {
+            let _ = ghostrace(&["live", "forget", "--home", &self.0, "--yes"]);
+        }
+    }
+    assert!(ghostrace(&["live", "init", "--home", &home_string]).status.success());
+    let _forget = Forget(home_string.clone());
+    assert!(ghostrace(&["live", "consent-shell", "--home", &home_string, "--yes"])
+        .status
+        .success());
+    assert!(ghostrace(&["run", "--home", &home_string, "--", "/usr/bin/true"]).status.success());
+
+    let export = folder.join("interactive.jsonl");
+    let archive = folder.join("interactive.parquet");
+    let expected = live_preview(&home, &export);
+    let mut args = vec![
+        "live".to_owned(),
+        "export".to_owned(),
+        "--home".to_owned(),
+        home_string.clone(),
+        "--output".to_owned(),
+        export.to_str().expect("utf8").to_owned(),
+    ];
+    if cfg!(feature = "parquet") {
+        args.extend(["--parquet".to_owned(), archive.to_str().expect("utf8").to_owned()]);
+    }
+
+    let exported = ghostrace_with_input(&args, "y\n");
+    assert!(exported.status.success(), "{}", String::from_utf8_lossy(&exported.stderr));
+    let stdout = String::from_utf8(exported.stdout).expect("utf8");
+    assert_eq!(preview_event_count(&stdout), expected.event_count);
+    assert_eq!(preview_value(&stdout, "Plan "), expected.plan_digest().as_str());
+    assert_eq!(preview_value(&stdout, "Snapshot "), expected.snapshot_digest().as_str());
+
+    let manifest = export_manifest(&export);
+    assert_eq!(manifest["query_scope"]["kind"], "all_committed");
+    assert_eq!(manifest["coverage"]["event_count"].as_u64(), Some(expected.event_count));
+    assert_eq!(manifest["record_counts"]["event"].as_u64(), Some(expected.event_count));
+    // The default live export includes the complete journal, so its body
+    // digest is the snapshot digest confirmed immediately before publication;
+    // manifests store that digest as bare hexadecimal while the preview uses
+    // the `sha256:`-tagged SnapshotDigest representation.
+    let snapshot_hex = expected
+        .snapshot_digest()
+        .as_str()
+        .strip_prefix("sha256:")
+        .expect("tagged snapshot digest");
+    assert_eq!(manifest["record_digests"]["event"].as_str(), Some(snapshot_hex));
+    assert!(ghostrace(&["validate", "--export", export.to_str().expect("utf8")]).status.success());
+    assert_private_file(&export);
+    if cfg!(feature = "parquet") {
+        assert!(ghostrace(&[
+            "verify-archive",
+            "--archive",
+            archive.to_str().expect("utf8"),
+            "--export",
+            export.to_str().expect("utf8"),
+        ])
+        .status
+        .success());
+        assert_private_file(&archive);
+    }
+    assert_no_export_temporary_files(&folder);
+
+    let duplicate = ghostrace_with_input(&args, "y\n");
+    assert!(!duplicate.status.success(), "an existing export must not be replaced");
+    let inside = home.join("inside.jsonl");
+    let inside_args = vec![
+        "live".to_owned(),
+        "export".to_owned(),
+        "--home".to_owned(),
+        home_string,
+        "--yes".to_owned(),
+        "--output".to_owned(),
+        inside.to_str().expect("utf8").to_owned(),
+    ];
+    let refused = ghostrace_with_input(&inside_args, "y\n");
+    assert!(!refused.status.success(), "an export inside the home must be refused");
+    assert!(!inside.exists());
+    assert_no_export_temporary_files(&folder);
+}
+
+#[test]
 fn live_export_validates_and_is_never_seen_by_a_running_watch() {
     if !enabled() {
         eprintln!("set GHOSTRACE_LOGIN_KEYCHAIN_TEST=1 to run the live CLI end to end");
@@ -194,11 +414,14 @@ fn live_export_validates_and_is_never_seen_by_a_running_watch() {
     assert!(summary.contains(" 0 change(s) recorded"), "{summary}");
 
     assert!(ghostrace(&["validate", "--export", export.to_str().unwrap()]).status.success());
+    assert_private_file(&export);
     if cfg!(feature = "parquet") {
         let verify = ["verify-archive", "--archive", archive.to_str().unwrap()];
         let verify = [&verify[..], &["--export", export.to_str().unwrap()]].concat();
         assert!(ghostrace(&verify).status.success());
+        assert_private_file(&archive);
     }
+    assert_no_export_temporary_files(&folder);
     // A second export to the same destination, or one inside the home, is refused.
     assert!(!ghostrace(&args).status.success());
     let inside = format!("{home}/export.jsonl");
