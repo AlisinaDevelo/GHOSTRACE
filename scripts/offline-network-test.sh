@@ -15,7 +15,8 @@ Usage:
   scripts/offline-network-test.sh --inside     Run after a caller has installed the denial.
 
 The hosted workflow installs Docker --network=none before invoking --inside.
-On macOS, the default mode installs sandbox-exec's deny network* profile.
+On macOS, the default mode denies IP networking, including loopback, while
+preserving local Unix-domain IPC through scripts/offline-network.sb.
 EOF
 }
 
@@ -51,7 +52,7 @@ run_inside() {
   "${cargo_command[@]}" --version
   rustc --version
 
-  echo "offline-lane canary"
+  echo "offline-lane network-denial and local-IPC canaries"
   CARGO_NET_OFFLINE=true "${cargo_command[@]}" test --locked --offline --test offline_network_canary -- --ignored --nocapture
 
   echo "offline-lane privacy fixture/explanation/export"
@@ -77,7 +78,7 @@ case "${1:-}" in
           GHOSTRACE_OFFLINE_ENFORCED=1 \
           GHOSTRACE_OFFLINE_MODE=sandbox-exec \
           /usr/bin/sandbox-exec \
-          -p '(version 1) (allow default) (deny network*)' \
+          -f "$ROOT_DIR/scripts/offline-network.sb" \
           "$0" --inside
         ;;
       *)
