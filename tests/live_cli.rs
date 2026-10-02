@@ -54,19 +54,6 @@ fn assert_no_export_temporary_files(folder: &Path) {
     assert!(leftovers.is_empty(), "temporary export artifacts remain: {leftovers:?}");
 }
 
-fn live_preview(home: &Path, output: &Path) -> ghostrace::ExportPreview {
-    let live = ghostrace::live::LiveHome::open(home).expect("live home");
-    let policy =
-        ghostrace::PolicyProfile::from_document(&live.policy_document().expect("live policy"))
-            .expect("policy profile");
-    let journal = live.journal().expect("journal");
-    let preview =
-        ghostrace::preview_export(&journal, &policy, &ghostrace::ExportRequest::default(), output)
-            .expect("preview");
-    journal.shutdown().expect("close journal");
-    preview
-}
-
 fn preview_value(stdout: &str, prefix: &str) -> String {
     stdout
         .lines()
@@ -298,7 +285,6 @@ fn live_export_interactive_preview_matches_manifest_and_writes_private_outputs()
 
     let export = folder.join("interactive.jsonl");
     let archive = folder.join("interactive.parquet");
-    let expected = live_preview(&home, &export);
     let mut args = vec![
         "live".to_owned(),
         "export".to_owned(),
@@ -311,26 +297,35 @@ fn live_export_interactive_preview_matches_manifest_and_writes_private_outputs()
         args.extend(["--parquet".to_owned(), archive.to_str().expect("utf8").to_owned()]);
     }
 
+    // Render the preview through the same CLI executable and keychain access
+    // path as the affirmative run. Declining does not mutate the journal, so
+    // these values are the exact confirmation rendered for the later write.
+    let declined = ghostrace_with_input(&args, "n\n");
+    assert!(declined.status.success(), "{}", String::from_utf8_lossy(&declined.stderr));
+    let declined_stdout = String::from_utf8(declined.stdout).expect("utf8");
+    let expected_event_count = preview_event_count(&declined_stdout);
+    let expected_plan = preview_value(&declined_stdout, "Plan ");
+    let expected_snapshot = preview_value(&declined_stdout, "Snapshot ");
+    assert!(!export.exists(), "declining the preview must not publish JSONL");
+    assert!(!archive.exists(), "declining the preview must not publish Parquet");
+    assert_no_export_temporary_files(&folder);
+
     let exported = ghostrace_with_input(&args, "y\n");
     assert!(exported.status.success(), "{}", String::from_utf8_lossy(&exported.stderr));
     let stdout = String::from_utf8(exported.stdout).expect("utf8");
-    assert_eq!(preview_event_count(&stdout), expected.event_count);
-    assert_eq!(preview_value(&stdout, "Plan "), expected.plan_digest().as_str());
-    assert_eq!(preview_value(&stdout, "Snapshot "), expected.snapshot_digest().as_str());
+    assert_eq!(preview_event_count(&stdout), expected_event_count);
+    assert_eq!(preview_value(&stdout, "Plan "), expected_plan);
+    assert_eq!(preview_value(&stdout, "Snapshot "), expected_snapshot);
 
     let manifest = export_manifest(&export);
     assert_eq!(manifest["query_scope"]["kind"], "all_committed");
-    assert_eq!(manifest["coverage"]["event_count"].as_u64(), Some(expected.event_count));
-    assert_eq!(manifest["record_counts"]["event"].as_u64(), Some(expected.event_count));
+    assert_eq!(manifest["coverage"]["event_count"].as_u64(), Some(expected_event_count));
+    assert_eq!(manifest["record_counts"]["event"].as_u64(), Some(expected_event_count));
     // The default live export includes the complete journal, so its body
     // digest is the snapshot digest confirmed immediately before publication;
     // manifests store that digest as bare hexadecimal while the preview uses
     // the `sha256:`-tagged SnapshotDigest representation.
-    let snapshot_hex = expected
-        .snapshot_digest()
-        .as_str()
-        .strip_prefix("sha256:")
-        .expect("tagged snapshot digest");
+    let snapshot_hex = expected_snapshot.strip_prefix("sha256:").expect("tagged snapshot digest");
     assert_eq!(manifest["record_digests"]["event"].as_str(), Some(snapshot_hex));
     assert!(ghostrace(&["validate", "--export", export.to_str().expect("utf8")]).status.success());
     assert_private_file(&export);
