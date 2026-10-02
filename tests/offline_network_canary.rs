@@ -47,3 +47,55 @@ fn network_denial_canary_proves_the_runner_is_enforced() {
         other => panic!("unknown offline runner mode: {other}"),
     }
 }
+
+/// The product's private local-service transport is Unix IPC, not TCP. The
+/// denied runner must keep that transport available while still rejecting IP.
+#[cfg(unix)]
+#[test]
+#[ignore = "run through scripts/offline-network-test.sh"]
+fn local_unix_ipc_remains_available_in_the_denied_runner() {
+    use std::{
+        io::{Read, Write},
+        os::unix::{
+            fs::PermissionsExt,
+            net::{UnixListener, UnixStream},
+        },
+    };
+
+    assert_eq!(env::var("GHOSTRACE_OFFLINE_ENFORCED").as_deref(), Ok("1"));
+    let directory = tempfile::tempdir().expect("private IPC directory");
+    std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))
+        .expect("private IPC permissions");
+    let path = directory.path().join("canary.sock");
+    let listener = UnixListener::bind(&path).expect("local Unix bind must remain available");
+    let mut client = UnixStream::connect(&path).expect("local Unix connect");
+    let (mut server, _) = listener.accept().expect("local Unix accept");
+    client.set_write_timeout(Some(Duration::from_secs(1))).expect("write timeout");
+    server.set_read_timeout(Some(Duration::from_secs(1))).expect("read timeout");
+    client.write_all(b"local-ipc").expect("local Unix write");
+    let mut message = [0; 9];
+    server.read_exact(&mut message).expect("local Unix read");
+    assert_eq!(&message, b"local-ipc");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "run through scripts/offline-network-test.sh"]
+fn macos_ip_bind_and_ipv6_connect_remain_denied() {
+    use std::net::{TcpListener, UdpSocket};
+
+    assert_eq!(env::var("GHOSTRACE_OFFLINE_MODE").as_deref(), Ok("sandbox-exec"));
+    assert_eq!(env::var("GHOSTRACE_OFFLINE_ENFORCED").as_deref(), Ok("1"));
+    for address in ["127.0.0.1:0", "[::1]:0"] {
+        let tcp = TcpListener::bind(address).expect_err("IP TCP bind unexpectedly allowed");
+        assert_eq!(tcp.kind(), io::ErrorKind::PermissionDenied, "{address}: {tcp:?}");
+        let udp = UdpSocket::bind(address).expect_err("IP UDP bind unexpectedly allowed");
+        assert_eq!(udp.kind(), io::ErrorKind::PermissionDenied, "{address}: {udp:?}");
+    }
+    let ipv6 = TcpStream::connect_timeout(
+        &"[::1]:9".parse().expect("IPv6 loopback"),
+        Duration::from_millis(250),
+    )
+    .expect_err("IPv6 TCP connect unexpectedly allowed");
+    assert_eq!(ipv6.kind(), io::ErrorKind::PermissionDenied, "{ipv6:?}");
+}

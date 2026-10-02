@@ -43,3 +43,9 @@ constraint and the passing sandbox-exec equivalent. The fixture-only scope does
 not claim live capture or production hardware coverage. Completion requires the
 acceptance evidence above; issue closure must link the report, artifacts, logs,
 limitations, and merged SHA.
+
+The macOS runner profile later needed a Unix-domain IPC allowance for the
+authenticated local-service tests. The current ADR records that narrow boundary
+and its local-proxy limit. Mandatory canaries now verify Unix IPC availability
+alongside kernel-denied IP networking; historical evidence is not relabeled as
+verification of the corrected runner.

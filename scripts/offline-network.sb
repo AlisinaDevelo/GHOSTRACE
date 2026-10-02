@@ -1,0 +1,9 @@
+(version 1)
+(allow default)
+(deny network*)
+
+; Preserve the product's local Unix-domain IPC, as Docker --network=none does.
+; These address-family filters do not exempt IP loopback, TCP, or UDP.
+(allow network*
+    (local unix-socket)
+    (remote unix-socket))

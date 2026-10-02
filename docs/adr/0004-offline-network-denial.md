@@ -28,11 +28,26 @@ port, or a silently skipped test from being reported as network denial.
 The target device has the Docker CLI but no running Docker Desktop daemon, so the
 Docker mechanism cannot be claimed as local evidence this week. The reproducible
 macOS equivalent is the system sandbox profile
-`(version 1) (allow default) (deny network*)`, installed by
+[`scripts/offline-network.sb`](../../scripts/offline-network.sb), installed by
 `scripts/offline-network-test.sh`. It runs the same ignored canary, the privacy
-regression corpus, and the complete locked test suite with no network access. The
+regression corpus, and the complete locked test suite with no IP network access. The
 canary must observe `PermissionDenied`; the local lane fails if the profile is
 missing or if the probe behaves like an ordinary closed-port connection.
+
+The original profile denied all `network*` operations, including Unix-domain
+socket bind/connect. Once local-service tests were added, that profile prevented
+the product's authenticated local IPC from running. The profile now permits only
+the Unix address family under the existing deny rule, matching the local-IPC
+behavior of Docker `--network=none`; it does not exempt IP loopback. The runner
+also tests a Unix-stream round trip. On macOS, additional canaries require
+`PermissionDenied` for IPv4/IPv6 TCP and UDP bind and IPv6 TCP connect. The original
+IPv4 connection canary remains mandatory.
+
+This test boundary denies direct IP networking, not communication through every
+possible local service. Unix IPC and default-allowed Mach IPC could reach a local
+proxy; the lane is not an isolation guarantee against malicious host services.
+Product peer/capability checks remain unchanged. No application entitlement,
+permission, collector, or production transport is added by this runner correction.
 
 This is an enforcement limitation, not a product-path exemption: the hosted Docker
 lane remains required before release evidence can claim Linux runner coverage.
