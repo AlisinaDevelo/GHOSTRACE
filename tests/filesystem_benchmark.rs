@@ -1,9 +1,54 @@
+use std::fmt::Display;
+
 use serde_json::Value;
 
 const CORPUS: &str = include_str!("../fixtures/filesystem-benchmark-corpus-v1.json");
 
 fn corpus() -> Value {
     serde_json::from_str(CORPUS).expect("filesystem benchmark corpus JSON")
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct BenchmarkResourceBudget {
+    drain_timeout_ms: u64,
+    max_run_ms: u64,
+}
+
+fn benchmark_bound_failure_message(
+    scenario: &str,
+    run: impl Display,
+    measured: impl Display,
+    bound: impl Display,
+) -> String {
+    format!(
+        "native filesystem benchmark bound failure: scenario={scenario}, run={run}, measured={measured}, bound={bound}"
+    )
+}
+
+fn assert_benchmark_bound(
+    condition: bool,
+    scenario: &str,
+    run: impl Display,
+    measured: impl Display,
+    bound: impl Display,
+) {
+    assert!(condition, "{}", benchmark_bound_failure_message(scenario, run, measured, bound));
+}
+
+fn benchmark_resource_budget(document: &Value) -> BenchmarkResourceBudget {
+    let corpus_max_run_ms = document["resource_limits"]["max_run_ms"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("benchmark corpus is missing resource_limits.max_run_ms"));
+
+    // Keep the existing three-second drain window tied to the checked-in
+    // corpus budget: the global thirty-second run budget reserves one tenth
+    // for waiting for the final quiet callback batch.
+    // The smaller per-scenario budgets remain corpus metadata for a future
+    // performance gate; this native lane keeps its existing global bound.
+    BenchmarkResourceBudget {
+        drain_timeout_ms: corpus_max_run_ms / 10,
+        max_run_ms: corpus_max_run_ms,
+    }
 }
 
 #[test]
@@ -48,6 +93,45 @@ fn filesystem_benchmark_contract_names_all_required_synthetic_workloads() {
     }
 }
 
+#[test]
+fn benchmark_resource_deadlines_are_derived_from_the_corpus_budget() {
+    let document = corpus();
+    let global_max_run_ms =
+        document["resource_limits"]["max_run_ms"].as_u64().expect("global benchmark run budget");
+    let budget = benchmark_resource_budget(&document);
+
+    let synthetic_global_max_run_ms = global_max_run_ms + 1_000;
+    let mut synthetic_document = document.clone();
+    synthetic_document["resource_limits"]["max_run_ms"] = Value::from(synthetic_global_max_run_ms);
+    let synthetic_budget = benchmark_resource_budget(&synthetic_document);
+
+    assert_eq!(budget.max_run_ms, global_max_run_ms);
+    assert_eq!(budget.drain_timeout_ms, global_max_run_ms / 10);
+    assert_eq!(synthetic_budget.drain_timeout_ms, synthetic_global_max_run_ms / 10);
+    assert_eq!(synthetic_budget.max_run_ms, synthetic_global_max_run_ms);
+}
+
+#[test]
+fn benchmark_bound_assertion_names_scenario_run_measurement_and_bound() {
+    assert_benchmark_bound(true, "small_tree", 1, "elapsed_ms=1", "max_run_ms<=5000");
+
+    let panic = std::panic::catch_unwind(|| {
+        assert_benchmark_bound(
+            false,
+            "event_storm_tree",
+            2,
+            "elapsed_ms=30001",
+            "max_run_ms<=30000",
+        );
+    })
+    .expect_err("a failed benchmark bound must panic");
+    let message = panic.downcast_ref::<String>().expect("benchmark panic message");
+    assert_eq!(
+        message,
+        "native filesystem benchmark bound failure: scenario=event_storm_tree, run=2, measured=elapsed_ms=30001, bound=max_run_ms<=30000"
+    );
+}
+
 #[cfg(not(target_os = "macos"))]
 #[test]
 fn native_filesystem_benchmark_is_an_explicit_no_go_without_substitution() {
@@ -60,7 +144,7 @@ fn native_filesystem_benchmark_is_an_explicit_no_go_without_substitution() {
 
 #[cfg(target_os = "macos")]
 mod macos {
-    use super::corpus;
+    use super::{assert_benchmark_bound, benchmark_resource_budget, corpus};
     use std::{
         collections::BTreeMap,
         fs, io,
@@ -349,8 +433,11 @@ mod macos {
         }
     }
 
-    fn drive_until_quiet(collector: &mut FseventsCollector) -> DriveOutcome {
-        let deadline = Instant::now() + Duration::from_secs(3);
+    fn drive_until_quiet(
+        collector: &mut FseventsCollector,
+        drain_timeout: Duration,
+    ) -> DriveOutcome {
+        let deadline = Instant::now() + drain_timeout;
         let mut quiet_ticks = 0;
         let mut events = Vec::new();
         while Instant::now() < deadline {
@@ -476,9 +563,11 @@ mod macos {
         let before_disk = file_tree_bytes(directory.path());
         let mut latency_samples_ms = Vec::new();
         let mut scenario_reports = Vec::new();
+        let resource_budget = benchmark_resource_budget(&corpus());
 
         for run in 0..3 {
             for scenario in SCENARIOS {
+                let run_number = run + 1;
                 let scenario_root = selected_root_path.join(format!("scenario-{scenario}"));
                 fs::create_dir_all(&scenario_root).expect("scenario root");
                 let instance = format!("live-benchmark-{run}-{scenario}");
@@ -491,7 +580,14 @@ mod macos {
                 )
                 .expect("benchmark collector");
                 collector.start().expect("start benchmark collector");
-                assert_eq!(collector.status().coverage_state, CollectorCoverageState::Live);
+                let coverage_state = collector.status().coverage_state;
+                assert_benchmark_bound(
+                    coverage_state == CollectorCoverageState::Live,
+                    scenario,
+                    run_number,
+                    format!("coverage_state={coverage_state:?}"),
+                    "coverage_state=Live",
+                );
                 let event_count_before = journal.events().expect("journal before").len();
                 let started = Instant::now();
                 let expected_operations = generate_workload(&selected_root_path, scenario)
@@ -499,19 +595,34 @@ mod macos {
                 let (operation_min, operation_max, entry_min, entry_max) =
                     scenario_bounds(scenario);
                 let entries = tree_entry_count(&scenario_root);
-                assert!(
+                assert_benchmark_bound(
                     (operation_min..=operation_max).contains(&expected_operations),
-                    "{scenario} generated {expected_operations} operations outside {operation_min}..={operation_max}"
+                    scenario,
+                    run_number,
+                    format!("operations={expected_operations}"),
+                    format!("operations={operation_min}..={operation_max}"),
                 );
-                assert!(
+                assert_benchmark_bound(
                     (entry_min..=entry_max).contains(&entries),
-                    "{scenario} generated {entries} entries outside {entry_min}..={entry_max}"
+                    scenario,
+                    run_number,
+                    format!("entries={entries}"),
+                    format!("entries={entry_min}..={entry_max}"),
                 );
                 let mutation_finished = Instant::now();
-                let outcome = drive_until_quiet(&mut collector);
+                let outcome = drive_until_quiet(
+                    &mut collector,
+                    Duration::from_millis(resource_budget.drain_timeout_ms),
+                );
                 let latency = mutation_finished.elapsed().as_secs_f64() * 1000.0;
                 let total_elapsed = started.elapsed().as_millis();
-                assert!(total_elapsed <= 30_000, "scenario exceeded bounded run time");
+                assert_benchmark_bound(
+                    total_elapsed <= u128::from(resource_budget.max_run_ms),
+                    scenario,
+                    run_number,
+                    format!("elapsed_ms={total_elapsed}"),
+                    format!("max_run_ms<={}", resource_budget.max_run_ms),
+                );
                 latency_samples_ms.push(latency);
                 let status = collector.status();
                 let mut errors = outcome.error.into_iter().collect::<Vec<_>>();
@@ -578,8 +689,23 @@ mod macos {
             "resource": resource,
         });
         let rendered = serde_json::to_string(&receipt).expect("benchmark receipt JSON");
-        assert!(!rendered.contains(&selected_root_path.to_string_lossy().to_string()));
-        assert!(!rendered.contains("fixture@example.invalid"));
+        let selected_root_path_leaked =
+            rendered.contains(&selected_root_path.to_string_lossy().to_string());
+        assert_benchmark_bound(
+            !selected_root_path_leaked,
+            "all",
+            "all",
+            format!("receipt_contains_selected_root_path={selected_root_path_leaked}"),
+            "receipt_contains_selected_root_path=false",
+        );
+        let fixture_identity_leaked = rendered.contains("fixture@example.invalid");
+        assert_benchmark_bound(
+            !fixture_identity_leaked,
+            "all",
+            "all",
+            format!("receipt_contains_fixture_identity={fixture_identity_leaked}"),
+            "receipt_contains_fixture_identity=false",
+        );
         println!("filesystem-benchmark-receipt={rendered}");
     }
 }
