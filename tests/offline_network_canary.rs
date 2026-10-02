@@ -63,6 +63,11 @@ fn local_unix_ipc_remains_available_in_the_denied_runner() {
     };
 
     assert_eq!(env::var("GHOSTRACE_OFFLINE_ENFORCED").as_deref(), Ok("1"));
+    let mode = env::var("GHOSTRACE_OFFLINE_MODE").expect("offline runner mode");
+    assert!(
+        matches!(mode.as_str(), "sandbox-exec" | "docker-network-none" | "linux-network-namespace"),
+        "unknown offline runner mode: {mode}"
+    );
     let directory = tempfile::tempdir().expect("private IPC directory");
     std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))
         .expect("private IPC permissions");
