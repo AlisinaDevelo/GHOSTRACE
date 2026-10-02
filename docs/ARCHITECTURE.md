@@ -735,8 +735,15 @@ diagnostics. The head MAC also binds the chain epoch, chain-start boundary, key
 generation, and deletion digest. The anchor contains no key material, paths,
 plaintext, or retained event identifiers.
 
-Every event/cursor/policy/diagnostic transaction refreshes the anchor before
-commit. A confirmed retention delete advances the chain epoch and records only
+Every event/cursor/policy/diagnostic write holds one immediate transaction from
+integrity and authenticated-state verification through mutation, anchor refresh,
+and commit. The verification helper returns the transaction guard to the writer;
+another connection cannot commit after verification and before the mutation.
+Dropping the guard on a refusal rolls back the whole operation. Component digests
+still require a full snapshot scan; task 0175 tracks the separate incremental-write
+and large-journal performance work.
+
+A confirmed retention delete advances the chain epoch and records only
 the plan/candidate digests, snapshot boundary, and counts. After bootstrap, a
 missing anchor is a failure and is never silently reseeded. `authenticated-check`
 reports bounded insertion, deletion, reorder, edit, replay, truncation, cursor

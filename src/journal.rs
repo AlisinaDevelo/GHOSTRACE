@@ -514,8 +514,7 @@ impl Journal {
         }
 
         let mut connection = self.lock_connection()?;
-        self.ensure_authenticated_for_write(&mut connection)?;
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let transaction = self.ensure_authenticated_for_write(&mut connection)?;
         let live_boundary = transaction
             .query_row("SELECT COALESCE(MAX(ingest_seq), 0) FROM events", [], |row| {
                 row.get::<_, i64>(0)
@@ -1008,8 +1007,7 @@ impl Journal {
         }
         self.faults.hit(FaultPoint::IngestBeforeTransaction)?;
         let mut connection = self.lock_connection()?;
-        self.ensure_authenticated_for_write(&mut connection)?;
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let transaction = self.ensure_authenticated_for_write(&mut connection)?;
         self.faults.hit(FaultPoint::IngestAfterTransaction)?;
         record_policy_profile(&transaction, policy)?;
         let sequences = insert_events(
@@ -1049,8 +1047,7 @@ impl Journal {
             policy.enable_source(interval.source);
         }
         let mut connection = self.lock_connection()?;
-        self.ensure_authenticated_for_write(&mut connection)?;
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let transaction = self.ensure_authenticated_for_write(&mut connection)?;
         let mut selected = HashSet::new();
         let mut counts = Vec::with_capacity(intervals.len());
         let mut dropped_event_count = 0_u64;
@@ -1267,8 +1264,7 @@ impl Journal {
     pub fn invalidate_cursor(&self, identity: &CursorIdentity) -> Result<(), GhostraceError> {
         self.faults.hit(FaultPoint::ControlBeforeTransaction)?;
         let mut connection = self.lock_connection()?;
-        self.ensure_authenticated_for_write(&mut connection)?;
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let transaction = self.ensure_authenticated_for_write(&mut connection)?;
         self.faults.hit(FaultPoint::ControlAfterTransaction)?;
         let changed = transaction.execute(
             "UPDATE cursors SET state = 'invalidated' WHERE source = ?1 AND collector_instance = ?2",
@@ -1302,8 +1298,7 @@ impl Journal {
         }
         self.faults.hit(FaultPoint::ControlBeforeTransaction)?;
         let mut connection = self.lock_connection()?;
-        self.ensure_authenticated_for_write(&mut connection)?;
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let transaction = self.ensure_authenticated_for_write(&mut connection)?;
         self.faults.hit(FaultPoint::ControlAfterTransaction)?;
         record_policy_profile(&transaction, policy)?;
         let current: Option<(u64, Option<String>)> = transaction
@@ -1479,19 +1474,23 @@ impl Journal {
         self.conn.lock().map_err(|_| GhostraceError::Migration("journal mutex poisoned".to_owned()))
     }
 
-    fn ensure_authenticated_for_write(
+    fn ensure_authenticated_for_write<'connection>(
         &self,
-        connection: &mut Connection,
-    ) -> Result<(), GhostraceError> {
+        connection: &'connection mut Connection,
+    ) -> Result<Transaction<'connection>, GhostraceError> {
+        // Retain this one write lock through validation, mutation, anchor
+        // refresh, and commit. Returning a guard prevents a caller from
+        // accidentally validating one transaction and writing in another.
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let data_version =
-            connection.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))?;
+            transaction.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))?;
         let needs_integrity_check = self
             .integrity_data_version
             .lock()
             .map_err(|_| GhostraceError::Migration("journal mutex poisoned".to_owned()))?
             .is_none_or(|cached| cached != data_version);
         if needs_integrity_check {
-            let integrity = IntegrityReport::from_connection(connection)?;
+            let integrity = IntegrityReport::from_connection(&transaction)?;
             if !integrity.integrity_ok {
                 return Err(GhostraceError::IntegrityReportInvalid(
                     "normal writer refuses an integrity-failed journal; repair a verified copy"
@@ -1508,16 +1507,11 @@ impl Journal {
             // An in-memory connection cannot be modified by another process;
             // the first transaction bootstraps its anchor after the event,
             // preserving the single key access at the encryption boundary.
-            return Ok(());
+            return Ok(transaction);
         }
-        // Hold the write lock while the snapshot and the anchor are read, so
-        // another process's commit cannot land between those reads and be
-        // mistaken for tampering.
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         authenticated::ensure_anchor_in(&transaction, self.key_provider.as_ref())?;
         authenticated::require_valid(&transaction, self.key_provider.as_ref())?;
-        transaction.commit()?;
-        Ok(())
+        Ok(transaction)
     }
 }
 
@@ -3093,5 +3087,50 @@ where
             let _ = connection.execute_batch("ROLLBACK");
             Err(error)
         }
+    }
+}
+
+#[cfg(test)]
+mod authenticated_write_tests {
+    use std::time::Duration;
+
+    use super::*;
+    use crate::crypto::DeterministicKeyProvider;
+
+    #[test]
+    fn authenticated_precondition_retains_the_write_lock_until_commit_or_rollback() {
+        let directory = tempfile::tempdir().expect("synthetic journal directory");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))
+                .expect("private synthetic directory");
+        }
+        let path = directory.path().join("journal.sqlite3");
+        let journal = Journal::open_fixture(
+            &path,
+            DeterministicKeyProvider::from_seed("authenticated-write-lock"),
+        )
+        .expect("journal");
+        journal.initialize_authenticated_state().expect("initial anchor");
+        let mut connection = journal.lock_connection().expect("connection");
+        let guard = journal.ensure_authenticated_for_write(&mut connection).expect("precondition");
+        let competing_writer = Connection::open(&path).expect("competing connection");
+        competing_writer.busy_timeout(Duration::ZERO).expect("no waiting");
+        let mutation = "UPDATE authenticated_state SET updated_at = updated_at";
+        let result = competing_writer.execute(mutation, []);
+        assert!(
+            matches!(
+                result,
+                Err(rusqlite::Error::SqliteFailure(error, _))
+                    if error.code == rusqlite::ErrorCode::DatabaseBusy
+            ),
+            "another connection must not commit between verification and mutation: {result:?}"
+        );
+        drop(guard);
+        assert_eq!(
+            competing_writer.execute(mutation, []).expect("lock released after rollback"),
+            1
+        );
     }
 }
