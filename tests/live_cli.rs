@@ -652,3 +652,122 @@ fn live_apps_records_a_focus_switch_with_name_version_and_dwell() {
     assert!(exported.contains("\"dwell_ms\":"));
     assert!(!exported.contains("/Applications") && !exported.contains("/System"));
 }
+
+#[cfg(feature = "frontmost")]
+#[test]
+fn live_apps_rapid_switching_termination_and_latency_on_device() {
+    let focus = std::env::var_os("GHOSTRACE_FRONTMOST_TEST").is_some_and(|value| value == "1");
+    if !enabled() || !focus {
+        eprintln!(
+            "set GHOSTRACE_LOGIN_KEYCHAIN_TEST=1 and GHOSTRACE_FRONTMOST_TEST=1 to switch focus"
+        );
+        return;
+    }
+    let directory = tempfile::tempdir().expect("tempdir");
+    let home = directory.path().join("home").to_str().expect("utf8").to_owned();
+    struct Forget(String);
+    impl Drop for Forget {
+        fn drop(&mut self) {
+            let _ = ghostrace(&["live", "forget", "--home", &self.0, "--yes"]);
+            let _ = Command::new("/usr/bin/pkill").args(["-x", "Calculator"]).status();
+        }
+    }
+    assert!(ghostrace(&["live", "init", "--home", &home]).status.success());
+    let _forget = Forget(home.clone());
+    let front_now = || {
+        let out = Command::new("/usr/bin/lsappinfo")
+            .args(["info", "-only", "bundleid", "-app", "front"])
+            .output()
+            .expect("lsappinfo");
+        String::from_utf8_lossy(&out.stdout)
+            .rsplit('=')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .trim_matches('"')
+            .to_owned()
+    };
+    let previous = front_now();
+    assert!(!previous.is_empty() && previous != "com.apple.finder", "start from another app");
+
+    let recorder = Command::new(env!("CARGO_BIN_EXE_ghostrace"))
+        .args(["live", "apps", "--home", &home, "--yes", "--seconds", "14"])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("apps starts");
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    let mut switches = Vec::new();
+    for index in 0..8 {
+        let target = if index % 2 == 0 { "com.apple.finder" } else { previous.as_str() };
+        let sent = chrono::Utc::now();
+        Command::new("/usr/bin/open").args(["-b", target]).status().expect("open");
+        switches.push((sent, target.to_ascii_lowercase()));
+        std::thread::sleep(std::time::Duration::from_millis(700));
+    }
+    // Termination: Calculator comes to the front, then quits.
+    let sent = chrono::Utc::now();
+    Command::new("/usr/bin/open").args(["-b", "com.apple.calculator"]).status().expect("open");
+    switches.push((sent, "com.apple.calculator".to_owned()));
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    Command::new("/usr/bin/pkill").args(["-x", "Calculator"]).status().expect("pkill");
+    std::thread::sleep(std::time::Duration::from_millis(1000));
+    Command::new("/usr/bin/open").args(["-b", &previous]).status().expect("open");
+    assert!(recorder.wait_with_output().expect("apps ends").status.success());
+
+    let export = directory.path().join("apps.jsonl");
+    let args = ["live", "export", "--home", &home, "--yes", "--output", export.to_str().unwrap()];
+    assert!(ghostrace(&args).status.success());
+    let text = std::fs::read_to_string(&export).expect("export");
+    assert!(
+        !text.contains("/Applications") && !text.contains("/System") && !text.contains("/Users")
+    );
+    let events = text
+        .lines()
+        .skip(1)
+        .map(|line| {
+            serde_json::from_str::<serde_json::Value>(line).expect("record")["event"].clone()
+        })
+        .filter(|event| event["kind"] == "frontmost_app_changed")
+        .collect::<Vec<_>>();
+    let time = |event: &serde_json::Value| {
+        event["observed_at"].as_str().unwrap().parse::<chrono::DateTime<chrono::Utc>>().unwrap()
+    };
+    assert!(events.windows(2).all(|pair| time(&pair[0]) <= time(&pair[1])), "records are ordered");
+    let activations = events
+        .iter()
+        .filter(|event| event["payload"]["data"]["change"] == "activated")
+        .map(|event| (time(event), event["payload"]["data"]["app_id"].as_str().unwrap().to_owned()))
+        .collect::<Vec<_>>();
+
+    // Every switch is attributed, in order, and its latency is measured.
+    let mut latencies = Vec::new();
+    let mut cursor = 0;
+    for (sent, target) in &switches {
+        let found = activations[cursor..]
+            .iter()
+            .position(|(at, app)| at >= sent && app == target)
+            .unwrap_or_else(|| {
+                panic!("switch to {target} at {sent} not attributed: {activations:?}")
+            });
+        cursor += found + 1;
+        latencies.push((activations[cursor - 1].0 - *sent).num_milliseconds());
+    }
+    let mut sorted = latencies.clone();
+    sorted.sort_unstable();
+    println!(
+        "attribution latency over {} switches: median {} ms, max {} ms (poll interval 250 ms)",
+        sorted.len(),
+        sorted[sorted.len() / 2],
+        sorted[sorted.len() - 1]
+    );
+    assert!(sorted[sorted.len() - 1] < 2_000, "latency {latencies:?}");
+
+    // Calculator's session is closed with its dwell once it quits.
+    let closed = events.iter().any(|event| {
+        let data = &event["payload"]["data"];
+        data["app_id"] == "com.apple.calculator"
+            && data["change"] == "deactivated"
+            && data["dwell_ms"].as_u64().is_some_and(|dwell| dwell > 500)
+    });
+    assert!(closed, "the terminated application's session was closed");
+}
