@@ -26,7 +26,7 @@ identifiers are selected with a journal qualifier:
 | Application bundle | `GHOSTRACE Journal.app` |
 | Bundle / reverse-DNS identifier | `com.alisinadevelo.ghostrace.journal` |
 
-The current fixture-only development package remains `ghostrace` with publication
+The current incubation development package remains `ghostrace` with publication
 disabled. Renaming the package, binary, formula, and bundle identifiers is a
 release-boundary task; it must happen before the first broadly distributed
 artifact, not after a registry or marketplace listing exists.

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-/// Errors returned by the fixture-only vertical slice.
+/// Errors returned by fixture tooling and explicit local journal surfaces.
 #[derive(Debug, Error)]
 pub enum GhostraceError {
     #[error("invalid event: {0}")]
@@ -132,7 +132,7 @@ pub enum GhostraceError {
     #[error("an origin instance is required to construct an event")]
     OriginInstanceRequired,
 
-    #[error("live capture is intentionally disabled until policy/cursor/Keychain gates land")]
+    #[error("ambient capture is intentionally disabled; explicit macOS live commands have separate consent/policy boundaries")]
     LiveCaptureDisabled,
 
     #[error("unsupported schema version: {0}")]

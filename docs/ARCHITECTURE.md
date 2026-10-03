@@ -220,7 +220,7 @@ the persisted shell consent that `run` requires.
 ### Shell-wrapper lifecycle reference harness
 
 [`fixtures/shell-wrapper-lifecycle-v1.json`](../fixtures/shell-wrapper-lifecycle-v1.json)
-and `tests/shell_wrapper_lifecycle.rs` specify the lifecycle behavior a future
+and `tests/shell_wrapper_lifecycle.rs` specify the lifecycle behavior an
 explicit wrapper must preserve. The device-safe harness invokes `/bin/sh -c` with
 cleared environment and null standard streams, then returns the native child exit
 code or signal unchanged. It exercises normal and non-zero exits, shell built-ins,
@@ -495,9 +495,11 @@ than silently downgraded to `SinceNow`. A timeout, partial-history status, or
 explicit stop before `HistoryDone` emits a bounded `fsevents_history_*` gap,
 enters `HistoryUnavailable`, and keeps `recovery_required` set. `HistoryDone`
 never becomes a `FilesystemChanged` record or a user observation.
-Gap events are committed with their cursor advancement in the same transaction;
-durable restart recovery and the ambient CLI remain later gates (tasks 0015–0017
-and their children).
+Gap events are committed with their cursor advancement in the same transaction.
+Durable restart/replay recovery is implemented and tested in the collector and
+journal. Complete target-device sleep/wake, logout, detach, source-loss recovery
+and release-scale lifecycle evidence remain gates; ambient CLI capture stays
+disabled. Completed component tasks do not establish those broader release claims.
 
 ## Policy-document boundary
 
@@ -788,13 +790,17 @@ binds the new generation into `chain_start_mac`. Older generations are retired
 only after every state and ciphertext that names them has been independently
 verified.
 
-The macOS key provider uses only the data-protection Keychain generic-password path:
+The default macOS library provider uses the data-protection Keychain generic-password path:
 non-synchronizable items, `WhenUnlockedThisDeviceOnly` access control, and an explicit
 service/account identity. The default app has no access-group entitlement; a signed
 helper may use one only when its bundle entitlement matches. Login-session availability
 and the data-protection requirement are checked before returning key bytes, so an
 unsigned CLI, locked session, duplicate item, or malformed item fails closed without
 falling back to the legacy file keychain.
+This describes data-protection custody, not the only macOS provider mode. The
+explicit unsigned live CLI deliberately selects login-Keychain custody at home
+initialization; it never silently switches modes after a data-protection failure.
+Signed/entitled production distribution remains a separate release gate.
 
 ### Persistent path boundary
 

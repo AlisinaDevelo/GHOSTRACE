@@ -1,4 +1,4 @@
-//! Device-safe contract tests for the future explicit shell wrapper.
+//! Device-safe contract tests for the explicit shell wrapper.
 //!
 //! This is a reference harness, not a shipped shell executor. It invokes a
 //! fixed POSIX shell with null stdio and a cleared environment, returns the

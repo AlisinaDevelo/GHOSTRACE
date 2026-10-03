@@ -247,7 +247,7 @@ or ambient collector is introduced by this contract.
 ## Git repository and worktree identity (task 0094)
 
 [`fixtures/git-repository-worktree-identity-v1.json`](../fixtures/git-repository-worktree-identity-v1.json)
-is a deterministic, offline transition matrix for the future explicit Git
+is a deterministic, offline transition matrix for the explicit Git
 adapter. `tests/git_identity.rs` validates the strict schema, exercises move,
 clone, linked-worktree, submodule, bare, source-scope rebinding, and repository
 reinitialization cases, and checks stable event `repository_id` derivation. The
@@ -257,15 +257,16 @@ path. Unknown remote URL, credential-helper, config, reflog, and path fields are
 rejected without echoing their values.
 
 The contract records no Git command output and performs no network operation. A
-future adapter must resolve the common object database and worktree metadata,
-discard all remote/config/reflog/path strings, and provide equivalent stable
-filesystem identity fields before these semantics can be used for live evidence.
+separate `GitSnapshotAdapter` resolves the common object database and worktree
+metadata, discards remote/config/reflog/path strings, and supplies equivalent
+stable filesystem identity fields. The type-level matrix is distinct from the
+adapter's real throwaway-repository tests.
 
 ## Metadata-only Git snapshot (task 0095)
 
 [`docs/GIT_SNAPSHOT.md`](GIT_SNAPSHOT.md) and
 [`fixtures/git-snapshot-metadata-v1.golden.json`](../fixtures/git-snapshot-metadata-v1.golden.json)
-define the input contract for the next explicit Git adapter. The Rust
+define the input contract used by the explicit Git adapter. The Rust
 `GitSnapshotMetadata` type accepts only normalized metadata: algorithm-aware
 SHA-1/SHA-256 HEAD/tree/index IDs, opaque repository kind, branch and operation
 classes, bounded status counts, and explicit source limitations. It has no
@@ -278,8 +279,10 @@ and algorithm-mismatched IDs, excluded/unknown-field rejection without input
 echo, clean/dirty/untracked/conflicted and bare-state bounds, all operation
 classes, every limitation state, oversized metadata, and deterministic
 serialization. The fixture and focused suite are included in the reproducibility
-smoke. This is a metadata contract only; live Git invocation, consent, event
-projection, and gap handling remain task 0025/0096 work.
+smoke. This suite evaluates the pure metadata contract; real Git invocation is
+tested separately in `tests/git_snapshot_adapter.rs`. The user-invoked
+`live git-snapshot` also projects metadata/history gaps into the journal under
+Git source policy, without requiring persisted shell consent.
 
 ## Event-storm backpressure and loss accounting (task 0016)
 
@@ -325,7 +328,8 @@ The integration matrix in `tests/query_pagination.rs` proves:
 
 This contract deliberately does not turn deletion into a tombstone and does not
 claim that the logical snapshot survives a destructive retention policy. A
-future retention task must add its own residue and recovery evidence.
+separate retention/deletion contracts below provide their own residue and recovery
+evidence; query pagination alone does not establish those guarantees.
 
 ## Retention planning (task 0086)
 
@@ -417,7 +421,9 @@ Task 0013 adds the first live-source gate: explicit consent confirmation, exact
 root mapping, path-free filesystem payloads, lifecycle records, writer admission,
 controlled create/modify/move/delete integration, and revocation before pending
 events commit. Task 0068 adds the descriptor-backed no-follow walk for later opens;
-cursor/recovery, exclusion, and ambient capture work below remains separate.
+cursor/recovery and exclusion evidence below is evaluated separately, not absent
+from the implementation. Complete target-device lifecycle and ambient-capture
+release gates remain incomplete.
 Cross-platform lifecycle-model tests inject schedule/start failures and assert that
 stop, invalidate, and release occur exactly once. AddressSanitizer is a required
 macOS evidence lane when the pinned nightly sanitizer toolchain is available; a

@@ -1,6 +1,7 @@
 # Threat model
 
-This model covers the local fixture headstart and the future opt-in macOS journal.
+This model covers fixture tooling, the explicit local macOS journal surfaces,
+and planned integrations whose release gates remain incomplete.
 It is a design boundary, not a claim that every implementation risk has been
 eliminated. GHOSTRACE records diagnostic evidence; it does not create legal chain of
 custody.
@@ -12,7 +13,8 @@ custody.
 3. Preserve provenance, ordering limits, and gaps without overstating causality.
 4. Protect production payloads and keys at rest.
 5. Make exports and other plaintext transitions deliberate and visible.
-6. Keep the baseline local, offline, and free of silent upload paths.
+6. Keep GHOSTRACE free of a network client or silent upload path. The explicit
+   `run` wrapper does not network-sandbox the deliberately requested child.
 
 ## Assets
 
@@ -70,7 +72,7 @@ plaintext chosen by the user.
 | Category | Example threat | Mitigation | State |
 | --- | --- | --- | --- |
 | Spoofing | A fixture or adapter claims another source or policy | Sealed typed origin capabilities, versioned provenance namespaces, policy IDs, and validation | Fixture and selected-root live-origin boundaries are tested; Endpoint Security attestation remains future work |
-| Tampering | A local process edits journal rows or an export | Authenticated payloads; future integrity chain; explicit integrity status | Keychain encryption and chain verification are roadmap gates |
+| Tampering | A local process edits journal rows or an export | Authenticated journal payloads, state and chain; explicit integrity checks; export body/manifest validation | Implemented with the configured local key; no hostile-keyholder or independent-origin-attestation claim; signed production custody remains a release gate |
 | Repudiation | An explanation hides a denied interval, restart, or replay conflict, or a callback is lost during native shutdown | First-class gaps, typed source identity, volume-bound stream mode, durable replay boundary, WatchRoot, stable loss reasons, bounded recovery metadata, explicit recovery gate, event IDs, policy binding, deterministic output, bounded callback queue, lifecycle records, named crash/replay matrix, owner-thread FSEvents shutdown fence | Selected-root lifecycle, blocked-summary, overflow-gap, root-change, loss-reason, volume-transition, boundary-mismatch, restart, and atomic rollback tests now; durable source-loss reconciliation and full recovery remain required |
 | Information disclosure | Logs, WAL files, exports, or errors reveal paths or payloads | Minimized fields, path digests, no sensitive diagnostics, explicit export, file permissions | Selected-root payloads and diagnostics contain no raw paths or contents; production release storage hardening remains |
 | Denial of service | Huge fixture, event storm, callback panic, or native lifecycle leak exhausts memory or leaves capture wedged | Bounded parser, bounded callback batches/paths, panic containment, single-owner lifecycle, bounded pending queue, writer admission, one emergency status reservation, input limits, bounded retries, visible loss | Task 0016's native-safe stress lane proves the pending cap, auditable overflow gap, writer status reservation, and `recovery_required` transition; larger cross-device throughput remains future work |
@@ -83,8 +85,13 @@ explicit. A clone or repository reinitialization is never treated as a moved
 worktree. Remote URLs, credential helpers, config values, reflog messages, and raw
 paths are absent from the type and rejected as unknown fields. The synthetic
 transition matrix covers move, clone, linked-worktree, submodule, bare, scope
-rebinding, and reinitialization; a future adapter still has to supply the stable
-metadata and prove its Git command parsing separately.
+rebinding, and reinitialization. The explicit snapshot adapter supplies stable
+metadata through hardened Git commands and has separate throwaway-repository
+parsing/privacy tests; the identity type does not execute Git itself.
+
+Export body/manifest digests detect inconsistency; they do not authenticate an
+artifact against an attacker who can rewrite both. Local-key journal checks are
+not independent origin attestation or legal chain-of-custody evidence.
 
 Task 0095 extends that boundary with `GitSnapshotMetadata`: object IDs are
 explicitly algorithm-tagged, branch names are reduced to classes, status and
@@ -119,8 +126,10 @@ explicit limitation rather than a completeness claim.
 - The lifecycle adapter and selected-root collector cannot make an FSEvents callback
   complete or attributable. They retain normalized flags, lifecycle state, explicit
   overflow gaps, policy outcomes, volume transition metadata, and durable metadata,
-  but volume-bound cursor persistence, recovery, and source completeness remain
-  later gates.
+  including persisted volume-bound cursors and durable restart/replay recovery.
+  Complete target-device lifecycle, source-loss reconciliation, release-scale
+  evidence and source-completeness limitations remain distinct gates; a persisted
+  cursor does not make missing callbacks complete or actor-attributed.
 - A user may intentionally export sensitive data to an insecure destination.
 - A compromised dependency, toolchain, or build host can violate the local-only
   contract. CI checks reduce this risk; they do not prove source intent.

@@ -956,12 +956,14 @@ fn export_refuses_replacing_the_source_journal() {
 fn capture_is_explicitly_refused() {
     let error = capture().expect_err("capture must be disabled");
     assert!(error.to_string().contains("intentionally disabled"));
+    assert!(error.to_string().contains("ambient capture"));
     let output = Command::new(env!("CARGO_BIN_EXE_ghostrace"))
         .arg("capture")
         .output()
         .expect("capture command");
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("intentionally disabled"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("separate consent/policy boundaries"));
 }
 
 #[test]

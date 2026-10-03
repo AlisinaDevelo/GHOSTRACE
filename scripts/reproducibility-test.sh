@@ -289,7 +289,7 @@ if cargo +1.88.0 run --quiet -- capture > "$WORK_DIR/capture.stdout" 2> "$WORK_D
   echo "capture unexpectedly succeeded" >&2
   exit 1
 fi
-grep -F "live capture is intentionally disabled" "$WORK_DIR/capture.stderr" >/dev/null
+grep -F "ambient capture is intentionally disabled" "$WORK_DIR/capture.stderr" >/dev/null
 
 echo "reproducibility: roadmap and Python evidence"
 python3 scripts/roadmap.py check >/dev/null

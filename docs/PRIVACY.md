@@ -1,14 +1,16 @@
 # Privacy model
 
 GHOSTRACE exists to help a person inspect a bounded sequence of local changes. It is
-not designed to reconstruct everything a person did. The current public headstart is
-local and offline: a selected-root collector API exists only behind explicit consent,
-while the ambient CLI remains disabled.
+not designed to reconstruct everything a person did. The current source provides
+fixture tooling and explicitly invoked local macOS surfaces behind their own
+consent/policy boundaries; ambient CLI capture remains disabled. GHOSTRACE has no
+network client, but `run` is not a network sandbox: its deliberately requested
+child inherits the caller's environment and terminal and may use networking.
 
 ## Defaults
 
-- Collection is deny-by-default and requires explicit, versioned consent when live
-  sources are introduced.
+- Collection is deny-by-default; current live sources require their explicit
+  consent/policy boundaries. A grant for one source does not enable another.
 - Policy documents are strict and versioned. Unknown versions, duplicate identities,
   downgrade attempts, and semantic changes without explicit reconfirmation fail
   closed before a candidate observation can be retained.
@@ -40,13 +42,17 @@ The exact fields are versioned in [EVENT_MODEL.md](EVENT_MODEL.md). A field is n
 privacy-safe merely because it is called metadata; paths, timestamps, identifiers,
 and source flags can be sensitive.
 
-The macOS provider stores only the journal wrapping key as a generic password in the
+The default macOS data-protection provider stores only the journal wrapping key as a generic password in the
 data-protection Keychain. It sets `kSecUseDataProtectionKeychain`, requires
 `kSecAttrSynchronizable=false`, and uses `WhenUnlockedThisDeviceOnly` access control.
 The default service/account are `com.alisinadevelo.ghostrace.journal` and
 `journal-wrapping-key-v1`; an access group is optional and must match the signed bundle
 entitlement. An unsigned command-line helper or a locked login session has no fallback:
 missing, inaccessible, duplicated, or malformed items produce redacted refusal errors.
+That refusal describes data-protection custody. The explicit live CLI instead
+selects login-Keychain custody deliberately during home initialization; this is
+not a fallback after a provider failure. Its device checks do not complete signed
+data-protection distribution or the broader release matrix.
 
 ### Key lifecycle and recovery
 
@@ -199,7 +205,7 @@ oversized rows, and missing essential gap fields rather than silently coercing t
 
 The archive is a separate external copy. Journal retention and key destruction do
 not erase it, and GHOSTRACE cannot retract copies made by downstream tools or
-backups. Any future deletion feature must identify the copy owner and scope, report
+backups. Any deletion change must identify the copy owner and scope, report
 what remains recoverable, and preserve the source journal when archive publication
 fails.
 
@@ -281,7 +287,7 @@ candidate-set digest.
 
 The plan is evaluated inside one SQLite read snapshot and binds its committed
 `ingest_seq` upper bound. Its confirmation contains only the plan digest,
-candidate digest, and boundary. A later deletion command must refuse any set that
+candidate digest, and boundary. The separate `retention-delete` command refuses any set that
 would exceed that boundary or differ from that digest, so concurrent ingest or a
 changed policy cannot expand a previously confirmed scope. The plan is not a
 deletion command and does not infer consent from a prior export.
@@ -289,14 +295,14 @@ deletion command and does not infer consent from a prior export.
 Retention deliberately excludes exports, database backups, SQLite WAL/SHM
 sidecars, diagnostic records, cursors, and encryption-key references from this
 journal-event scope. Legal holds are not implemented and are never inferred from
-an export or backup. Future deletion work must define residue, transactional
-behavior, recovery, and what remains recoverable from external copies before it
-can remove journal rows or related artifacts.
+an export or backup. The logical deletion and recovery contracts below do not
+erase those external copies. Further deletion work must preserve explicit residue,
+transactional, recovery and external-copy guarantees before broadening its scope.
 
 ### Residue modes and erasure limits
 
 `residue-report` is a read-only, path-free inventory. It makes four operations
-explicit so a future deletion command cannot present one as another:
+explicit so a deletion command cannot present one as another:
 
 - **Logical deletion** removes selected rows from the live SQLite view. It is the
   least expensive operation, but free pages, WAL frames, virtual-table shadow
