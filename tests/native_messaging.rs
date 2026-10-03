@@ -5,7 +5,8 @@ use std::time::Duration;
 use ghostrace::{
     encode_frame, parse_message, ExtensionMessage, FrameDecoder, NativeMessagingError,
     ProtocolSession, SessionEvent, MAX_NATIVE_DECODER_BUFFER, MAX_NATIVE_FRAME_BYTES,
-    MAX_NATIVE_MESSAGES_PER_WINDOW, NATIVE_SESSION_IDLE_TIMEOUT,
+    MAX_NATIVE_MESSAGES_PER_WINDOW, MAX_NATIVE_MESSAGE_STRING_BUDGET_BYTES,
+    MAX_NATIVE_MESSAGE_STRING_BYTES, NATIVE_SESSION_IDLE_TIMEOUT,
 };
 use sha2::{Digest, Sha256};
 
@@ -62,6 +63,10 @@ fn oversized_empty_truncated_and_invalid_frames_fail_closed() {
     let mut empty = FrameDecoder::new();
     assert_eq!(empty.push(&0u32.to_ne_bytes()), Err(NativeMessagingError::EmptyFrame));
 
+    let mut split_oversized = FrameDecoder::new();
+    split_oversized.push(&[0xff]).expect("partial prefix");
+    assert_eq!(split_oversized.push(&[0xff, 0xff, 0xff]), Err(NativeMessagingError::FrameTooLarge));
+
     let mut truncated = FrameDecoder::new();
     let frame = encode_frame(&hello()).expect("frame");
     truncated.push(&frame[..frame.len() - 3]).expect("partial");
@@ -92,6 +97,48 @@ fn unknown_types_fields_and_hostile_structure_are_refused() {
         "[".repeat(40)
     );
     assert!(parse_message(quoted.as_bytes()).is_ok());
+}
+
+#[test]
+fn parser_accepts_only_the_four_defined_v1_message_types() {
+    let messages = [
+        hello(),
+        nav(2),
+        br#"{"type":"heartbeat","seq":3,"mac":"00"}"#.to_vec(),
+        br#"{"type":"goodbye","seq":4,"mac":"00"}"#.to_vec(),
+    ];
+    for body in messages {
+        parse_message(&body).expect("defined v1 message");
+    }
+}
+
+#[test]
+fn fields_and_strings_are_bounded_before_typed_deserialization() {
+    let oversized_url = format!(
+        r#"{{"type":"navigation","seq":2,"url":"https://e.com/{}","private_context":false,"transition":"committed","mac":"00"}}"#,
+        "x".repeat(MAX_NATIVE_MESSAGE_STRING_BYTES)
+    );
+    assert_eq!(parse_message(oversized_url.as_bytes()), Err(NativeMessagingError::StringTooLong));
+
+    let over_budget = format!(
+        r#"{{"type":"hello","protocol_version":1,"seq":1,"pairing_id":"00000000-0000-4000-8000-000000000001","extension_id":"{}","extension_key_digest":"{}","permissions_digest":"{}","client_nonce":"cc"}}"#,
+        "a".repeat(MAX_NATIVE_MESSAGE_STRING_BUDGET_BYTES / 3),
+        "b".repeat(MAX_NATIVE_MESSAGE_STRING_BUDGET_BYTES / 3),
+        "c".repeat(MAX_NATIVE_MESSAGE_STRING_BUDGET_BYTES / 3),
+    );
+    assert_eq!(
+        parse_message(over_budget.as_bytes()),
+        Err(NativeMessagingError::StringBudgetExceeded)
+    );
+
+    let too_wide = br#"{"type":"navigation","seq":2,"url":"https://e.com/","private_context":false,"transition":"committed","mac":"00","x1":null,"x2":null,"x3":null}"#;
+    assert_eq!(parse_message(too_wide), Err(NativeMessagingError::TooManyFields));
+
+    let duplicate = br#"{"type":"heartbeat","seq":2,"mac":"00","mac":"01"}"#;
+    assert_eq!(parse_message(duplicate), Err(NativeMessagingError::DuplicateField));
+
+    let escaped_key = br#"{"ty\u0070e":"heartbeat","seq":2,"mac":"00"}"#;
+    assert_eq!(parse_message(escaped_key), Err(NativeMessagingError::MalformedJson));
 }
 
 #[test]
@@ -158,6 +205,37 @@ fn idle_sessions_time_out_and_floods_are_rate_limited() {
     assert!(limited);
     // The window slides: the session recovers after it passes.
     assert!(flood.receive(&nav(1_000), at(30)).is_ok());
+}
+
+#[test]
+fn rejected_frames_consume_the_ingress_rate_budget() {
+    let mut session = ProtocolSession::new_at(Duration::ZERO);
+    let malformed = br#"{"type":"not-a-message"}"#;
+    for _ in 0..MAX_NATIVE_MESSAGES_PER_WINDOW {
+        assert_eq!(session.receive(malformed, at(0)), Err(NativeMessagingError::UnknownMessage));
+    }
+    assert_eq!(session.receive(&hello(), at(0)), Err(NativeMessagingError::RateLimited));
+}
+
+#[test]
+fn preadmitted_frames_are_not_charged_twice() {
+    let mut session = ProtocolSession::new_at(Duration::ZERO);
+    session.admit_attempt(at(0)).expect("hello admission");
+    session.receive_after_admission(&hello(), at(0)).expect("hello");
+    for seq in 2..=MAX_NATIVE_MESSAGES_PER_WINDOW as u64 {
+        session.admit_attempt(at(0)).expect("message admission");
+        session.receive_after_admission(&nav(seq), at(0)).expect("message");
+    }
+    assert_eq!(session.receive(&nav(999), at(0)), Err(NativeMessagingError::RateLimited));
+}
+
+#[test]
+fn an_initial_hello_must_arrive_before_the_idle_deadline() {
+    let mut session = ProtocolSession::new_at(Duration::ZERO);
+    assert_eq!(
+        session.check_deadline(NATIVE_SESSION_IDLE_TIMEOUT),
+        Err(NativeMessagingError::Timeout)
+    );
 }
 
 #[test]

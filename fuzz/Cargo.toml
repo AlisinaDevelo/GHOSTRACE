@@ -1,0 +1,64 @@
+[package]
+name = "ghostrace-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+ghostrace = { path = ".." }
+libfuzzer-sys = "0.4"
+chrono = "0.4"
+serde_json = "1.0"
+uuid = { version = "1.10", features = ["serde", "v4"] }
+
+[[bin]]
+name = "frame_decoder"
+path = "fuzz_targets/frame_decoder.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "schema_parser"
+path = "fuzz_targets/schema_parser.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "origin_validation"
+path = "fuzz_targets/origin_validation.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pairing_state"
+path = "fuzz_targets/pairing_state.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sequence_handling"
+path = "fuzz_targets/sequence_handling.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "policy_conversion"
+path = "fuzz_targets/policy_conversion.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "transport_differential"
+path = "fuzz_targets/transport_differential.rs"
+test = false
+doc = false
+bench = false

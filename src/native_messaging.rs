@@ -25,6 +25,12 @@ pub const MAX_NATIVE_DECODER_BUFFER: usize = 2 * (4 + MAX_NATIVE_FRAME_BYTES);
 pub const MAX_NATIVE_MESSAGE_DEPTH: usize = 8;
 /// Most JSON values (objects, arrays, scalars) accepted in one message.
 pub const MAX_NATIVE_MESSAGE_VALUES: usize = 256;
+/// Most fields accepted in one JSON object, including the tagged message type.
+pub const MAX_NATIVE_MESSAGE_FIELDS: usize = 8;
+/// Largest decoded string accepted in one message field.
+pub const MAX_NATIVE_MESSAGE_STRING_BYTES: usize = 8 * 1024;
+/// Total decoded string budget for one message, including object keys.
+pub const MAX_NATIVE_MESSAGE_STRING_BUDGET_BYTES: usize = 16 * 1024;
 /// Longest silence allowed between messages in an open session.
 pub const NATIVE_SESSION_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 /// Most messages accepted within one rate window.
@@ -52,6 +58,14 @@ pub enum NativeMessagingError {
     TooDeep,
     #[error("message has too many values")]
     TooManyValues,
+    #[error("message has too many object fields")]
+    TooManyFields,
+    #[error("message repeats an object field")]
+    DuplicateField,
+    #[error("a message string exceeds the field bound")]
+    StringTooLong,
+    #[error("message strings exceed the allocation budget")]
+    StringBudgetExceeded,
     #[error("message type or fields are not defined by the protocol")]
     UnknownMessage,
     #[error("the first message must be hello")]
@@ -82,15 +96,16 @@ impl FrameDecoder {
     /// Append received bytes. The buffer never holds more than one prefix and
     /// one maximum-size body.
     pub fn push(&mut self, bytes: &[u8]) -> Result<(), NativeMessagingError> {
+        // Inspect a complete prefix, including one split across this chunk,
+        // before extending the buffer. A hostile length therefore cannot make
+        // us buffer a large chunk merely to discover that its body is refused.
+        pending_frame_length(&self.buffer, bytes)?;
         // Never hold more than two maximal frames, whatever the chunk size or
         // decoder state; the caller drains complete frames between pushes.
         if self.buffer.len().saturating_add(bytes.len()) > MAX_NATIVE_DECODER_BUFFER {
             return Err(NativeMessagingError::BufferFull);
         }
         self.buffer.extend_from_slice(bytes);
-        if self.buffer.len() >= 4 {
-            frame_length(&self.buffer)?;
-        }
         Ok(())
     }
 
@@ -127,6 +142,23 @@ fn frame_length(buffer: &[u8]) -> Result<usize, NativeMessagingError> {
         return Err(NativeMessagingError::FrameTooLarge);
     }
     Ok(length)
+}
+
+fn pending_frame_length(
+    buffer: &[u8],
+    incoming: &[u8],
+) -> Result<Option<usize>, NativeMessagingError> {
+    if buffer.len() >= 4 {
+        return frame_length(buffer).map(Some);
+    }
+    let needed = 4 - buffer.len();
+    if incoming.len() < needed {
+        return Ok(None);
+    }
+    let mut prefix = [0u8; 4];
+    prefix[..buffer.len()].copy_from_slice(buffer);
+    prefix[buffer.len()..].copy_from_slice(&incoming[..needed]);
+    frame_length(&prefix).map(Some)
 }
 
 /// Encode an outbound frame with the native-endian length prefix.
@@ -236,6 +268,12 @@ impl NavigationTransition {
 
 /// Parse one frame body into a typed message after bounding its structure.
 pub fn parse_message(body: &[u8]) -> Result<ExtensionMessage, NativeMessagingError> {
+    if body.is_empty() {
+        return Err(NativeMessagingError::EmptyFrame);
+    }
+    if body.len() > MAX_NATIVE_FRAME_BYTES {
+        return Err(NativeMessagingError::FrameTooLarge);
+    }
     let text = std::str::from_utf8(body).map_err(|_| NativeMessagingError::InvalidUtf8)?;
     scan_structure(text)?;
     serde_json::from_str::<ExtensionMessage>(text).map_err(|error| {
@@ -247,56 +285,228 @@ pub fn parse_message(body: &[u8]) -> Result<ExtensionMessage, NativeMessagingErr
     })
 }
 
-/// Count nesting depth and values without building a tree, so a deeply
-/// nested or very wide payload is refused before serde allocates for it.
+/// Scan JSON structure without building a tree, so a deeply nested, very wide,
+/// or allocation-heavy payload is refused before typed deserialization.
 fn scan_structure(text: &str) -> Result<(), NativeMessagingError> {
-    let mut depth = 0usize;
-    let mut values = 0usize;
-    let mut in_string = false;
-    let mut escaped = false;
-    let mut in_scalar = false;
-    for byte in text.bytes() {
-        if in_string {
-            match (escaped, byte) {
-                (true, _) => escaped = false,
-                (false, b'\\') => escaped = true,
-                (false, b'"') => in_string = false,
-                _ => {}
-            }
-            continue;
-        }
-        let scalar_byte = byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'+' | b'.');
-        if scalar_byte {
-            if !in_scalar {
-                in_scalar = true;
-                values += 1;
-            }
-            continue;
-        }
-        in_scalar = false;
-        match byte {
-            b'"' => {
-                in_string = true;
-                values += 1;
-            }
-            b'{' | b'[' => {
-                depth += 1;
-                values += 1;
-                if depth > MAX_NATIVE_MESSAGE_DEPTH {
-                    return Err(NativeMessagingError::TooDeep);
-                }
-            }
-            b'}' | b']' => depth = depth.saturating_sub(1),
-            _ => {}
-        }
-        if values > MAX_NATIVE_MESSAGE_VALUES {
-            return Err(NativeMessagingError::TooManyValues);
-        }
-    }
-    if in_string {
+    let mut scanner = JsonStructureScanner::new(text.as_bytes());
+    scanner.skip_whitespace();
+    scanner.scan_value(0)?;
+    scanner.skip_whitespace();
+    if scanner.position != scanner.input.len() {
         return Err(NativeMessagingError::MalformedJson);
     }
     Ok(())
+}
+
+struct JsonStructureScanner<'a> {
+    input: &'a [u8],
+    position: usize,
+    values: usize,
+    string_budget: usize,
+}
+
+impl<'a> JsonStructureScanner<'a> {
+    fn new(input: &'a [u8]) -> Self {
+        Self { input, position: 0, values: 0, string_budget: 0 }
+    }
+
+    fn skip_whitespace(&mut self) {
+        while self.position < self.input.len()
+            && matches!(self.input[self.position], b' ' | b'\t' | b'\r' | b'\n')
+        {
+            self.position += 1;
+        }
+    }
+
+    fn scan_value(&mut self, depth: usize) -> Result<(), NativeMessagingError> {
+        self.skip_whitespace();
+        self.values = self.values.saturating_add(1);
+        if self.values > MAX_NATIVE_MESSAGE_VALUES {
+            return Err(NativeMessagingError::TooManyValues);
+        }
+        let Some(byte) = self.input.get(self.position).copied() else {
+            return Err(NativeMessagingError::MalformedJson);
+        };
+        match byte {
+            b'{' => self.scan_object(depth + 1),
+            b'[' => self.scan_array(depth + 1),
+            b'"' => {
+                self.scan_string()?;
+                Ok(())
+            }
+            b't' => self.scan_literal(b"true"),
+            b'f' => self.scan_literal(b"false"),
+            b'n' => self.scan_literal(b"null"),
+            b'-' | b'0'..=b'9' => self.scan_number(),
+            _ => Err(NativeMessagingError::MalformedJson),
+        }
+    }
+
+    fn scan_object(&mut self, depth: usize) -> Result<(), NativeMessagingError> {
+        if depth > MAX_NATIVE_MESSAGE_DEPTH {
+            return Err(NativeMessagingError::TooDeep);
+        }
+        self.position += 1;
+        self.skip_whitespace();
+        if self.consume(b'}') {
+            return Ok(());
+        }
+
+        let mut fields = 0usize;
+        let mut keys = [None; MAX_NATIVE_MESSAGE_FIELDS];
+        loop {
+            self.skip_whitespace();
+            if self.input.get(self.position) != Some(&b'"') {
+                return Err(NativeMessagingError::MalformedJson);
+            }
+            self.values = self.values.saturating_add(1);
+            if self.values > MAX_NATIVE_MESSAGE_VALUES {
+                return Err(NativeMessagingError::TooManyValues);
+            }
+            let key_start = self.position;
+            self.scan_string()?;
+            let key_end = self.position;
+            // All v1 field names are plain ASCII identifiers. Refusing an
+            // escaped key keeps the pre-scan's duplicate check semantic: a
+            // key such as `"ty\\u0070e"` cannot alias `"type"` after serde
+            // decodes it.
+            if self.input[key_start..key_end].contains(&b'\\') {
+                return Err(NativeMessagingError::MalformedJson);
+            }
+            fields = fields.saturating_add(1);
+            if fields > MAX_NATIVE_MESSAGE_FIELDS {
+                return Err(NativeMessagingError::TooManyFields);
+            }
+            if keys[..fields - 1]
+                .iter()
+                .flatten()
+                .any(|(start, end)| self.input[*start..*end] == self.input[key_start..key_end])
+            {
+                return Err(NativeMessagingError::DuplicateField);
+            }
+            keys[fields - 1] = Some((key_start, key_end));
+            self.skip_whitespace();
+            if !self.consume(b':') {
+                return Err(NativeMessagingError::MalformedJson);
+            }
+            self.scan_value(depth)?;
+            self.skip_whitespace();
+            if self.consume(b'}') {
+                return Ok(());
+            }
+            if !self.consume(b',') {
+                return Err(NativeMessagingError::MalformedJson);
+            }
+        }
+    }
+
+    fn scan_array(&mut self, depth: usize) -> Result<(), NativeMessagingError> {
+        if depth > MAX_NATIVE_MESSAGE_DEPTH {
+            return Err(NativeMessagingError::TooDeep);
+        }
+        self.position += 1;
+        self.skip_whitespace();
+        if self.consume(b']') {
+            return Ok(());
+        }
+        loop {
+            self.scan_value(depth)?;
+            self.skip_whitespace();
+            if self.consume(b']') {
+                return Ok(());
+            }
+            if !self.consume(b',') {
+                return Err(NativeMessagingError::MalformedJson);
+            }
+        }
+    }
+
+    fn scan_string(&mut self) -> Result<(), NativeMessagingError> {
+        if !self.consume(b'"') {
+            return Err(NativeMessagingError::MalformedJson);
+        }
+        let mut bytes = 0usize;
+        loop {
+            let Some(byte) = self.input.get(self.position).copied() else {
+                return Err(NativeMessagingError::MalformedJson);
+            };
+            self.position += 1;
+            let bytes_before = bytes;
+            match byte {
+                b'"' => return Ok(()),
+                b'\\' => {
+                    let Some(escaped) = self.input.get(self.position).copied() else {
+                        return Err(NativeMessagingError::MalformedJson);
+                    };
+                    self.position += 1;
+                    match escaped {
+                        b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't' => {
+                            bytes = bytes.saturating_add(1);
+                        }
+                        b'u' => {
+                            if self.position.saturating_add(4) > self.input.len()
+                                || !self.input[self.position..self.position + 4]
+                                    .iter()
+                                    .all(|digit| digit.is_ascii_hexdigit())
+                            {
+                                return Err(NativeMessagingError::MalformedJson);
+                            }
+                            self.position += 4;
+                            // A Unicode escape expands to at most three UTF-8
+                            // bytes for one code point. Over-counting a
+                            // surrogate pair is safe for this pre-allocation
+                            // budget and keeps the scanner allocation-free.
+                            bytes = bytes.saturating_add(3);
+                        }
+                        _ => return Err(NativeMessagingError::MalformedJson),
+                    }
+                }
+                byte if byte < 0x20 => return Err(NativeMessagingError::MalformedJson),
+                _ => bytes = bytes.saturating_add(1),
+            }
+            if bytes > MAX_NATIVE_MESSAGE_STRING_BYTES {
+                return Err(NativeMessagingError::StringTooLong);
+            }
+            self.string_budget =
+                self.string_budget.saturating_add(bytes.saturating_sub(bytes_before));
+            if self.string_budget > MAX_NATIVE_MESSAGE_STRING_BUDGET_BYTES {
+                return Err(NativeMessagingError::StringBudgetExceeded);
+            }
+        }
+    }
+
+    fn scan_literal(&mut self, literal: &[u8]) -> Result<(), NativeMessagingError> {
+        let end = self.position.saturating_add(literal.len());
+        if end > self.input.len() || self.input[self.position..end] != *literal {
+            return Err(NativeMessagingError::MalformedJson);
+        }
+        self.position = end;
+        Ok(())
+    }
+
+    fn scan_number(&mut self) -> Result<(), NativeMessagingError> {
+        let start = self.position;
+        while let Some(byte) = self.input.get(self.position).copied() {
+            if matches!(byte, b' ' | b'\t' | b'\r' | b'\n' | b',' | b']' | b'}') {
+                break;
+            }
+            self.position += 1;
+        }
+        if self.position == start {
+            Err(NativeMessagingError::MalformedJson)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn consume(&mut self, expected: u8) -> bool {
+        if self.input.get(self.position) == Some(&expected) {
+            self.position += 1;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 /// What the session concluded from one accepted message.
@@ -324,8 +534,9 @@ enum SessionState {
 pub struct ProtocolSession {
     state: SessionState,
     last_seq: u64,
+    started_at: Option<Duration>,
     last_activity: Option<Duration>,
-    recent: VecDeque<Duration>,
+    recent_attempts: VecDeque<Duration>,
 }
 
 impl Default for ProtocolSession {
@@ -336,12 +547,57 @@ impl Default for ProtocolSession {
 
 impl ProtocolSession {
     pub fn new() -> Self {
+        Self::new_with_start(None)
+    }
+
+    /// Create a session with a known connection start time. The native host
+    /// uses this before blocking on stdin so a peer that never sends `hello`
+    /// still reaches the idle deadline.
+    pub fn new_at(started_at: Duration) -> Self {
+        Self::new_with_start(Some(started_at))
+    }
+
+    fn new_with_start(started_at: Option<Duration>) -> Self {
         Self {
             state: SessionState::AwaitingHello,
             last_seq: 0,
+            started_at,
             last_activity: None,
-            recent: VecDeque::new(),
+            recent_attempts: VecDeque::new(),
         }
+    }
+
+    /// Check the connection and session deadline without requiring a frame.
+    pub fn check_deadline(&mut self, now: Duration) -> Result<(), NativeMessagingError> {
+        if self.state == SessionState::Closed {
+            return Err(NativeMessagingError::TrailingData);
+        }
+        self.started_at.get_or_insert(now);
+        let anchor = self.last_activity.or(self.started_at);
+        if anchor.is_some_and(|last| now.saturating_sub(last) >= NATIVE_SESSION_IDLE_TIMEOUT) {
+            self.state = SessionState::Closed;
+            return Err(NativeMessagingError::Timeout);
+        }
+        Ok(())
+    }
+
+    /// Account for one complete inbound frame before parsing or authentication.
+    /// The native host calls this for every frame, including malformed and
+    /// unauthenticated input, so rejection cannot bypass the rate bound.
+    pub fn admit_attempt(&mut self, now: Duration) -> Result<(), NativeMessagingError> {
+        self.check_deadline(now)?;
+        while self
+            .recent_attempts
+            .front()
+            .is_some_and(|at| now.saturating_sub(*at) >= NATIVE_RATE_WINDOW)
+        {
+            self.recent_attempts.pop_front();
+        }
+        if self.recent_attempts.len() >= MAX_NATIVE_MESSAGES_PER_WINDOW {
+            return Err(NativeMessagingError::RateLimited);
+        }
+        self.recent_attempts.push_back(now);
+        Ok(())
     }
 
     /// Process one frame body received at monotonic time `now`.
@@ -350,24 +606,21 @@ impl ProtocolSession {
         body: &[u8],
         now: Duration,
     ) -> Result<SessionEvent, NativeMessagingError> {
-        if self.state == SessionState::Closed {
-            return Err(NativeMessagingError::TrailingData);
-        }
-        if self
-            .last_activity
-            .is_some_and(|last| now.saturating_sub(last) > NATIVE_SESSION_IDLE_TIMEOUT)
-        {
-            self.state = SessionState::Closed;
-            return Err(NativeMessagingError::Timeout);
-        }
-        while self.recent.front().is_some_and(|at| now.saturating_sub(*at) >= NATIVE_RATE_WINDOW) {
-            self.recent.pop_front();
-        }
-        if self.recent.len() >= MAX_NATIVE_MESSAGES_PER_WINDOW {
-            return Err(NativeMessagingError::RateLimited);
-        }
+        self.admit_attempt(now)?;
+        self.receive_after_admission(body, now)
+    }
+
+    /// Process a frame after the caller has already admitted it to the ingress
+    /// budget. This is the native-host seam: pairing/MAC validation can happen
+    /// after the attempt is counted without charging valid frames twice.
+    pub fn receive_after_admission(
+        &mut self,
+        body: &[u8],
+        now: Duration,
+    ) -> Result<SessionEvent, NativeMessagingError> {
+        self.check_deadline(now)?;
         let message = parse_message(body)?;
-        self.recent.push_back(now);
+        self.started_at.get_or_insert(now);
         self.last_activity = Some(now);
 
         match (&self.state, &message) {
