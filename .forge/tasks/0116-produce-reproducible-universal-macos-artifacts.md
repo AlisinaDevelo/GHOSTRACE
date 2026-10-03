@@ -27,4 +27,5 @@ Build Intel and Apple silicon CLI, service, native host, and application artifac
 Reproducibility is a measured property and cannot be claimed solely from a lockfile.
 
 ## Notes
+The CLI part is done: `scripts/build-universal.sh` builds a byte-for-byte reproducible universal CLI (two clones at different paths compared identical on the reference M1) with no embedded local paths. Still open: service, native host, and application artifacts; Developer ID signing and entitlements (0122); a run on Intel hardware rather than Rosetta.
 Planned in the 2026–2031 GHOSTRACE program. Completion requires the acceptance evidence above; issue closure alone is not evidence.

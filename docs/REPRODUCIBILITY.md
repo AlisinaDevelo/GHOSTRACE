@@ -176,6 +176,37 @@ constructor cannot read Git object contents. This is a metadata contract, not a
 live Git command or network test. Task 0025 must add its own consent, parser,
 failure/gap, and device evidence before any live snapshot is claimed.
 
+## Universal macOS CLI
+
+`scripts/build-universal.sh` builds the `ghostrace` CLI for Apple silicon and
+Intel from the locked inputs, merges the slices with `lipo`, applies an ad-hoc
+signature (`com.alisinadevelo.ghostrace`), and writes `manifest.json` beside the
+binary. It pins the toolchain (`rust-toolchain.toml`), `Cargo.lock`, the minimum
+macOS version (13.0), `SOURCE_DATE_EPOCH` (the commit time), one codegen unit, no
+debug info, stripped symbols, and `ZERO_AR_DATE`. It records what it cannot pin:
+the Xcode, SDK, linker, and compiler versions. Each slice's manifest entry carries
+its SHA-256, Mach-O UUID, minimum OS, and a count of absolute local paths found in
+the binary, which must be 0.
+
+`scripts/build-universal.sh --twice` builds the same commit from two clones at
+different absolute paths and writes `comparison.json`, listing every manifest
+field that differs. On the reference M1 (Xcode with SDK 26.5, Rust 1.88.0) both
+builds were byte-for-byte identical: the same digests for both slices and the
+universal binary, with no differing field. Both slices report minimum macOS 13.0,
+the signature verifies, and the fixture demo produces the same statements natively
+and under Rosetta.
+
+Release artifacts must come from this script. A plain `cargo build --release`
+embeds absolute source paths in panic locations, including the builder's home
+directory and user name; on the reference device it embedded 102 such paths. The
+script remaps both the given and the resolved spelling of the source, Cargo, and
+rustup paths (macOS reports `/var/...` as `/private/var/...`, and remapping only
+one spelling leaves the path in place).
+
+Not covered yet: the service, native host, and application artifacts, which do not
+exist as separate binaries; Developer ID signing, entitlements, and notarization
+(task 0122); and a run on Intel hardware rather than Rosetta.
+
 ## Clean-machine smoke
 
 After installing the pinned inputs, run the complete local reproduction lane:
