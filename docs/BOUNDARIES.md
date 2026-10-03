@@ -12,15 +12,13 @@ where coverage is missing. Its explanation layer links observations without
 turning temporal order into proof of intent or complete causality.
 
 GHOSTRACE is currently the incubation track in the evidence-engineering family.
-The fixture path and consent-gated collector API are useful research and contract
-surfaces, but live capture remains disabled until the privacy, cursor-recovery,
-durable-writer, encryption, and release gates are demonstrated on the named
-device. This posture is deliberate: a long roadmap or green fixture suite does
-not substitute for a safe live-capture experiment.
-
-The current release includes the fixture CLI and an explicitly consent-gated,
-selected-root FSEvents collector API. Ambient CLI capture remains disabled until
-the remaining path-policy, recovery, writer, encryption, and release gates pass.
+The source includes fixture tooling and explicit macOS CLI paths for selected-root
+watching, requested command execution, Git snapshots, and export/report, with
+login-Keychain custody. Frontmost recording is opt-in and has incomplete lifecycle
+coverage. These are incubation surfaces, not a completed production release.
+Ambient `capture`, browser collection, service/Tauri/launchd integration, signed
+data-protection distribution, and broader device gates remain incomplete. A long
+roadmap or green fixture suite does not substitute for target-device acceptance.
 
 ## Portfolio comparison
 
@@ -59,5 +57,6 @@ intent from event order, or treat an export as legal chain-of-custody evidence.
   a retrieval/indexing tool such as LOOM.
 - If the task is **comparing TypeScript architecture across Git revisions**, it
   belongs to CARTOGRAPH.
-- If the task requires ambient capture, content indexing, or source-code execution,
-  it is outside the current GHOSTRACE contract.
+- If the task requires ambient capture, content indexing, or source-code analysis
+  for an architecture graph, it is outside the current GHOSTRACE contract. The
+  deliberate `run` wrapper records an execution's metadata, not its source code.

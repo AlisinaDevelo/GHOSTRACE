@@ -1,8 +1,9 @@
 # Architecture
 
 GHOSTRACE is a local, modular Rust application with a deliberately narrow data
-path. The public slice replays synthetic JSONL fixtures and now contains an explicitly
-enabled selected-root FSEvents source. Ambient CLI capture remains disabled until the
+path. The public source includes synthetic fixture tooling and user-invoked
+macOS commands for selected-root FSEvents, shell wrapping, Git snapshots, and
+explicit export/report. Ambient CLI capture remains disabled until the
 remaining path-policy, recovery, and release gates pass.
 
 GHOSTRACE is the event-observation and explanation layer in the portfolio. It does
@@ -14,7 +15,8 @@ are separate product boundaries; see [Product boundaries](BOUNDARIES.md).
 ~~~text
 source adapter
   ├─ fixture JSONL (current)
-  └─ explicitly enabled selected-root FSEvents source (current API)
+  ├─ explicitly consented selected-root FSEvents (API and CLI)
+  └─ requested shell/Git context; opt-in frontmost context
         │
         v
 bounded normalization
@@ -71,8 +73,10 @@ therefore exercise the persistence boundary rather than an in-memory shortcut.
 digests match the explicit confirmation from the preview. The receipt records only
 the destination class and artifact digests, never the destination path.
 The key is intentionally deterministic only for the synthetic headstart; it is not
-the production Keychain design. `capture` remains an explicit refusal, and no CLI
-command enables a live collector or network path.
+the production Keychain design. These fixture commands are distinct from `live`
+and `run`, whose explicit commands use login-Keychain custody and versioned policy.
+`capture` remains an explicit refusal. GHOSTRACE has no network client; deliberately
+wrapped programs are not network-sandboxed by `run`.
 
 ## Checkpoint and repair boundary
 
@@ -159,7 +163,7 @@ place without replacing an existing file. Any failure removes the temporary.
 ### Explicit shell-wrapper metadata
 
 [`schemas/shell-execution-metadata-v1.json`](../schemas/shell-execution-metadata-v1.json)
-defines the only metadata a future user-invoked shell wrapper may submit. The
+defines the only metadata the explicit user-invoked shell wrapper may submit. The
 strict v1 record contains an opaque wrapper session, a normalized executable
 basename identity, a working-directory class plus root-scoped digest, start and
 end timestamps, an outcome class, an exit code, and a signal. The raw working
@@ -174,12 +178,12 @@ input/output, shell history, aliases, command text, or expanded command text.
 `ShellExecutionMetadata` uses deny-unknown-fields deserialization plus semantic
 validation, and its field registry records the semantic and sensitivity class of
 every retained field. This is a data contract, not a shell executor or ambient
-collector; a later wrapper must remain explicit and policy-gated.
+collector; the separate implemented wrapper remains explicit and consent-gated.
 
 ### Git repository and worktree identity
 
 [`git-repository-worktree-identity-v1.json`](../schemas/git-repository-worktree-identity-v1.json)
-defines the path-free identity boundary for the future explicit Git adapter. The
+defines the path-free identity boundary used by the explicit Git adapter. The
 adapter resolves Git's common object database and worktree metadata, then passes
 only device/file identity values to `GitIdentity::from_stable_parts` (or
 `from_paths`, which reads and immediately discards directory metadata). The
@@ -200,16 +204,18 @@ output into retained evidence.
 
 ### Metadata-only Git snapshot boundary
 
-[`GitSnapshotMetadata`](GIT_SNAPSHOT.md) is the privacy contract for the next
-Git integration stage. It accepts an opaque repository identity, an explicit
+[`GitSnapshotMetadata`](GIT_SNAPSHOT.md) is the pure-data privacy contract used by
+the explicit Git snapshot adapter. It accepts an opaque repository identity, an explicit
 SHA-1 or SHA-256 format, optional algorithm-tagged HEAD/tree/index IDs, bounded
 status counts, branch and operation classes, and required source limitations.
 It has no path, ref name, remote, message, author, filename, diff, patch, or
 object-content field. Its constructors perform no filesystem, Git, network, or
-object-database I/O; a future adapter must normalize metadata before calling
+object-database I/O; the separate adapter normalizes metadata before calling
 them and must discard all other command output. Unknown source conditions are
 represented explicitly rather than promoted to complete history. The snapshot
-schema and digest are validated before any future event projection.
+schema and digest are validated before `live git-snapshot` projects metadata and
+history gaps into the journal. This explicit policy-gated command does not require
+the persisted shell consent that `run` requires.
 
 ### Shell-wrapper lifecycle reference harness
 
@@ -220,8 +226,9 @@ cleared environment and null standard streams, then returns the native child exi
 code or signal unchanged. It exercises normal and non-zero exits, shell built-ins,
 pipelines, timeout, cancellation, and exec failure. Terminal closure and wrapper
 crash are represented as explicit gaps with no completion, end time, exit code, or
-success status. This is a test contract only: GHOSTRACE does not ship a shell
-executor, PTY, terminal collector, or command capture path.
+success status. The reference harness is not a terminal collector: the separate
+explicit `run` wrapper implements deliberately requested program execution, with
+no PTY or ambient command/terminal collection.
 
 ### Explicit shell run wrapper
 
@@ -266,15 +273,15 @@ within one process because these dispositions are process-global. `executable_id
 
 [`fixtures/shell-secret-leakage-v1.json`](../fixtures/shell-secret-leakage-v1.json)
 and `tests/shell_secret_leakage.rs` are a synthetic, unique-sentinel corpus for the
-future wrapper boundary. The tests inject sentinels into arguments, environment,
+wrapper data boundary. The tests inject sentinels into arguments, environment,
 standard input/output/error, executable names, working paths, failure messages,
 prompt text, process titles, diagnostics, crash-report context, and command text.
 Metadata validation, journal ingestion, diagnostics, exports, CLI output, and panic
 output reject or omit every sentinel before GHOSTRACE retention. Process inspection
 and operating-system crash reporting may expose synthetic process state outside the
 application; those rows are documented as `os_visible_not_retained`, not claimed as
-privacy guarantees. This red-team contract adds no event fields and does not ship a
-shell executor or ambient capture path.
+privacy guarantees. This red-team contract adds no event fields or executor of
+its own; the separate consented `run` wrapper does not authorize ambient capture.
 
 ### Frontmost-application identity boundary
 
@@ -650,15 +657,20 @@ pages, in addition to the matching-row count used to detect retention deletion.
 
 | Component | Responsibility | Current state |
 | --- | --- | --- |
-| CLI | Parse commands, print structured results, and surface refusal reasons | Fixture commands available; capture refuses |
+| CLI | Parse commands, print structured results, and surface refusal reasons | Fixture tooling plus explicit live/run commands; ambient capture refuses |
 | Fixture adapter | Read synthetic JSONL and validate the event contract | Available |
-| Source adapters | Translate bounded platform observations into the envelope | Live adapters not shipped |
-| Policy gate | Apply consent, selected scope, exclusions, private-context rules, and redaction | Required before live capture |
+| Source adapters | Translate bounded platform observations into the envelope | Explicit selected-root, shell and Git paths; optional frontmost path with incomplete lifecycle coverage; browser/Endpoint Security remain unimplemented |
+| Policy gate | Apply consent, selected scope, exclusions, private-context rules, and redaction | Implemented and required before explicit live persistence; no ambient grant |
 | Event envelope | Preserve source facts, provenance, evidence level, and schema version | Versioned contract is documented; journal ingestion requires an origin capability |
-| Ingest writer | Bound memory, serialize writes, and commit event, cursor, policy reference, and diagnostics atomically | Bounded fixture writer is implemented and tested; live gate remains |
-| Journal | Store local event metadata and encrypted payloads when the production key path exists | SQLite/WAL design documented; cursor contract migrations 0003–0004 and durable replay-boundary writes are implemented; Keychain production path not shipped |
-| Explain/export | Produce deterministic evidence-linked explanations and explicit exports | Fixture surface available |
+| Ingest writer | Bound memory, serialize writes, and commit event, cursor, policy reference, and diagnostics atomically | Implemented for fixture and explicit live paths; large-journal authenticated-write cost remains open (#403) |
+| Journal | Store local event metadata and encrypted payloads | SQLite/WAL, migrations, replay boundaries and authenticated state implemented; explicit live path uses login Keychain, not a signed production data-protection release |
+| Explain/export | Produce deterministic evidence-linked explanations and explicit exports | Fixture and explicit live surfaces, preview-bound JSONL, optional Parquet and offline HTML |
 | Query | Return bounded, policy-scoped pages from a stable logical ingest snapshot | Encrypted-token pagination is implemented and covered by concurrent-ingest, deletion, token-negative, and migration tests |
+
+The live CLI's `status` and `timeline` currently call `Journal::events`, which
+materializes and decrypts all events before counting or limiting displayed rows.
+Their output limit is not a read-memory bound; release-scale read performance
+remains unverified. This path is distinct from the paginated query API above.
 
 ## Event lifecycle
 
@@ -681,8 +693,10 @@ pages, in addition to the matching-row count used to detect retention deletion.
 
 ## Storage boundary
 
-The active journal is planned as one local SQLite database in WAL mode with one
-writer and read-only readers. Its ordered migration catalog records each SQL
+Each active journal is one local SQLite database in WAL mode, with serialized
+write transactions and snapshot readers. A central service owning all CLI/UI
+writes remains future work; SQLite coordinates separate explicit CLI processes.
+Its ordered migration catalog records each SQL
 identifier, checksum, resulting schema version, tool version, and application time
 before the journal is considered open. A missing, modified, reordered, future,
 partially applied, or downgraded migration refuses startup; legacy v1 journals are
@@ -696,9 +710,10 @@ snapshots, observable passive/truncate checkpoints, and refusal when remaining
 frames or sidecar bytes exceed the configured limit. A database snapshot is made
 only after a truncate checkpoint and never by copying a `-wal` or `-shm` file.
 
-Production sensitive payloads require authenticated encryption with a macOS Keychain
-backing key. That key path is not represented as shipped live-capture capability in
-the current headstart. Missing keys or failed authentication must fail closed.
+Explicit live payloads use authenticated encryption with a login-Keychain backing
+key. The data-protection provider remains the default library custody choice,
+but signed/entitled production distribution is not complete. Missing keys or
+failed authentication fail closed; login custody is not an implicit fallback.
 
 Payload bytes are now stored in a versioned `GRCE` envelope that records the cipher
 algorithm, positive key generation, nonce, and authenticated ciphertext without ever

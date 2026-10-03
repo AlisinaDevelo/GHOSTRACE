@@ -66,13 +66,16 @@ legal evidence or an exhaustive audit log.
 SQLite WAL is a practical local active-journal mechanism because it supports one
 writer with concurrent readers and transactional recovery. WAL is not encryption,
 does not remove side-channel metadata, and does not repair incomplete sources.
-GHOSTRACE pairs it with bounded writes, explicit gaps, and a future Keychain-backed
-payload key.
+GHOSTRACE pairs it with bounded writes, explicit gaps, and login-Keychain custody
+for the explicitly invoked live CLI. Signed data-protection distribution remains
+a separate release gate.
 
 ### Future platform contracts
 
-Later integrations remain design work, not shipped capability. Their ADRs and test
-matrices must begin with these platform constraints:
+Browser collectors, service methods, Tauri, background lifecycle and production
+distribution remain incomplete. Frontmost normalization/polling and private Unix
+socket admission cores exist, but they do not complete those aggregate integrations.
+Their ADRs and test matrices must begin with these platform constraints:
 
 - A per-user background helper should use Apple's Service Management lifecycle and
   preserve explicit approval, status, registration, unregistration, and denial
@@ -100,8 +103,9 @@ GHOSTRACE makes four choices explicit:
 
 1. **Evidence before narrative.** Explanations cite event IDs and evidence levels;
    they cannot turn missing observations into a story.
-2. **Capture is a capability, not the default.** The first release is fixture-only,
-   local, offline, and capture-disabled while privacy gates are built.
+2. **Capture is a capability, not the default.** Fixture tooling is offline;
+   explicit live commands require their consent/policy boundaries. Ambient
+   capture and production release remain gated.
 3. **Gaps are data.** Coalescing, denial, restart loss, source errors, and queue
    drops are represented so coverage is inspectable.
 4. **Scope is user-facing.** Selected roots, private-context behavior, redaction,

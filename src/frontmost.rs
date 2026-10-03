@@ -1,6 +1,6 @@
 //! Frontmost-application identity and session semantics.
 //!
-//! This is the normalization boundary for a future NSWorkspace activation
+//! This is the normalization boundary used by the opt-in macOS NSWorkspace
 //! adapter. The adapter reads only the bounded facts in
 //! [`FrontmostRawObservation`] from `NSRunningApplication` and the code-signing
 //! API; that type has no field for a window title, document name, URL,

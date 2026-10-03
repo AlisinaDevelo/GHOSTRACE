@@ -33,8 +33,10 @@ What it shows:
 
 The key is kept in the login keychain because the build is not Developer ID
 signed; see [Key custody without Developer ID signing](PRIVACY.md#key-custody-without-developer-id-signing).
-After rebuilding an unsigned binary, macOS asks once whether the new binary may use
-the key, unless you sign builds with `scripts/local-signing.sh`.
+An unsigned rebuild can require approval again. `scripts/local-signing.sh` is
+intended to stabilize access across re-signed rebuilds, but its no-prompt and
+wrong-signature prompt matrix remains unverified under #393; it is not a completed
+Developer ID or production-release path.
 
 ## Using it on your own folders
 
@@ -58,13 +60,14 @@ $G live forget
 $ ghostrace live init --home <workspace>/home
 GHOSTRACE home created at <workspace>/home
 Key custody: login keychain (explicit opt-in for unsigned builds).
-Nothing is recorded until you ask: `ghostrace live consent-shell` then
-`ghostrace run -- <command>`, `ghostrace live watch <folder>`, or
-`ghostrace live git-snapshot`. Never recorded: file contents or readable
+Nothing is recorded until you ask. `ghostrace run -- <command>` requires
+`ghostrace live consent-shell`; `ghostrace live watch <folder>` has its own
+consent preview, and `ghostrace live git-snapshot` is explicitly invoked and
+policy-gated without requiring shell consent. Never recorded: file contents or readable
 file names, command arguments, environment, terminal input or output,
 branch or remote names, or which app made a change.
 
-## 2. Nothing runs through GHOSTRACE until you consent
+## 2. The run wrapper requires persisted shell consent
 $ ghostrace run --home <workspace>/home -- /usr/bin/true
 error: invalid event: `ghostrace run` needs your consent first; run `ghostrace live consent-shell`
 $ ghostrace live consent-shell --home <workspace>/home --yes

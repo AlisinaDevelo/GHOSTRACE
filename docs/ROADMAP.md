@@ -1,7 +1,8 @@
 # GHOSTRACE 2026–2031 program
 
 This engineering and research program runs from 2026-08-23 through
-2031-12-31. It defines 160 planning tasks across 12 milestones. Dates
+2031-12-31. The original baseline defines 160 tasks across 12 milestones;
+the canonical ledger currently includes 174 tasks after follow-up work. Dates
 are planning boundaries, not promises. A milestone closes only when its acceptance
 evidence is current; issue closure, code volume, or a green narrow test is not a
 substitute.
@@ -47,18 +48,21 @@ a pass.
 | M1 | 2027-03-31 | 20 | Typed origins and fields, revocable consent, Keychain lifecycle, hardened SQLite WAL, bounded writer, and crash recovery |
 | M2 | 2027-09-30 | 19 | Selected-root FSEvents with containment, volume-aware cursors, explicit loss, lifecycle recovery, and reproducible benchmarks |
 | M3 | 2028-03-31 | 20 | Snapshot queries, evidence-claim grammar, deterministic explanation, streaming export, retention, deletion limits, and integrity |
-| M4 | 2028-09-30 | 15 | Explicit shell and Git sources, frontmost context, secret-leakage tests, and multi-source workflow evaluation |
+| M4 | 2028-09-30 | 28 | Explicit shell and Git sources, frontmost context, secret-leakage tests, and multi-source workflow evaluation |
 | M5 | 2029-03-31 | 23 | Browser security and pairing, constrained adapters, authenticated local service, accessible UI, and reversible launchd lifecycle |
-| M6 | 2029-08-23 | 14 | v1 release evidence: reproducible universal builds, SBOM and SLSA provenance, notarization, performance, compatibility, red-team, and incident drills |
+| M6 | 2029-08-23 | 15 | v1 release evidence: reproducible universal builds, SBOM and SLSA provenance, notarization, performance, compatibility, red-team, and incident drills |
 | M7 | 2030-02-28 | 7 | v1.1 operational resilience: diagnostics, backup and recovery, annual macOS validation, accessibility, distribution, and telemetry-free support |
 | M8 | 2030-08-31 | 7 | Imported-evidence trust, W3C PROV, bounded offline interoperability, adapter capabilities and conformance, and encrypted bundles |
 | M9 | 2031-02-28 | 7 | Reproducible research on causal precision, coverage, abstention, gap comprehension, privacy leakage, and longitudinal resource cost |
 | M10 | 2031-08-31 | 7 | Governed ecosystem with stable adapter contracts, isolation decision, code admission, revocation, conformance evidence, and security response |
 | M11 | 2031-12-31 | 8 | v2 and LTS decision, format and key migration, verified compaction, independent audit, release-candidate recovery, and 2032 sustainability plan |
 
-The complete task graph is in [the Forge ledger](../.forge/tasks/README.md).
-GitHub mirrors each task as an issue with the same stable ID, milestone, status,
-workstream, priority, risks, native parent relationship, and native blocked-by edges.
+The complete current task graph and counts are in [the Forge ledger](../.forge/tasks/README.md).
+The synchronization contract mirrors task titles, acceptance criteria, milestones,
+status, workstreams, priorities, risks, parent relationships, and blocked-by edges
+to GitHub. Canonical task IDs are not GitHub issue numbers; for example, issue #110
+maps to task 0106. Current remote parity requires the authenticated check described
+below. Planning task counts do not establish completed release gates.
 
 ## Workstreams
 
@@ -71,9 +75,10 @@ reasons, macOS data-protection Keychain behavior, key rotation, no-follow databa
 creation, WAL sidecar policy, migration checksums, cursor monotonicity, and fault
 injection.
 
-Live collection remains refused until the capstone issues for policy, keys, storage,
-writer, and recovery close on their child evidence. A completed fixture demo does
-not satisfy those production gates.
+Ambient `capture` and production-release readiness remain refused until their
+capstone evidence is complete. Explicit selected-root, shell and Git CLI paths
+exist behind their own consent/policy boundaries; they do not satisfy all release
+gates. A completed fixture demo does not substitute for target-device evidence.
 
 ### Filesystem evidence
 
@@ -163,7 +168,9 @@ messages, remote credentials, and raw paths. Task 0094 defines the companion
 path-free identity contract: object-database and worktree device/file identities
 become digests, selected-root and source-scope bindings stay explicit, and move,
 clone, linked-worktree, submodule, bare, and repository-reinitialization continuity
-outcomes are tested offline before any live adapter exists. Task 0095 adds the
+outcomes were first tested offline. The explicit Git snapshot adapter and
+`live git-snapshot` now supply/project that metadata without a remote fetch.
+Task 0095 adds the
 metadata-only snapshot boundary: algorithm-tagged object IDs, bounded status and
 operation classes, branch classes instead of ref names, and explicit limitations
 for partial clones, replace refs, shallow history, submodules, and alternate object
@@ -311,4 +318,4 @@ API provides stronger evidence than documented:
   development and vulnerability-response program.
 
 These sources constrain tasks and decisions. They are not claims that the current
-fixture-only release already implements later milestones.
+incubation source already satisfies later release or research milestones.

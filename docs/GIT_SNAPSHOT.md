@@ -1,6 +1,6 @@
 # Metadata-only Git snapshot contract
 
-Task 0095 defines the privacy boundary for a future explicitly requested Git
+Task 0095 defines the privacy boundary for an explicitly requested Git
 snapshot. The contract is implemented by `GitSnapshotMetadata` and is not a Git
 command runner. It accepts normalized facts only; it has no path, ref name,
 remote, command, object-reader, or file-content input.
@@ -54,7 +54,10 @@ authorization. It must normalize the small field set above, discard all other
 strings and command output, and call `GitSnapshotMetadata::from_identity`. The
 constructor performs no filesystem, Git, network, or object-database I/O, so
 the default read policy is `metadata_only`. The explicit adapter below is the only
-component that runs Git; event projection into the journal is a later step.
+component that runs Git. The user-invoked `live git-snapshot` CLI now validates
+and projects metadata/history gaps into the journal; it is policy-gated but does
+not require the shell consent that `run` requires. The pure metadata type remains
+separate from both command execution and persistence.
 
 The checked-in schema and golden example are
 [`schemas/git-snapshot-metadata-v1.json`](../schemas/git-snapshot-metadata-v1.json)

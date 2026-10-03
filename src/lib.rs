@@ -1,8 +1,10 @@
-//! GHOSTRACE fixture-only vertical slice.
+//! GHOSTRACE local event journal and bounded observation contracts.
 //!
-//! This package intentionally has no live collector, network, telemetry,
-//! screen/audio capture, or keylogging implementation.  The public boundary is
-//! fixture ingestion into an encrypted local SQLite journal.
+//! Fixture tooling and explicitly invoked macOS live sources write to an
+//! encrypted local SQLite journal. Ambient capture, integrated browser/service/UI
+//! collection and signed production distribution remain incomplete. The package
+//! has no network client, telemetry, screen/audio capture or keylogging. The
+//! explicit shell wrapper does not network-sandbox the requested program.
 
 pub mod authenticated;
 pub mod browser_origin;

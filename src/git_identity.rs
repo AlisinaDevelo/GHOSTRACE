@@ -6,7 +6,7 @@
 //! SHA-256 digests.  Remote URLs, credential helpers, config values, reflog
 //! messages, and filesystem paths have no representation in the output type.
 //!
-//! The module is an identity contract for a future Git adapter, not a Git
+//! The module is an identity contract used by the explicit Git adapter, not a Git
 //! command runner.  An adapter may resolve Git's common object directory and
 //! worktree metadata, but it must pass only the resulting device/file
 //! identities here and discard the source strings before persistence.
