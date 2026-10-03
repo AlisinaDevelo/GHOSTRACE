@@ -1,7 +1,7 @@
 # Event model
 
-This document describes the versioned event contract that connects fixtures, future
-source adapters, storage, explanations, and exports. It is a contract for bounded
+This document describes the versioned event contract that connects fixtures,
+explicit source adapters, storage, explanations, and exports. It is a contract for bounded
 observations, not a claim that an observation is a complete causal record.
 
 ## Envelope
@@ -158,7 +158,7 @@ before constructing an identity.
 
 ### Metadata-only Git snapshot
 
-The future explicit Git snapshot adapter uses the separate
+The explicit Git snapshot adapter uses the separate
 [`GitSnapshotMetadata`](GIT_SNAPSHOT.md) contract. It replaces raw ref names with
 a `branch_class`, tags every optional HEAD/tree/index object ID with its SHA-1
 or SHA-256 algorithm, and retains only bounded status and operation classes.
@@ -267,7 +267,7 @@ values, window titles, page contents, file contents, credentials, environment
 variables, command arguments, standard input, or standard output. A future adapter
 must justify every new field in the privacy and threat documents before adding it.
 
-The explicit shell-wrapper proposal follows the same rule. Its standalone v1
+The explicit shell-wrapper contract follows the same rule. Its standalone v1
 metadata schema permits only wrapper session, normalized executable identity,
 sanitized working-directory class/digest, start/end time, outcome, exit code, and
 signal. It has no field for arguments, environment, terminal streams, history,
@@ -283,8 +283,8 @@ existed rejects an envelope that carries them; no such reader has been released.
 
 The companion [`shell-wrapper-lifecycle-v1.json`](../fixtures/shell-wrapper-lifecycle-v1.json)
 fixture tests child status propagation and explicit incomplete-execution gaps for a
-future wrapper. It adds no event fields and does not execute a shipped collector or
-shell executor.
+explicit wrapper. The reference fixture adds no event fields or executor of its
+own; it is separate from the consented `run` implementation.
 
 The companion [`shell-secret-leakage-v1.json`](../fixtures/shell-secret-leakage-v1.json)
 red-team corpus exercises denied shell channels and external OS exposure without

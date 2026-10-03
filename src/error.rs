@@ -132,7 +132,7 @@ pub enum GhostraceError {
     #[error("an origin instance is required to construct an event")]
     OriginInstanceRequired,
 
-    #[error("live capture is intentionally disabled until policy/cursor/Keychain gates land")]
+    #[error("ambient capture is intentionally disabled; explicit macOS live commands have separate consent/policy boundaries")]
     LiveCaptureDisabled,
 
     #[error("unsupported schema version: {0}")]

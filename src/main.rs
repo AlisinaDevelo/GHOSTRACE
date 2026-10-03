@@ -200,9 +200,9 @@ enum Command {
         #[arg(long)]
         export: PathBuf,
     },
-    /// Print the strict v1 metadata schema for a future explicit shell wrapper.
+    /// Print the strict v1 metadata schema for the explicit shell wrapper.
     ShellSchema,
-    /// Live capture is intentionally unavailable in this vertical slice.
+    /// Ambient capture remains disabled; explicit macOS live commands are separate.
     Capture,
 }
 
