@@ -11,7 +11,8 @@ when they broaden collection by default.
 2. Check open issues and the [roadmap](docs/ROADMAP.md).
 3. For a material design change, open a proposal issue before implementing it.
 
-The initial code path is fixture-only. Do not enable ambient capture, request a new
+The source includes fixture tooling and explicitly enabled local live paths.
+Do not enable ambient capture, request a new
 macOS permission, add a network client, or add a sensitive field as an incidental
 part of another change.
 

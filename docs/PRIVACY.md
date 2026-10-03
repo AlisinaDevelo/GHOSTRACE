@@ -28,12 +28,12 @@ These are product boundaries, not suggestions for a future configuration screen.
 | Data class | Purpose | Default state | Retention rule |
 | --- | --- | --- | --- |
 | Synthetic fixture event | Exercise parsing, explanation, and export | Allowed in developer headstart | Checked-in fixtures must contain no user data |
-| Event ID, schema version, source, kind, timestamps, and policy ID/version | Identify, order, and audit the policy that accepted an observation | Fixture-only now; live only after policy | Bounded by the journal policy |
-| Source cursor and status | Describe coverage and restart state | Not ambiently collected now | Persist with the event when live capture ships |
-| Selected path metadata | Describe a permitted filesystem change without reading content | Explicit selected-root API only | Canonicalized, policy-checked, hashed, and bounded before persistence |
-| Policy decision and reason | Explain why an observation was accepted, denied, or redacted | Required for live design | No blocked sensitive value is retained |
+| Event ID, schema version, source, kind, timestamps, and policy ID/version | Identify, order, and audit the policy that accepted an observation | Fixtures and explicitly enabled live sources after policy | Bounded by the journal policy |
+| Source cursor and status | Describe coverage and restart state | Explicit selected-root collection only | Persist transactionally with the admitted batch |
+| Selected path metadata | Describe a permitted filesystem change without reading content | Explicit selected-root API/CLI only | Canonicalized, policy-checked, hashed, and bounded before persistence |
+| Policy decision and reason | Explain why an observation was accepted, denied, or redacted | Required before explicit live persistence | No blocked sensitive value is retained |
 | Evidence level and gap | Express what the source supports and what it cannot | Part of the event contract | First-class records |
-| Payload | Carry the minimum normalized source facts | Fixture-only plaintext may be shown by an explicit command | Production payloads require Keychain-backed authenticated encryption |
+| Payload | Carry the minimum normalized source facts | Explicit fixture/live reads and export only | Live payloads use login-Keychain-backed authenticated encryption; signed data-protection release remains a separate gate |
 | Export | Give the user a requested portable view | Explicit command only | Written to the destination chosen by the user |
 
 The exact fields are versioned in [EVENT_MODEL.md](EVENT_MODEL.md). A field is not
@@ -263,7 +263,8 @@ unknown source conditions remain explicit `unknown` limitations.
 
 ## Retention and deletion
 
-The fixture headstart has no ambient retention burden. The read-only
+No source is enabled ambiently. Explicit live recordings do create retention
+responsibilities; exports/backups remain independent copies. The read-only
 `retention-plan` command is the first retention boundary: its documented default
 is observations older than 90 days, anchored at an explicit UTC `as_of` time. A
 caller can instead supply a UTC cutoff, source, opaque filesystem root, maximum

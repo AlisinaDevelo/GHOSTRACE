@@ -33,8 +33,10 @@ What it shows:
 
 The key is kept in the login keychain because the build is not Developer ID
 signed; see [Key custody without Developer ID signing](PRIVACY.md#key-custody-without-developer-id-signing).
-After rebuilding an unsigned binary, macOS asks once whether the new binary may use
-the key, unless you sign builds with `scripts/local-signing.sh`.
+An unsigned rebuild can require approval again. `scripts/local-signing.sh` is
+intended to stabilize access across re-signed rebuilds, but its no-prompt and
+wrong-signature prompt matrix remains unverified under #393; it is not a completed
+Developer ID or production-release path.
 
 ## Using it on your own folders
 

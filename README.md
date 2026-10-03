@@ -9,11 +9,13 @@ GHOSTRACE is a local macOS event provenance journal. It records bounded,
 user-authorized evidence about changes—not everything a person does—and explains
 which observations support each sequence.
 
-> **Status:** incubation / M2 selected-root collector API headstart (0.0.1). The API
-> requires an explicit consent confirmation and writes only bounded filesystem metadata through the
-> existing writer; the ambient `capture` command remains intentionally disabled until
-> path-race containment, cursor recovery, and release gates are complete. This
-> repository makes no legal chain-of-custody claim.
+> **Status:** incubation (0.0.1), with fixture tooling and explicit local macOS CLI
+> surfaces. Consented commands can watch one selected folder, wrap one requested
+> command, snapshot one Git repository, and export or report the local journal.
+> Frontmost-app recording is an opt-in build feature with incomplete lifecycle
+> coverage. Ambient `capture`, browser collection, Tauri, launchd, and signed/notarized
+> distribution remain unavailable. This is not a production-release or legal
+> chain-of-custody claim.
 
 ## Product boundary
 
@@ -36,8 +38,10 @@ current limits.
 
 ## Ten-minute demo
 
-The current vertical slice is offline and fixture-driven. It does not ask for macOS
+This demo is offline and fixture-driven. It does not ask for macOS
 permissions, start a collector, contact a service, or upload data.
+It uses Rust 1.88.0 and `jq` to read explicit confirmation receipts. For the
+separate user-invoked macOS surfaces, see [the live demo](docs/DEMO.md).
 
 ~~~sh
 git clone https://github.com/AlisinaDevelo/GHOSTRACE.git
@@ -76,12 +80,14 @@ cargo +1.88.0 run -- retention-plan \
 # Apply only the exact confirmed scope printed by retention-plan. This is a
 # logical deletion; it does not compact SQLite or remove external copies.
 # Set the three confirmation variables from the matching JSON receipt above.
-cargo +1.88.0 run -- retention-delete \
-  --journal "$JOURNAL" \
-  --before 2026-01-01T00:00:08Z \
-  --confirm-plan "$PLAN_DIGEST" \
-  --confirm-candidate-set "$CANDIDATE_SET_DIGEST" \
-  --confirm-snapshot-boundary "$SNAPSHOT_BOUNDARY"
+# Optional deletion, after setting the confirmation variables; leave commented
+# to preserve the example events for the explanation/export below.
+# cargo +1.88.0 run -- retention-delete \
+#   --journal "$JOURNAL" \
+#   --before 2026-01-01T00:00:08Z \
+#   --confirm-plan "$PLAN_DIGEST" \
+#   --confirm-candidate-set "$CANDIDATE_SET_DIGEST" \
+#   --confirm-snapshot-boundary "$SNAPSHOT_BOUNDARY"
 
 # Run bounded SQLite integrity and foreign-key checks. A failed check is a
 # recovery stop signal, not an automatic repair request.
@@ -111,10 +117,20 @@ cargo +1.88.0 run -- recovery-demo
 cargo +1.88.0 run -- residue-report \
   --journal "$JOURNAL"
 
-# Export a user-requested, local JSONL view. Existing files are protected.
+# Preview the plaintext transition, then bind export to those exact digests.
+# The export is synthetic and stays inside this temporary demo directory.
+EXPORT="$JOURNAL_DIR/export.jsonl"
+cargo +1.88.0 run -- preview \
+  --journal "$JOURNAL" \
+  --output "$EXPORT" | tee "$JOURNAL_DIR/preview.json"
+EXPORT_PLAN=$(jq -r .plan_digest "$JOURNAL_DIR/preview.json")
+EXPORT_SNAPSHOT=$(jq -r .snapshot_digest "$JOURNAL_DIR/preview.json")
 cargo +1.88.0 run -- export \
   --journal "$JOURNAL" \
-  --output /tmp/ghostrace-export.jsonl
+  --output "$EXPORT" \
+  --confirm-plan "$EXPORT_PLAN" \
+  --confirm-snapshot "$EXPORT_SNAPSHOT"
+cargo +1.88.0 run -- validate --export "$EXPORT"
 
 # The baseline refuses ambient capture by design.
 if cargo +1.88.0 run -- capture; then
@@ -132,9 +148,9 @@ available as an in-memory shortcut. The durable CLI path uses a deterministic
 synthetic key only for this fixture-only headstart; it is not a production
 encryption or key-management claim.
 
-## What is shipped now
+## What is implemented now
 
-| Surface | M0 status |
+| Surface | Current state |
 | --- | --- |
 | Fixture JSONL ingestion and validation | Available for the developer headstart |
 | ghostrace init --journal <path> | Available; creates an idempotent durable fixture journal |
@@ -157,13 +173,17 @@ encryption or key-management claim.
 | ghostrace parquet-profile | Available; prints and validates the strict v1 profile for the derived Parquet archive |
 | ghostrace archive --export ... --output ... --yes | Opt-in (`--features parquet`); writes a plaintext Parquet cold archive from a validated JSONL export, reads it back and compares every record before an atomic 0600 publish, and never replaces an existing file |
 | ghostrace verify-archive --archive ... --export ... | Opt-in; rechecks an archive against its footer digests and its source export |
-| ghostrace shell-schema | Available; prints the strict v1 metadata-only contract for a future explicit shell wrapper; no shell is executed |
+| ghostrace shell-schema | Available; prints the strict v1 metadata-only contract; this schema command executes no shell |
+| ghostrace live init / status / timeline / explain / forget | Available on macOS; an explicitly created private home with encrypted payloads and opt-in login-Keychain custody, bounded reads, and confirmed deletion |
+| ghostrace live watch <folder> [--seconds N] [--yes] | Available on macOS after a consent preview; observes only the requested root until the deadline or Ctrl-C, with source gaps and internal-output suppression; not ambient capture |
+| ghostrace run -- <program> [args...] | Available on macOS after persisted revocable shell consent; deliberately runs one requested program and records only bounded identity/timing/outcome metadata |
+| ghostrace live git-snapshot <repository> | Available on macOS; explicitly runs hardened read-only Git plumbing and projects bounded metadata/history limits into the journal; no remote fetch |
 | ghostrace live report --output ... [--yes] | Available on macOS; writes the timeline as one offline HTML file (no scripts, fonts, or links; a CSP forbids loads) with gaps, abstentions, and evidence levels drawn distinctly; 0600, never overwrites, never inside the home |
 | ghostrace live export --output ... [--parquet ...] [--yes] | Available on macOS; exports the live journal through the same preview and confirmation as the fixture export, and with `--features parquet` also writes a verified Parquet archive; never inside the home, never overwrites, and never observed by a running watch |
 | ghostrace live apps [--seconds N] [--exclude ID] [--yes] | Opt-in (`--features frontmost`), macOS; after a consent preview, records which application is in front with its bundle ID, developer-set name and version, and dwell time; password managers and `--exclude` IDs are withheld; an observed login window is a coverage boundary, but sleep/wake and complete lock-lifecycle integration remain incomplete (#392) |
 | ghostrace live consent-shell / revoke-shell | Available on macOS; persisted, revocable consent that `ghostrace run` requires before it starts anything |
 | ghostrace capture | Refuses by design |
-| Local journal and bounded durable writer | Scaffolded for the fixture path; live ingestion is gated |
+| Local journal and bounded durable writer | Implemented for fixture and explicit live paths; authenticated v1 writes still scan the stored snapshot (#403), so large-journal write cost is not resolved |
 | Selected-root FSEvents collector API | Available only behind explicit consent; no ambient CLI |
 | Storm/lifecycle corpus and native-safe macOS receipt | Available as a bounded test contract; sleep/wake, logout, and volume detach are explicit no-go rows |
 | Reproducible filesystem benchmark corpus | Available as an offline synthetic workload contract; native results require the named macOS device and retain observed gaps/failures |
@@ -175,22 +195,23 @@ encryption or key-management claim.
 | Export schema and manifest registry | Available as six strict v1 contracts with stable IDs, golden examples, version declarations, fail-closed streaming validation for mixed versions, counts, bytes, and body digests, and bounded record/metadata limits |
 | Derived Parquet archive profile | Available as a strict, lossless 23-column v1 contract with explicit gap/provenance/policy mappings, additive-nullable evolution gates, bounded rows/metadata, and privacy-safe storage defaults; the opt-in writer follows it exactly |
 | Explicit shell metadata schema | Available as a strict v1 contract for wrapper session, executable identity, sanitized working-directory identity, timing, outcome, exit code, and signal; raw command state is structurally rejected |
-| Shell wrapper lifecycle contract | Available as synthetic reference tests for child status propagation and explicit incomplete-execution gaps; no shell executor is shipped |
-| Shell secret-leakage red-team contract | Available as synthetic negative tests for metadata, journal, diagnostics, exports, panic output, and documented OS exposure; no shell capture is shipped |
-| Git repository/worktree identity contract | Available as a path-free metadata contract with object-database/worktree digests, selected-root/source-scope binding, and move/clone/linked-worktree/submodule/bare/reinitialization continuity tests; no Git command runner or remote access is shipped |
+| Shell wrapper lifecycle contract | Synthetic reference tests plus the explicit run wrapper; child status propagation and incomplete-execution gaps do not authorize ambient shell/terminal collection |
+| Shell secret-leakage red-team contract | Synthetic negative tests for metadata, journal, diagnostics, exports, panic output, and documented OS exposure; arguments/environment/streams are not retained by the explicit wrapper |
+| Git repository/worktree identity contract | Path-free metadata and continuity tests; the explicit snapshot adapter supplies the metadata without remote access or content reads |
 | Metadata-only Git snapshot contract | Available as a strict algorithm-aware SHA-1/SHA-256 snapshot boundary with bounded status/operation facts and explicit partial-history, replace-ref, shallow, submodule, and alternate-object-database limitations; no object content is read |
-| Explicit Git snapshot adapter | Available as a policy-gated library adapter that runs hardened read-only Git plumbing for one requested repository and returns only the metadata-only snapshot; repository hooks, fsmonitor, filters, pagers, and transports are disabled; no journal projection or CLI yet |
+| Explicit Git snapshot adapter | Policy-gated library plus live git-snapshot projection; repository hooks, fsmonitor, filters, pagers, and transports are disabled |
 | Repository-local Git hook lifecycle | Available as a library manager with plan, install/upgrade, verify, disable/enable, and digest-checked uninstall; foreign hooks, `core.hooksPath` managers, symlinks, drift, and concurrent edits are refused |
-| Explicit shell run wrapper | Available as a consent-gated library adapter; records executable basename token, working-directory class/digest, timing, and outcome for one deliberately wrapped command; arguments, environment, and terminal streams are never retained; no CLI command yet |
+| Explicit shell run wrapper | Consent-gated library and run CLI; records executable basename token, working-directory class/digest, timing, and outcome for one deliberately wrapped command; arguments, environment, and terminal streams are never retained |
 | Frontmost-app identity and session contract | Available as a strict normalization boundary for bundle ID, signing class, app kind/location, salted launch instance, and session dwell/transient semantics; titles, documents, URLs, accessibility, menus, and screen content are structurally absent; the developer-set bundle name and version are kept when plain and bounded |
 | NSWorkspace frontmost-app adapter | Opt-in (`--features frontmost`); polls on the main thread with no Accessibility or Screen Recording permission; recorded by `ghostrace live apps` |
 | Ambient shell, Git, frontmost-app, or browser collectors | Not shipped |
 | Permission drift gate | Available as a reviewed manifest of entitlements, linked libraries, privacy-sensitive APIs, and network capability, checked against the signed release binary in macOS CI; new or broadened permissions fail until review evidence is updated |
-| macOS Keychain-backed production encryption | Not shipped |
+| macOS Keychain-backed encryption | Explicit live CLI uses login-Keychain custody; data-protection provider exists but signed/entitled production distribution and full device acceptance remain release gates |
 | Signed/notarized release artifacts | Not shipped |
 
-The roadmap is a plan, not a promise. A capability is shipped only when its privacy,
-failure, and coverage tests are present.
+Source availability is not release readiness. The roadmap is a plan, not a
+promise; each issue/gate requires its own privacy, failure, coverage and target
+evidence. Component cores do not imply shipped browser, service or UI integration.
 
 ### Temporal ordering contract
 
@@ -256,18 +277,20 @@ The Git identity headstart is similarly bounded. `GitIdentity` retains only
 object-database/worktree digests, an opaque selected-root ID, source scope, and
 repository kind. It classifies moves, clones, linked worktrees, submodules, bare
 repositories, and reinitialization without retaining remote URLs, credentials,
-configuration, reflog messages, or paths. It is a contract for a future explicit Git
-adapter; no Git command runner, remote access, or authorship/causality claim is shipped.
+configuration, reflog messages, or paths. The explicit snapshot adapter supplies
+that metadata through read-only Git commands; it does not fetch remotes or
+establish authorship, actor attribution or causality.
 
 ## Trust contract
 
 GHOSTRACE is designed around a narrow local boundary:
 
 - **Local-only:** source inspection of current product and runtime paths finds no
-  network client, telemetry, cloud sync, URL fetching, or silent upload path. Task
-  0044 must make that boundary independently enforceable in CI before it becomes
-  release evidence. The separate maintainer-only roadmap synchronizer invokes `gh`
-  only when an operator explicitly runs its GitHub commands.
+  network client, telemetry, cloud sync, URL fetching, or silent upload path. The
+  separate maintainer-only roadmap synchronizer invokes `gh`
+  only when an operator explicitly runs its GitHub commands. The checked-in
+  network-denied runner verifies direct IP denial while preserving Unix IPC;
+  local proxy containment is outside that guarantee (see ADR 0004).
 - **User-authorized:** the selected-root collector requires explicit consent, selected
   scope, and a versioned policy. No event is retained before policy evaluation.
 - **Minimized:** the baseline records bounded metadata about changes. It does not
@@ -286,8 +309,10 @@ GHOSTRACE is designed around a narrow local boundary:
 The initial product does **not** use keylogging, microphones, screen recording,
 clipboard capture, window titles, page contents, or private-browsing data by default.
 It does not require root, Full Disk Access, Accessibility, or Automation permissions.
-No silent upload mechanism exists in the current source; the planned network-denial
-CI lane will continuously verify that boundary.
+No silent upload mechanism exists in the current source; the checked-in
+network-denied runner verifies the fixture/product path without direct IP
+networking. It does not prove isolation from a malicious same-user proxy or a
+compromised host.
 
 FSEvents is a change-notification source, not a complete process-attributed causal
 trace. It can omit, coalesce, reorder, or delay observations. Endpoint Security is
@@ -339,7 +364,7 @@ docs/adr/            Immutable architecture decisions
 - [Research](docs/RESEARCH.md) — landscape, differentiation, and primary sources
 - [Identity gate](docs/IDENTITY.md) — qualified descriptor, release identifiers, and legal-review boundary
 - [Platform](docs/PLATFORM.md) — macOS boundary and permission policy
-- [Roadmap](docs/ROADMAP.md) — 160 tasks across M0 through M11, August 2026–December 2031
+- [Roadmap](docs/ROADMAP.md) — 160-task baseline plus follow-up tasks across M0 through M11, August 2026–December 2031; current graph/counts are in the canonical ledger
 - [ADR 0001](docs/adr/0001-local-only-minimized-capture.md) — local-only minimized capture
 - [ADR 0002](docs/adr/0002-fsevents-before-endpoint-security.md) — FSEvents before Endpoint Security
 - [ADR 0003](docs/adr/0003-sqlite-wal-active-journal.md) — SQLite WAL active journal

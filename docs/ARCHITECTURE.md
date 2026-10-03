@@ -1,8 +1,9 @@
 # Architecture
 
 GHOSTRACE is a local, modular Rust application with a deliberately narrow data
-path. The public slice replays synthetic JSONL fixtures and now contains an explicitly
-enabled selected-root FSEvents source. Ambient CLI capture remains disabled until the
+path. The public source includes synthetic fixture tooling and user-invoked
+macOS commands for selected-root FSEvents, shell wrapping, Git snapshots, and
+explicit export/report. Ambient CLI capture remains disabled until the
 remaining path-policy, recovery, and release gates pass.
 
 GHOSTRACE is the event-observation and explanation layer in the portfolio. It does
@@ -14,7 +15,8 @@ are separate product boundaries; see [Product boundaries](BOUNDARIES.md).
 ~~~text
 source adapter
   ├─ fixture JSONL (current)
-  └─ explicitly enabled selected-root FSEvents source (current API)
+  ├─ explicitly consented selected-root FSEvents (API and CLI)
+  └─ requested shell/Git context; opt-in frontmost context
         │
         v
 bounded normalization
@@ -71,8 +73,10 @@ therefore exercise the persistence boundary rather than an in-memory shortcut.
 digests match the explicit confirmation from the preview. The receipt records only
 the destination class and artifact digests, never the destination path.
 The key is intentionally deterministic only for the synthetic headstart; it is not
-the production Keychain design. `capture` remains an explicit refusal, and no CLI
-command enables a live collector or network path.
+the production Keychain design. These fixture commands are distinct from `live`
+and `run`, whose explicit commands use login-Keychain custody and versioned policy.
+`capture` remains an explicit refusal. GHOSTRACE has no network client; deliberately
+wrapped programs are not network-sandboxed by `run`.
 
 ## Checkpoint and repair boundary
 
@@ -220,8 +224,9 @@ cleared environment and null standard streams, then returns the native child exi
 code or signal unchanged. It exercises normal and non-zero exits, shell built-ins,
 pipelines, timeout, cancellation, and exec failure. Terminal closure and wrapper
 crash are represented as explicit gaps with no completion, end time, exit code, or
-success status. This is a test contract only: GHOSTRACE does not ship a shell
-executor, PTY, terminal collector, or command capture path.
+success status. The reference harness is not a terminal collector: the separate
+explicit `run` wrapper implements deliberately requested program execution, with
+no PTY or ambient command/terminal collection.
 
 ### Explicit shell run wrapper
 
@@ -650,14 +655,14 @@ pages, in addition to the matching-row count used to detect retention deletion.
 
 | Component | Responsibility | Current state |
 | --- | --- | --- |
-| CLI | Parse commands, print structured results, and surface refusal reasons | Fixture commands available; capture refuses |
+| CLI | Parse commands, print structured results, and surface refusal reasons | Fixture tooling plus explicit live/run commands; ambient capture refuses |
 | Fixture adapter | Read synthetic JSONL and validate the event contract | Available |
-| Source adapters | Translate bounded platform observations into the envelope | Live adapters not shipped |
-| Policy gate | Apply consent, selected scope, exclusions, private-context rules, and redaction | Required before live capture |
+| Source adapters | Translate bounded platform observations into the envelope | Explicit selected-root, shell and Git paths; optional frontmost path with incomplete lifecycle coverage; browser/Endpoint Security remain unimplemented |
+| Policy gate | Apply consent, selected scope, exclusions, private-context rules, and redaction | Implemented and required before explicit live persistence; no ambient grant |
 | Event envelope | Preserve source facts, provenance, evidence level, and schema version | Versioned contract is documented; journal ingestion requires an origin capability |
-| Ingest writer | Bound memory, serialize writes, and commit event, cursor, policy reference, and diagnostics atomically | Bounded fixture writer is implemented and tested; live gate remains |
-| Journal | Store local event metadata and encrypted payloads when the production key path exists | SQLite/WAL design documented; cursor contract migrations 0003–0004 and durable replay-boundary writes are implemented; Keychain production path not shipped |
-| Explain/export | Produce deterministic evidence-linked explanations and explicit exports | Fixture surface available |
+| Ingest writer | Bound memory, serialize writes, and commit event, cursor, policy reference, and diagnostics atomically | Implemented for fixture and explicit live paths; large-journal authenticated-write cost remains open (#403) |
+| Journal | Store local event metadata and encrypted payloads | SQLite/WAL, migrations, replay boundaries and authenticated state implemented; explicit live path uses login Keychain, not a signed production data-protection release |
+| Explain/export | Produce deterministic evidence-linked explanations and explicit exports | Fixture and explicit live surfaces, preview-bound JSONL, optional Parquet and offline HTML |
 | Query | Return bounded, policy-scoped pages from a stable logical ingest snapshot | Encrypted-token pagination is implemented and covered by concurrent-ingest, deletion, token-negative, and migration tests |
 
 ## Event lifecycle
@@ -681,8 +686,10 @@ pages, in addition to the matching-row count used to detect retention deletion.
 
 ## Storage boundary
 
-The active journal is planned as one local SQLite database in WAL mode with one
-writer and read-only readers. Its ordered migration catalog records each SQL
+Each active journal is one local SQLite database in WAL mode, with serialized
+write transactions and snapshot readers. A central service owning all CLI/UI
+writes remains future work; SQLite coordinates separate explicit CLI processes.
+Its ordered migration catalog records each SQL
 identifier, checksum, resulting schema version, tool version, and application time
 before the journal is considered open. A missing, modified, reordered, future,
 partially applied, or downgraded migration refuses startup; legacy v1 journals are
@@ -696,9 +703,10 @@ snapshots, observable passive/truncate checkpoints, and refusal when remaining
 frames or sidecar bytes exceed the configured limit. A database snapshot is made
 only after a truncate checkpoint and never by copying a `-wal` or `-shm` file.
 
-Production sensitive payloads require authenticated encryption with a macOS Keychain
-backing key. That key path is not represented as shipped live-capture capability in
-the current headstart. Missing keys or failed authentication must fail closed.
+Explicit live payloads use authenticated encryption with a login-Keychain backing
+key. The data-protection provider remains the default library custody choice,
+but signed/entitled production distribution is not complete. Missing keys or
+failed authentication fail closed; login custody is not an implicit fallback.
 
 Payload bytes are now stored in a versioned `GRCE` envelope that records the cipher
 algorithm, positive key generation, nonce, and authenticated ciphertext without ever
