@@ -1,7 +1,7 @@
 ---
 id: 0103
 title: Version and bound the native-messaging protocol
-status: backlog
+status: in-progress
 agent: api-designer
 model: human
 release: M5

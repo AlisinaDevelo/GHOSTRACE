@@ -5,6 +5,12 @@ fuzz_seconds="${FUZZ_SECONDS:-60}"
 timeout_seconds="${FUZZ_TIMEOUT_SECS:-2}"
 rss_megabytes="${FUZZ_RSS_MB:-256}"
 max_len="${FUZZ_MAX_LEN:-65536}"
+target_triple="${FUZZ_TARGET_TRIPLE:-}"
+build_dir="${FUZZ_BUILD_DIR:-fuzz/target}"
+if [ -z "$target_triple" ]; then
+    target_triple="$(rustc -vV | sed -n 's/^host: //p')"
+fi
+test -n "$target_triple"
 
 targets='frame_decoder schema_parser origin_validation pairing_state sequence_handling policy_conversion transport_differential'
 
@@ -15,7 +21,11 @@ for target in $targets; do
         target_max_len=131080
     fi
     log_path="fuzz/artifacts/${target}.log"
-    cargo fuzz run "$target" -- \
+    campaign_corpus="fuzz/artifacts/corpus/$target"
+    mkdir -p "$campaign_corpus"
+    cp -R "fuzz/corpus/$target/." "$campaign_corpus/"
+    cargo fuzz run "$target" "$campaign_corpus" \
+        --target "$target_triple" --target-dir "$build_dir" -- \
         -max_total_time="$fuzz_seconds" \
         -timeout="$timeout_seconds" \
         -rss_limit_mb="$rss_megabytes" \

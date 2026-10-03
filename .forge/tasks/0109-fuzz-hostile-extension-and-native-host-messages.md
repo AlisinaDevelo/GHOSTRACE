@@ -1,7 +1,7 @@
 ---
 id: 0109
 title: Fuzz hostile extension and native-host messages
-status: backlog
+status: in-progress
 agent: test-engineer
 model: human
 release: M5

@@ -247,7 +247,8 @@ pub use native_transport::{
     encode_chromium_stream, encode_safari_envelope, normalize_chromium_stream,
     normalize_safari_envelope, validate_chromium_caller_origin, validate_safari_identity,
     NativeTransportError, NormalizedTransportFrame, SafariTransportEnvelope, TransportIdentity,
-    MAX_SAFARI_ID_BYTES, SAFARI_TRANSPORT_SCHEMA_VERSION,
+    MAX_CHROMIUM_STREAM_BYTES, MAX_CHROMIUM_STREAM_FRAMES, MAX_SAFARI_ID_BYTES,
+    SAFARI_TRANSPORT_SCHEMA_VERSION,
 };
 pub use ordering::{
     analyze_temporal_observations, compare_event_order, StableOrderKey, TemporalAnalysis,

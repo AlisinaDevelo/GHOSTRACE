@@ -5,9 +5,10 @@
 //! envelopes deliver the same protocol body and identity shape.
 
 use ghostrace::{
-    encode_chromium_stream, encode_safari_envelope, normalize_chromium_stream,
+    encode_chromium_stream, encode_frame, encode_safari_envelope, normalize_chromium_stream,
     normalize_safari_envelope, validate_chromium_caller_origin, NativeMessagingError,
-    NativeTransportError, TransportIdentity, MAX_NATIVE_FRAME_BYTES,
+    NativeTransportError, TransportIdentity, MAX_CHROMIUM_STREAM_BYTES, MAX_CHROMIUM_STREAM_FRAMES,
+    MAX_NATIVE_FRAME_BYTES,
 };
 use serde::Deserialize;
 
@@ -85,7 +86,7 @@ fn chromium_fixture_drains_many_frames_incrementally() {
 }
 
 #[test]
-fn Chromium_stream_rejects_bad_origin_and_truncation() {
+fn chromium_stream_rejects_bad_origin_and_truncation() {
     assert_eq!(
         validate_chromium_caller_origin("chrome-extension://not-an-id/"),
         Err(NativeTransportError::InvalidChromiumOrigin)
@@ -99,7 +100,42 @@ fn Chromium_stream_rejects_bad_origin_and_truncation() {
 }
 
 #[test]
-fn Safari_envelope_rejects_unknown_fields_versions_and_identities() {
+fn chromium_stream_limits_cover_encode_and_normalize_collection() {
+    let too_many =
+        (0..=MAX_CHROMIUM_STREAM_FRAMES).map(|seq| heartbeat(seq as u64)).collect::<Vec<_>>();
+    let too_many_references = too_many.iter().map(Vec::as_slice).collect::<Vec<_>>();
+    assert_eq!(
+        encode_chromium_stream(&too_many_references),
+        Err(NativeTransportError::ChromiumStreamTooManyFrames)
+    );
+
+    let maximal_body = vec![b'x'; MAX_NATIVE_FRAME_BYTES];
+    let too_many_bytes =
+        vec![maximal_body.as_slice(); MAX_CHROMIUM_STREAM_BYTES / (MAX_NATIVE_FRAME_BYTES + 4) + 1];
+    assert_eq!(
+        encode_chromium_stream(&too_many_bytes),
+        Err(NativeTransportError::ChromiumStreamTooLarge)
+    );
+
+    let oversized_input = vec![0u8; MAX_CHROMIUM_STREAM_BYTES + 1];
+    assert_eq!(
+        normalize_chromium_stream(&oversized_input, CHROMIUM_ORIGIN),
+        Err(NativeTransportError::ChromiumStreamTooLarge)
+    );
+
+    let mut many_frames = Vec::new();
+    for seq in 0..=MAX_CHROMIUM_STREAM_FRAMES {
+        many_frames.extend(encode_frame(&heartbeat(seq as u64)).expect("fixture frame"));
+    }
+    assert!(many_frames.len() <= MAX_CHROMIUM_STREAM_BYTES);
+    assert_eq!(
+        normalize_chromium_stream(&many_frames, CHROMIUM_ORIGIN),
+        Err(NativeTransportError::ChromiumStreamTooManyFrames)
+    );
+}
+
+#[test]
+fn safari_envelope_rejects_unknown_fields_versions_and_identities() {
     let body = heartbeat(2);
     let encoded = encode_safari_envelope(SAFARI_BUNDLE, SAFARI_PROFILE, &body).expect("envelope");
     let mut unknown = String::from_utf8(encoded).expect("UTF-8 envelope");

@@ -15,9 +15,11 @@ Targets:
 - `origin_validation` — Chromium caller-origin and bounded Safari identity
   validation.
 - `pairing_state` — pairing identity, digest, revocation, and admission
-  decisions against a fixed synthetic approved record.
+  decisions against a fixed synthetic approved record, with exact refusal
+  oracles and cross-session/body/sequence MAC rejection assertions.
 - `sequence_handling` — hello-first, sequence replay/gap handling, ingress
-  rate admission, and idle deadline state.
+  rate admission, and idle deadline state, with independent acceptance, gap,
+  replay, timeout and shutdown assertions.
 - `policy_conversion` — hostile URL conversion and policy decision records.
 - `transport_differential` — equal protocol bodies through the pure Chromium
   frame and Safari-shaped envelope fixtures.
@@ -41,10 +43,21 @@ The wrapper defaults to one 60-second run per target, one libFuzzer worker,
 input. `frame_decoder` uses its explicit 131080-byte decoder-buffer bound.
 Override `FUZZ_SECONDS`, `FUZZ_TIMEOUT_SECS`, `FUZZ_RSS_MB`, and
 `FUZZ_MAX_LEN` only when the receipt records the changed values. The script
-keeps all generated artifacts below ignored `fuzz/artifacts/`.
+keeps logs and a copy of each campaign corpus below ignored `fuzz/artifacts/`;
+mutation never changes the checked-in seeds. It selects the Rust compiler's
+host target, not the architecture of the `cargo-fuzz` tool binary.
+`FUZZ_TARGET_TRIPLE` and `FUZZ_BUILD_DIR` can override the target and build-cache
+path; record both in the receipt. Use an installed nightly Rust toolchain (for
+example through `RUSTUP_TOOLCHAIN`) and record its exact version.
 
 The campaign has not been run for this candidate branch. Building a fuzz crate
 is not a campaign and is not reported as one.
+
+Dependencies are pinned by `fuzz/Cargo.lock`. Check the unpublished harness
+against the production policy with `cd fuzz && cargo deny --locked --offline
+--config ../deny.toml check bans licenses sources`. The crate/version-scoped
+NCSA exception covers only `libfuzzer-sys` 0.4.13; production allowances are
+unchanged.
 
 ## Required receipt
 

@@ -93,17 +93,39 @@ impl FrameDecoder {
         Self::default()
     }
 
-    /// Append received bytes. The buffer never holds more than one prefix and
-    /// one maximum-size body.
+    /// Append received bytes. The buffer never exceeds the bounded decoder
+    /// window, including its allocated capacity.
     pub fn push(&mut self, bytes: &[u8]) -> Result<(), NativeMessagingError> {
-        // Inspect a complete prefix, including one split across this chunk,
-        // before extending the buffer. A hostile length therefore cannot make
-        // us buffer a large chunk merely to discover that its body is refused.
-        pending_frame_length(&self.buffer, bytes)?;
         // Never hold more than two maximal frames, whatever the chunk size or
         // decoder state; the caller drains complete frames between pushes.
-        if self.buffer.len().saturating_add(bytes.len()) > MAX_NATIVE_DECODER_BUFFER {
+        let new_len =
+            self.buffer.len().checked_add(bytes.len()).ok_or(NativeMessagingError::BufferFull)?;
+        if new_len > MAX_NATIVE_DECODER_BUFFER {
             return Err(NativeMessagingError::BufferFull);
+        }
+        // Reject the complete chunk's resource budget before inspecting its
+        // prefix. Neither check allocates or retains an untrusted body.
+        pending_frame_length(&self.buffer, bytes)?;
+        // `extend_from_slice` is permitted to grow geometrically. Choose a
+        // bounded geometric target ourselves, then reserve that exact target
+        // fallibly so growth remains amortized without ever jumping over the
+        // advertised decoder bound.
+        if self.buffer.capacity() > MAX_NATIVE_DECODER_BUFFER {
+            return Err(NativeMessagingError::BufferFull);
+        }
+        if self.buffer.capacity() < new_len {
+            let target_capacity = self
+                .buffer
+                .capacity()
+                .saturating_mul(2)
+                .max(new_len)
+                .min(MAX_NATIVE_DECODER_BUFFER);
+            let additional = target_capacity
+                .checked_sub(self.buffer.len())
+                .ok_or(NativeMessagingError::BufferFull)?;
+            self.buffer
+                .try_reserve_exact(additional)
+                .map_err(|_| NativeMessagingError::BufferFull)?;
         }
         self.buffer.extend_from_slice(bytes);
         Ok(())
@@ -130,6 +152,17 @@ impl FrameDecoder {
         } else {
             Err(NativeMessagingError::Truncated)
         }
+    }
+
+    /// Whether bytes remain buffered after the last complete frame.
+    pub fn has_buffered_data(&self) -> bool {
+        !self.buffer.is_empty()
+    }
+
+    /// Current allocation capacity, exposed so resource-bound tests can pin the
+    /// distinction between buffered length and allocated capacity.
+    pub fn buffered_capacity(&self) -> usize {
+        self.buffer.capacity()
     }
 }
 
@@ -169,7 +202,10 @@ pub fn encode_frame(body: &[u8]) -> Result<Vec<u8>, NativeMessagingError> {
     if body.len() > MAX_NATIVE_FRAME_BYTES {
         return Err(NativeMessagingError::FrameTooLarge);
     }
-    let mut frame = (body.len() as u32).to_ne_bytes().to_vec();
+    let total = body.len().checked_add(4).ok_or(NativeMessagingError::BufferFull)?;
+    let mut frame = Vec::new();
+    frame.try_reserve_exact(total).map_err(|_| NativeMessagingError::BufferFull)?;
+    frame.extend_from_slice(&(body.len() as u32).to_ne_bytes());
     frame.extend_from_slice(body);
     Ok(frame)
 }
@@ -621,7 +657,6 @@ impl ProtocolSession {
         self.check_deadline(now)?;
         let message = parse_message(body)?;
         self.started_at.get_or_insert(now);
-        self.last_activity = Some(now);
 
         match (&self.state, &message) {
             (
@@ -637,6 +672,10 @@ impl ProtocolSession {
                 }
                 self.last_seq = 1;
                 self.state = SessionState::Open;
+                // Only a successfully admitted hello starts activity. A
+                // valid-but-rejected pre-hello frame must not slide the
+                // connection-start deadline indefinitely.
+                self.last_activity = Some(now);
                 return Ok(SessionEvent::Accepted(message));
             }
             (SessionState::AwaitingHello, _) => return Err(NativeMessagingError::HelloRequired),
@@ -655,6 +694,10 @@ impl ProtocolSession {
         }
         let missing = seq - self.last_seq - 1;
         self.last_seq = seq;
+        // Sequence and message validation completed, so this is genuine
+        // open-session activity. Replays, malformed messages, and duplicate
+        // hellos above never refresh the idle anchor.
+        self.last_activity = Some(now);
         if matches!(message, ExtensionMessage::Goodbye { .. }) {
             self.state = SessionState::Closed;
             return Ok(SessionEvent::Closed);
@@ -664,5 +707,11 @@ impl ProtocolSession {
         } else {
             SessionEvent::AcceptedAfterGap { message, missing }
         })
+    }
+
+    /// Last sequence number accepted by this connection. The native bridge
+    /// uses it to derive a stable delivery identity for reconnect retries.
+    pub fn last_sequence(&self) -> u64 {
+        self.last_seq
     }
 }

@@ -10,14 +10,18 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::native_messaging::{
-    encode_frame, FrameDecoder, NativeMessagingError, MAX_NATIVE_FRAME_BYTES,
-};
+use crate::native_messaging::{FrameDecoder, NativeMessagingError, MAX_NATIVE_FRAME_BYTES};
 
 /// Version of the synthetic Safari envelope used by the pure fixture adapter.
 pub const SAFARI_TRANSPORT_SCHEMA_VERSION: u32 = 1;
 /// Maximum UTF-8 bytes in a synthetic Safari bundle identifier or profile ID.
 pub const MAX_SAFARI_ID_BYTES: usize = 128;
+/// Maximum number of Chromium frames collected by one pure fixture stream.
+pub const MAX_CHROMIUM_STREAM_FRAMES: usize = 256;
+/// Maximum aggregate Chromium framing and body bytes collected by one pure
+/// fixture stream. The production host processes live stdio incrementally; the
+/// pure adapter still needs a finite batch bound before collecting frames.
+pub const MAX_CHROMIUM_STREAM_BYTES: usize = 8 * crate::native_messaging::MAX_NATIVE_DECODER_BUFFER;
 
 /// A transport identity supplied outside the protocol body.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -48,6 +52,10 @@ pub enum NativeTransportError {
     InvalidSafariPayload,
     #[error("the Safari transport envelope exceeds its byte bound")]
     SafariEnvelopeTooLarge,
+    #[error("the Chromium transport stream exceeds its aggregate byte bound")]
+    ChromiumStreamTooLarge,
+    #[error("the Chromium transport stream exceeds its frame-count bound")]
+    ChromiumStreamTooManyFrames,
     #[error(transparent)]
     NativeMessaging(#[from] NativeMessagingError),
 }
@@ -83,8 +91,12 @@ pub fn normalize_chromium_stream(
     caller_origin: &str,
 ) -> Result<Vec<NormalizedTransportFrame>, NativeTransportError> {
     validate_chromium_caller_origin(caller_origin)?;
+    if stream.len() > MAX_CHROMIUM_STREAM_BYTES {
+        return Err(NativeTransportError::ChromiumStreamTooLarge);
+    }
     let mut decoder = FrameDecoder::new();
-    let mut frames = Vec::new();
+    let mut frames = Vec::with_capacity(stream.len().min(MAX_CHROMIUM_STREAM_FRAMES));
+    let mut frame_count = 0usize;
     // Exercise the same bounded incremental path as the host. A fixture may
     // contain several frames, so feeding the whole stream at once would make
     // an otherwise valid batch fail merely because it is larger than the
@@ -92,6 +104,12 @@ pub fn normalize_chromium_stream(
     for chunk in stream.chunks(4096) {
         decoder.push(chunk)?;
         while let Some(body) = decoder.next_frame()? {
+            frame_count = frame_count
+                .checked_add(1)
+                .ok_or(NativeTransportError::ChromiumStreamTooManyFrames)?;
+            if frame_count > MAX_CHROMIUM_STREAM_FRAMES {
+                return Err(NativeTransportError::ChromiumStreamTooManyFrames);
+            }
             frames.push(NormalizedTransportFrame {
                 identity: TransportIdentity::Chromium { caller_origin: caller_origin.to_owned() },
                 body,
@@ -196,9 +214,36 @@ fn valid_safari_bundle_id(value: &str) -> bool {
 /// Build one Chromium fixture stream from bodies without exposing framing
 /// details in every differential test.
 pub fn encode_chromium_stream(bodies: &[&[u8]]) -> Result<Vec<u8>, NativeTransportError> {
-    let mut stream = Vec::new();
+    if bodies.len() > MAX_CHROMIUM_STREAM_FRAMES {
+        return Err(NativeTransportError::ChromiumStreamTooManyFrames);
+    }
+
+    // Validate each body and calculate the complete output length before
+    // allocating the aggregate stream. This prevents a large body slice list
+    // or a long batch from driving geometric Vec growth.
+    let mut total = 0usize;
     for body in bodies {
-        stream.extend_from_slice(&encode_frame(body)?);
+        if body.is_empty() {
+            return Err(NativeTransportError::NativeMessaging(NativeMessagingError::EmptyFrame));
+        }
+        if body.len() > MAX_NATIVE_FRAME_BYTES {
+            return Err(NativeTransportError::NativeMessaging(NativeMessagingError::FrameTooLarge));
+        }
+        let framed_len = body
+            .len()
+            .checked_add(4)
+            .and_then(|length| total.checked_add(length))
+            .ok_or(NativeTransportError::ChromiumStreamTooLarge)?;
+        if framed_len > MAX_CHROMIUM_STREAM_BYTES {
+            return Err(NativeTransportError::ChromiumStreamTooLarge);
+        }
+        total = framed_len;
+    }
+
+    let mut stream = Vec::with_capacity(total);
+    for body in bodies {
+        stream.extend_from_slice(&(body.len() as u32).to_ne_bytes());
+        stream.extend_from_slice(body);
     }
     Ok(stream)
 }

@@ -3,7 +3,10 @@
 use std::{collections::BTreeSet, sync::OnceLock};
 
 use chrono::{TimeZone, Utc};
-use ghostrace::{BrowserEventClass, ClientHello, PairingRecord, PairingRequest, ProfileClass};
+use ghostrace::{
+    BrowserEventClass, ClientHello, PairedSession, PairingError, PairingRecord, PairingRequest,
+    ProfileClass,
+};
 use libfuzzer_sys::fuzz_target;
 
 const EXTENSION_ID: &str = "abcdefghijklmnopabcdefghijklmnop";
@@ -28,23 +31,51 @@ fn approved_record() -> &'static PairingRecord {
 
 fuzz_target!(|data: &[u8]| {
     let mut record = approved_record().clone();
-    let now = Utc.timestamp_opt(0, 0).single().expect("epoch");
-    if data.first().is_some_and(|byte| byte & 1 == 1) {
+    let flags = data.first().copied().unwrap_or_default();
+    let revoked = flags & 1 != 0;
+    let replaced_key = flags & 2 != 0;
+    let replaced_extension = flags & 4 != 0;
+    let replaced_permissions = flags & 8 != 0;
+    let copied_pairing = flags & 16 != 0;
+    let expired = flags & 32 != 0;
+    let now = if expired { record.expires_at } else { record.approved_at };
+    if revoked {
         record.revoke();
     }
-    let key_digest =
-        if data.get(1).is_some_and(|byte| byte & 1 == 1) { "c".repeat(64) } else { "a".repeat(64) };
-    let extension_id = if data.get(2).is_some_and(|byte| byte & 1 == 1) {
-        "replaced-extension".to_owned()
-    } else {
-        EXTENSION_ID.to_owned()
-    };
+    let key_digest = if replaced_key { "c".repeat(64) } else { "a".repeat(64) };
+    let extension_id =
+        if replaced_extension { "replaced-extension".to_owned() } else { EXTENSION_ID.to_owned() };
     let hello = ClientHello {
-        pairing_id: record.pairing_id,
+        pairing_id: if copied_pairing { uuid::Uuid::nil() } else { record.pairing_id },
         extension_id,
         extension_key_digest: key_digest,
-        permissions_digest: "b".repeat(64),
-        client_nonce: [data.first().copied().unwrap_or_default(); 32],
+        permissions_digest: if replaced_permissions { "d".repeat(64) } else { "b".repeat(64) },
+        client_nonce: [data.get(1).copied().unwrap_or_default(); 32],
     };
-    let _ = record.admit(&hello, now);
+    // Check the security decision, not merely whether admission panics.
+    let expected = if copied_pairing || replaced_extension {
+        Err(PairingError::NotPaired)
+    } else if revoked {
+        Err(PairingError::Revoked)
+    } else if expired || replaced_key || replaced_permissions {
+        Err(PairingError::RePairingRequired)
+    } else {
+        Ok(())
+    };
+    assert_eq!(record.admit(&hello, now), expected);
+
+    // Replay from another session, sequence, or body must not authenticate.
+    let host_nonce = [data.get(2).copied().unwrap_or_default(); 32];
+    let session = PairedSession::derive(&[0x42; 32], &host_nonce, &hello.client_nonce);
+    let body = &data[..data.len().min(4096)];
+    let mac = session.mac(2, body);
+    assert_eq!(session.verify(2, body, &mac), Ok(()));
+    assert_eq!(session.verify(3, body, &mac), Err(PairingError::BadMac));
+    let mut changed_body = body.to_vec();
+    changed_body.push(0);
+    assert_eq!(session.verify(2, &changed_body, &mac), Err(PairingError::BadMac));
+    let mut next_host_nonce = host_nonce;
+    next_host_nonce[0] ^= 1;
+    let next_session = PairedSession::derive(&[0x42; 32], &next_host_nonce, &hello.client_nonce);
+    assert_eq!(next_session.verify(2, body, &mac), Err(PairingError::BadMac));
 });
