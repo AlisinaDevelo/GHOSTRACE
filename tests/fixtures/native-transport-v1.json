@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "contract_id": "ghostrace-native-transport-v1",
+  "scope": "pure_fixture_only",
+  "network_listener": false,
+  "cases": [
+    {
+      "id": "heartbeat-equivalent",
+      "body": "{\"type\":\"heartbeat\",\"seq\":2,\"mac\":\"00\"}",
+      "chromium_origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop/",
+      "safari_bundle_id": "com.alisinadevelo.ghostrace.extension",
+      "safari_profile_id": "default",
+      "expected": "normalized"
+    },
+    {
+      "id": "goodbye-equivalent",
+      "body": "{\"type\":\"goodbye\",\"seq\":3,\"mac\":\"00\"}",
+      "chromium_origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop/",
+      "safari_bundle_id": "com.alisinadevelo.ghostrace.extension",
+      "safari_profile_id": "named-1",
+      "expected": "normalized"
+    },
+    {
+      "id": "safari-profile-is-explicit",
+      "body": "{\"type\":\"heartbeat\",\"seq\":4,\"mac\":\"00\"}",
+      "chromium_origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop/",
+      "safari_bundle_id": "com.alisinadevelo.ghostrace.extension",
+      "safari_profile_id": "work_profile",
+      "expected": "normalized"
+    }
+  ]
+}
