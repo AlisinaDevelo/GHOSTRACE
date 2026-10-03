@@ -10,8 +10,8 @@ WHATWG parser, with explicit refusal classes for other schemes and private
 contexts. The default keeps only a minimized origin. The optional path policy
 keeps one short plain word or an opaque digest.
 
-The previous path digest omitted the scheme. The test
-The initial scheme-boundary regression fails against production
+The previous path digest omitted the scheme. The initial form of
+`opaque_path_digests_bind_the_complete_retained_origin` fails against production
 source e506507f2067f70eecc154d82b67cff8ac1b8509: HTTP and HTTPS produce the same
 digest. The correction uses the `ghostrace-navigation-path-segment-v2` domain,
 a stable host-class tag, and length-framed retained-origin and segment bytes.
@@ -67,6 +67,8 @@ cargo +1.88.0 test --locked --test browser_origin --test native_host_session \
 - Chromium/Safari collection, permission/state handling, durable projection and
   end-to-end browser privacy acceptance remain separate open work. No browser,
   network channel or additional macOS permission is enabled here.
+- The authenticated optional-path test configures the host policy explicitly;
+  it does not prove a browser approval flow enforces the retained-fields list.
 
 The pull request receipt retains exact candidate and merged source, reference
 device/toolchain, red/green and full local-suite results, raw log digests and
