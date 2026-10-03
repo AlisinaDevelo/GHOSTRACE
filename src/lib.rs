@@ -130,11 +130,12 @@ pub use fixture::{ingest_fixture, read_fixture, FixtureIngestReport};
 pub use frontmost::{
     FrontmostActivationPolicy, FrontmostApp, FrontmostAppKind, FrontmostAppLocation,
     FrontmostBasis, FrontmostCoverageBoundary, FrontmostCoverageState, FrontmostError,
-    FrontmostExclusions, FrontmostNormalizer, FrontmostObservation, FrontmostRawObservation,
-    FrontmostRecord, FrontmostSessionTracker, FrontmostSigningIdentity, FrontmostSigningInput,
-    FrontmostSystemEvent, FrontmostTransition, FrontmostUnknownReason,
-    FRONTMOST_IDENTITY_CORPUS_JSON, FRONTMOST_SCHEMA_JSON, FRONTMOST_SCHEMA_VERSION,
-    FRONTMOST_TRANSIENT_DWELL_MS, MAX_FRONTMOST_RAW_BYTES,
+    FrontmostExclusions, FrontmostLifecycleMonitor, FrontmostNormalizer, FrontmostObservation,
+    FrontmostRawObservation, FrontmostRecord, FrontmostSessionSample, FrontmostSessionTracker,
+    FrontmostSigningIdentity, FrontmostSigningInput, FrontmostSystemEvent, FrontmostTransition,
+    FrontmostUnknownReason, FRONTMOST_IDENTITY_CORPUS_JSON, FRONTMOST_SCHEMA_JSON,
+    FRONTMOST_SCHEMA_VERSION, FRONTMOST_SLEEP_THRESHOLD, FRONTMOST_TRANSIENT_DWELL_MS,
+    MAX_FRONTMOST_RAW_BYTES,
 };
 pub use fsevents::{
     CallbackHealth, FseventsError, FseventsEvent, FseventsOptions, FseventsStream,

@@ -326,10 +326,18 @@ session it ends is closed by inference at that moment with its dwell time. An
 observed login window is treated as a screen-lock boundary; observing an app again
 resumes coverage with a gap. Observer start/stop boundaries are also supplied by
 the CLI. Password managers and user-excluded bundle IDs are never identified.
-The tracker can model sleep/wake, but the live CLI does not yet supply those
-events or a complete lock/session lifecycle. Dwell can span an unobserved boundary;
-synthetic tracker coverage is not proof of live lifecycle coverage. Task 0171/#392
-remains open for that integration and device verification.
+
+Each poll also feeds `FrontmostLifecycleMonitor` (`src/frontmost.rs`) a session
+sample: wall time, uptime from `std::time::Instant` (which on macOS does not advance
+during sleep), and `CGSessionCopyCurrentDictionary`'s console and screen-lock flags
+(only those two keys are read). Wall time outrunning uptime by more than two seconds
+is sleep, reported as `WillSleep` at the last awake sample, so a session's dwell
+ends when sleep began; a locked screen, the login window, or another user on the
+console suspends coverage until the session is active again, and the resumption is
+a gap. Boundaries are accurate to the 250 ms poll, and a forward clock change is
+also recorded as a gap. `tests/frontmost_lifecycle.rs` covers these transitions
+with synthetic samples; locking and sleeping the reference device are manual
+checks, because a test cannot lock the user's screen.
 
 `FrontmostSessionTracker` suppresses repeated activations of the frontmost
 instance, puts the dwell time on the event that ends a session, marks sessions

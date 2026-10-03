@@ -24,6 +24,7 @@ use std::{
 use chrono::Utc;
 use core_foundation::{
     base::{CFType, TCFType},
+    boolean::CFBoolean,
     dictionary::{CFDictionary, CFDictionaryRef},
     number::CFNumber,
     string::{CFString, CFStringRef},
@@ -50,6 +51,11 @@ extern "C" {
     fn objc_msgSend();
     fn objc_autoreleasePoolPush() -> *mut c_void;
     fn objc_autoreleasePoolPop(pool: *mut c_void);
+}
+
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGSessionCopyCurrentDictionary() -> CFDictionaryRef;
 }
 
 #[link(name = "Security", kind = "framework")]
@@ -80,6 +86,12 @@ impl FrontmostProbe {
         Self::default()
     }
 
+    /// Forget the last instance, so the next poll reports whatever is in
+    /// front even if it did not change (used when coverage resumes).
+    pub fn reset(&mut self) {
+        self.last = None;
+    }
+
     /// Run this thread's run loop for `interval`, then return an activation
     /// if a different launch instance is now frontmost. The observation time
     /// is the read time, at most `interval` after the switch.
@@ -108,6 +120,33 @@ pub fn pump_run_loop(interval: Duration) {
     if result == K_CF_RUN_LOOP_RUN_FINISHED {
         std::thread::sleep(interval.saturating_sub(started.elapsed()));
     }
+}
+
+/// Whether this login session owns the console, and whether its screen is
+/// locked, from `CGSessionCopyCurrentDictionary`. Only those two keys are read;
+/// the dictionary's user name and IDs are not. `None` means unknown.
+pub fn session_state() -> (Option<bool>, Option<bool>) {
+    // SAFETY: the function has no preconditions and returns a dictionary we
+    // own under the create rule, or null outside a GUI login session.
+    let raw = unsafe { CGSessionCopyCurrentDictionary() };
+    if raw.is_null() {
+        return (None, None);
+    }
+    // SAFETY: non-null, owned under the create rule, released when dropped.
+    let session: CFDictionary<CFString, CFType> =
+        unsafe { CFDictionary::wrap_under_create_rule(raw) };
+    let flag = |key: &'static str| {
+        session.find(CFString::from_static_string(key)).and_then(|value| {
+            value
+                .downcast::<CFBoolean>()
+                .map(bool::from)
+                .or_else(|| value.downcast::<CFNumber>().and_then(|n| n.to_i64()).map(|n| n != 0))
+        })
+    };
+    let on_console = flag("kCGSSessionOnConsoleKey");
+    // macOS adds this key only while the screen is locked.
+    let locked = on_console.map(|_| flag("CGSSessionScreenIsLocked").unwrap_or(false));
+    (on_console, locked)
 }
 
 /// Whether the calling thread is the process's main thread, the only one on
