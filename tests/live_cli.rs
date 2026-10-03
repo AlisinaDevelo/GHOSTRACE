@@ -15,6 +15,25 @@ fn enabled() -> bool {
     std::env::var_os("GHOSTRACE_LOGIN_KEYCHAIN_TEST").is_some_and(|value| value == "1")
 }
 
+/// The frontmost application's bundle ID, from LaunchServices.
+#[allow(dead_code)]
+fn front_bundle() -> String {
+    let asn = Command::new("/usr/bin/lsappinfo").arg("front").output().expect("lsappinfo front");
+    let asn = String::from_utf8_lossy(&asn.stdout).trim().to_owned();
+    assert!(!asn.is_empty(), "no frontmost application");
+    let info = Command::new("/usr/bin/lsappinfo")
+        .args(["info", "-only", "bundleid", &asn])
+        .output()
+        .expect("lsappinfo info");
+    String::from_utf8_lossy(&info.stdout)
+        .rsplit('=')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .trim_matches('"')
+        .to_owned()
+}
+
 fn ghostrace(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_ghostrace")).args(args).output().expect("ghostrace runs")
 }
@@ -594,15 +613,7 @@ fn live_apps_records_a_focus_switch_with_name_version_and_dwell() {
     let front = |bundle: &str| {
         Command::new("/usr/bin/open").args(["-b", bundle]).status().expect("open");
     };
-    let before = String::from_utf8(
-        Command::new("/usr/bin/lsappinfo")
-            .args(["info", "-only", "bundleid", "-app", "front"])
-            .output()
-            .expect("lsappinfo")
-            .stdout,
-    )
-    .expect("utf8");
-    let previous = before.rsplit('=').next().unwrap_or("").trim().trim_matches('"').to_owned();
+    let previous = front_bundle();
     let recorder = Command::new(env!("CARGO_BIN_EXE_ghostrace"))
         .args(["live", "apps", "--home", &home, "--yes", "--seconds", "5"])
         .stdout(std::process::Stdio::piped())
@@ -674,20 +685,7 @@ fn live_apps_rapid_switching_termination_and_latency_on_device() {
     }
     assert!(ghostrace(&["live", "init", "--home", &home]).status.success());
     let _forget = Forget(home.clone());
-    let front_now = || {
-        let out = Command::new("/usr/bin/lsappinfo")
-            .args(["info", "-only", "bundleid", "-app", "front"])
-            .output()
-            .expect("lsappinfo");
-        String::from_utf8_lossy(&out.stdout)
-            .rsplit('=')
-            .next()
-            .unwrap_or("")
-            .trim()
-            .trim_matches('"')
-            .to_owned()
-    };
-    let previous = front_now();
+    let previous = front_bundle();
     assert!(!previous.is_empty() && previous != "com.apple.finder", "start from another app");
 
     let recorder = Command::new(env!("CARGO_BIN_EXE_ghostrace"))
