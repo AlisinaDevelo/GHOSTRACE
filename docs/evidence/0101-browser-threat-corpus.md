@@ -74,4 +74,4 @@ Logs are retained on the verification device outside the repository.
 
 ## Privacy, failure, and scope boundaries
 
-- The corpus is synthetic. Three open canonicalization findings recorded by it were addressed for navigation evidence by task 0106 (#364).
+- The corpus is synthetic. The separate canonical navigation shape introduced in #364 addresses its path, trailing-dot and private-host findings for future navigation collection. The legacy v1 `SanitizedUrl` fixture/event type still has those limitations, so its corpus findings remain open; no browser collector is enabled. [The origin-digest correction](0106-browser-origin-boundary.md) records the scheme boundary and retained-origin limits.

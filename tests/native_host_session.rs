@@ -7,7 +7,7 @@ use chrono::Utc;
 use ghostrace::{
     encode_hex, BrowserEventClass, ExtensionMessage, HostMessage, HostOutput, NativeHostSession,
     NativeSessionError, NavigationRefusal, NavigationTransition, PairedSession, PairingError,
-    PairingRecord, PairingRequest, ProfileClass, UrlShapePolicy,
+    PairingRecord, PairingRequest, PathSegmentClass, ProfileClass, UrlShapePolicy,
 };
 
 const EXTENSION: &str = "abcdefghijklmnopabcdefghijklmnop";
@@ -67,7 +67,14 @@ fn nav_message(seq: u64, url: &str, private_context: bool) -> ExtensionMessage {
 }
 
 fn open(record: &PairingRecord) -> (NativeHostSession, Extension) {
-    let mut host = NativeHostSession::new(UrlShapePolicy::OriginOnly);
+    open_with_policy(record, UrlShapePolicy::OriginOnly)
+}
+
+fn open_with_policy(
+    record: &PairingRecord,
+    policy: UrlShapePolicy,
+) -> (NativeHostSession, Extension) {
+    let mut host = NativeHostSession::new(policy);
     let reply = host
         .receive(&hello(record, &"a".repeat(64)), Duration::ZERO, Utc::now(), |_| {
             Some(record.clone())
@@ -137,6 +144,45 @@ fn an_authenticated_navigation_is_reduced_to_its_origin() {
         host.receive(&goodbye, at(4), Utc::now(), |_| None).expect("goodbye"),
         HostOutput::Closed
     );
+}
+
+#[test]
+fn authenticated_path_policy_preserves_the_origin_digest_boundary() {
+    let mut request = record().request;
+    request.retained_fields.push("first_path_segment".to_owned());
+    let record = PairingRecord::approve(request, Utc::now()).expect("approve path policy");
+    let (mut host, extension) = open_with_policy(&record, UrlShapePolicy::FirstPathSegment);
+    let mut segments = Vec::new();
+    for (index, raw) in [
+        "https://user:SENTINELPASS@example.com/Zt7xQ?SENTINELQUERY#SENTINELFRAG",
+        "http://example.com/Zt7xQ",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let HostOutput::Navigation { navigation, missing, .. } = host
+            .receive(
+                &extension.sign(nav_message(index as u64 + 2, raw, false)),
+                at(index as u64 + 1),
+                Utc::now(),
+                |_| None,
+            )
+            .expect("authenticated navigation")
+        else {
+            panic!("navigation was not admitted");
+        };
+        assert_eq!(missing, 0);
+        assert!(!serde_json::to_string(&navigation).expect("JSON").contains("SENTINEL"));
+        segments.push(navigation.path_segment.expect("path class"));
+    }
+    assert_eq!(
+        segments[0],
+        PathSegmentClass::Opaque {
+            digest: "sha256:7101d302ea56404605c4f874aa18d234fa50a1bd13255fdad1253365b13411b1"
+                .into(),
+        }
+    );
+    assert_ne!(segments[0], segments[1]);
 }
 
 #[test]
