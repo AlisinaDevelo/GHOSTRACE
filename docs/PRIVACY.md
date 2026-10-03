@@ -393,12 +393,24 @@ an address would. An
 opt-in `first_path_segment` policy keeps the first path segment only when it is a
 short lowercase word (at most 16 characters and one separator); anything else
 becomes an origin-scoped digest, so the same token on two origins is not
-linkable. The type has no field for userinfo, query, fragment, or private-context
+represented by the same digest. The pre-collector v2 digest domain binds the
+host class, complete retained origin (including scheme and non-default port),
+and length-framed segment. Withheld private hosts intentionally share the
+`private-network` origin; neither the digest nor that placeholder identifies an
+internal host. Digests are deterministic, not encryption: a guessable segment can
+still be guessed, and an opted-in plain word can itself be sensitive. Origin-only
+remains the default. The type has no field for userinfo, query, fragment, or private-context
 markers. `tests/browser_origin.rs` pins the outcome of each URL class and runs
 2,000 generated URLs carrying sentinel credentials, queries, fragments, and
 private markers to prove none of them serialize. This closes the retained-path,
 trailing-dot, and private-address findings recorded in the browser threat corpus
 for the navigation shape; no browser collector ships yet.
+
+The older v1 fixture/event `SanitizedUrl` is a different compatibility type. It
+removes credentials, query and fragment but still retains a path, trailing-dot
+host spelling and private-network address. These limitations remain visible in
+the browser threat corpus; a future live collector must use the canonical shape,
+not treat a legacy fixture payload as approved navigation evidence.
 
 
 ## Live exports, archives, and reports

@@ -1,0 +1,52 @@
+# Browser origin digest boundary
+
+Scope: the canonical navigation library and native-host session, not a shipped
+browser collector or a migration of v1 event payloads. Issue #110 remains open.
+
+## Contract and regression
+
+`CanonicalNavigation::from_url` admits only bounded HTTP/HTTPS URLs through the
+WHATWG parser, with explicit refusal classes for other schemes and private
+contexts. The default keeps only a minimized origin. The optional path policy
+keeps one short plain word or an opaque digest.
+
+The previous path digest omitted the scheme. The test
+`opaque_path_digests_bind_the_complete_retained_origin` fails against production
+source e506507f2067f70eecc154d82b67cff8ac1b8509: HTTP and HTTPS produce the same
+digest. The correction uses the `ghostrace-navigation-path-segment-v2` domain,
+a stable host-class tag, and length-framed retained-origin and segment bytes.
+This changes pre-collector opaque path digests; it does not change an event,
+journal, export schema or legacy `SanitizedUrl` value.
+
+| Evidence | Test and observable outcome |
+| --- | --- |
+| B-origin-01 | `opaque_path_digests_bind_the_complete_retained_origin`: scheme, host, port, segment and host-class changes separate digests; case, default port, trailing-dot spelling and removed credential/query/fragment fields do not. A golden pins the v2 byte contract. |
+| B-origin-02 | `every_url_class_has_an_explicit_outcome`: IDN, IPv4/IPv6, special-use hosts, schemes, invalid/opaque URLs and byte overflow have explicit outcomes. |
+| B-origin-03 | `credentials_queries_fragments_and_private_markers_never_serialize`: 2,000 deterministic synthetic cases; private contexts are refused and sentinel fields are absent from JSON and origin rendering. |
+| B-origin-04 | `maximum_size_navigation_has_a_bounded_shape_and_refusals_are_path_free`: 8,192-byte input yields a sub-256-byte shape for the tested maximum segment; 8,193 bytes are refused; private refusal precedes parsing, and errors contain no rejected sentinel. This is a bound test, not an allocator or performance benchmark. |
+| B-origin-05 | `tests/native_host_session.rs`: pairing/MAC/protocol handling precedes canonicalization; accepted navigation is minimized, private navigation refused, and forged/replayed messages rejected. |
+
+Focused reproduction:
+
+```sh
+cargo +1.88.0 test --locked --test browser_origin --test native_host_session \
+  --test browser_threat_corpus --test browser_pairing
+```
+
+## Limits
+
+- Private-network hosts are withheld and intentionally coalesce. Their digests
+  cannot establish that two observations reached the same internal service.
+- A deterministic digest is not encryption and does not protect guessable
+  segments from dictionary attacks. The opt-in plain-word policy can retain a
+  sensitive word; origin-only is the default.
+- Legacy v1 fixture/event URLs still retain paths, private hosts and trailing-dot
+  spelling. Their threat-corpus findings are not closed by this correction.
+- Chromium/Safari collection, permission/state handling, durable projection and
+  end-to-end browser privacy acceptance remain separate open work. No browser,
+  network channel or additional macOS permission is enabled here.
+
+The pull request receipt retains exact candidate and merged source, reference
+device/toolchain, red/green and full local-suite results, raw log digests and
+any failing or unavailable checks. Passing host tests are not browser/device
+integration proof.

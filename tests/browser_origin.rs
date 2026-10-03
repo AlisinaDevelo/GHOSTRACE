@@ -137,6 +137,84 @@ fn first_path_segment_keeps_only_plain_words_and_digests_everything_else() {
     assert_ne!(shape("https://a.example/Zt7xQ"), shape("https://b.example/Zt7xQ"));
 }
 
+#[test]
+fn opaque_path_digests_bind_the_complete_retained_origin() {
+    let shape = |raw: &str| {
+        CanonicalNavigation::from_url(raw, false, UrlShapePolicy::FirstPathSegment)
+            .expect("navigation")
+            .path_segment
+            .expect("segment")
+    };
+    let baseline = shape("https://example.com/Zt7xQ");
+    assert_eq!(
+        baseline,
+        PathSegmentClass::Opaque {
+            digest: "sha256:7101d302ea56404605c4f874aa18d234fa50a1bd13255fdad1253365b13411b1"
+                .into(),
+        },
+        "v2 digest domain and framing golden"
+    );
+    assert_ne!(baseline, shape("http://example.com/Zt7xQ"), "scheme boundary");
+    assert_ne!(baseline, shape("https://example.com:8443/Zt7xQ"), "port boundary");
+    assert_ne!(baseline, shape("https://other.example/Zt7xQ"), "host boundary");
+    assert_ne!(baseline, shape("https://example.com/Ab4Cd9"), "segment boundary");
+    for equivalent in [
+        "HTTPS://EXAMPLE.COM:443/Zt7xQ",
+        "https://example.com./Zt7xQ",
+        "https://user:password@example.com/Zt7xQ?token=secret#fragment",
+        "https://example.com/Zt7xQ/other-path",
+    ] {
+        assert_eq!(baseline, shape(equivalent), "canonical equivalence");
+    }
+    // Withheld private hosts intentionally share the same minimized origin.
+    // A digest is not evidence that two internal services are the same host.
+    assert_eq!(shape("https://10.1.2.3/Zt7xQ"), shape("https://nas.local/Zt7xQ"));
+    assert_ne!(
+        shape("https://10.1.2.3/Zt7xQ"),
+        shape("http://10.1.2.3/Zt7xQ"),
+        "private-network scheme boundary"
+    );
+    assert_ne!(
+        shape("https://10.1.2.3/Zt7xQ"),
+        shape("https://private-network/Zt7xQ"),
+        "host class boundary"
+    );
+}
+
+#[test]
+fn maximum_size_navigation_has_a_bounded_shape_and_refusals_are_path_free() {
+    let prefix = "https://example.com/";
+    let maximum =
+        format!("{prefix}{}", "A".repeat(ghostrace::MAX_BROWSER_URL_BYTES - prefix.len()));
+    let navigation =
+        CanonicalNavigation::from_url(&maximum, false, UrlShapePolicy::FirstPathSegment)
+            .expect("maximum-size navigation");
+    let PathSegmentClass::Opaque { digest } = navigation.path_segment.as_ref().expect("segment")
+    else {
+        panic!("maximum segment was retained");
+    };
+    assert_eq!(digest.len(), "sha256:".len() + 64);
+    assert!(serde_json::to_vec(&navigation).expect("JSON").len() < 256);
+    let oversized = format!("{maximum}A");
+    assert_eq!(
+        CanonicalNavigation::from_url(&oversized, false, UrlShapePolicy::FirstPathSegment),
+        Err(NavigationRefusal::TooLong)
+    );
+    // Private-context refusal precedes even URL validation and byte admission.
+    assert_eq!(
+        CanonicalNavigation::from_url(&oversized, true, UrlShapePolicy::FirstPathSegment),
+        Err(NavigationRefusal::PrivateContext)
+    );
+    for raw in ["file:///SENTINELPATH", "invalid:SENTINELSECRET", "https://[SENTINELHOST"] {
+        let refusal = CanonicalNavigation::from_url(raw, false, UrlShapePolicy::OriginOnly)
+            .expect_err("refused URL");
+        let diagnostic =
+            format!("{refusal:?} {refusal} {}", serde_json::to_string(&refusal).unwrap());
+        assert!(!diagnostic.contains("SENTINEL"));
+        assert!(!diagnostic.contains(raw));
+    }
+}
+
 /// A deterministic generator so the property test needs no extra dependency.
 struct Generator(u64);
 

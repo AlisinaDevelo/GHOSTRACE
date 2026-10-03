@@ -155,8 +155,11 @@ drift, downgrades, private-context messages, and native-host manifest tampering.
 Each case names the layer that validates it and whether it is rejected,
 canonicalized, recorded as a gap, or requires re-pairing. URL cases run against the
 shipped `SanitizedUrl` today; the others name the ledger task that must enforce
-them. Three open findings (retained paths, trailing-dot host aliases, and
-private-network hosts) stay visible until origin canonicalization (task 0106).
+them. Three findings (retained paths, trailing-dot host aliases, and
+private-network hosts) remain visible for the legacy `SanitizedUrl` fixture/event
+type. The separate `CanonicalNavigation` boundary addresses them for future
+navigation collection, but does not migrate historical v1 payloads or enable a
+browser collector. Its opaque path digest binds the complete retained origin;
+withheld private hosts deliberately coalesce and cannot support host identity.
 [ADR 0005](adr/0005-browser-transport-and-permissions.md) links each accepted risk
 to its test case, permission, user control, and rollback path.
-

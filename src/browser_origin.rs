@@ -93,7 +93,8 @@ pub enum PathSegmentClass {
         value: String,
     },
     /// A segment that could be an identifier or secret; only a digest,
-    /// domain-separated by origin, is kept.
+    /// domain-separated by host class and the complete retained origin, is
+    /// kept. Withheld private hosts intentionally share a minimized origin.
     Opaque {
         digest: String,
     },
@@ -146,13 +147,12 @@ impl CanonicalNavigation {
             None => return Err(NavigationRefusal::Opaque),
         };
         let port = url.port();
-        let path_segment = match policy {
-            UrlShapePolicy::OriginOnly => None,
-            UrlShapePolicy::FirstPathSegment => {
-                Some(path_class(&url, host_class, host.as_deref(), port))
-            }
-        };
-        Ok(Self { scheme: url.scheme().to_owned(), host_class, host, port, path_segment })
+        let mut navigation =
+            Self { scheme: url.scheme().to_owned(), host_class, host, port, path_segment: None };
+        if policy == UrlShapePolicy::FirstPathSegment {
+            navigation.path_segment = Some(path_class(&url, &navigation));
+        }
+        Ok(navigation)
     }
 
     /// The canonical origin string, e.g. `https://example.com:8443`. A
@@ -217,12 +217,7 @@ fn is_private_v6(address: Ipv6Addr) -> bool {
         || (first & 0xffc0) == 0xfe80
 }
 
-fn path_class(
-    url: &Url,
-    host_class: NavigationHostClass,
-    host: Option<&str>,
-    port: Option<u16>,
-) -> PathSegmentClass {
+fn path_class(url: &Url, navigation: &CanonicalNavigation) -> PathSegmentClass {
     let Some(segment) = url.path_segments().and_then(|mut segments| segments.next()) else {
         return PathSegmentClass::Root;
     };
@@ -236,10 +231,20 @@ fn path_class(
         return PathSegmentClass::Word { value: segment.to_owned() };
     }
     let mut hasher = Sha256::new();
-    hasher.update(b"ghostrace-navigation-path-segment-v1\0");
-    hasher.update(format!("{host_class:?}").as_bytes());
-    hasher.update(host.unwrap_or("private-network").as_bytes());
-    hasher.update(port.unwrap_or(0).to_le_bytes());
+    // This pre-collector digest domain replaces v1, which omitted the scheme.
+    // Hash only the retained origin: never reintroduce a withheld private host,
+    // userinfo, query or fragment through the digest input. Length framing and
+    // a stable host-class tag keep component and placeholder boundaries distinct.
+    hasher.update(b"ghostrace-navigation-path-segment-v2\0");
+    hasher.update([match navigation.host_class {
+        NavigationHostClass::Domain => 0,
+        NavigationHostClass::PublicAddress => 1,
+        NavigationHostClass::PrivateNetwork => 2,
+    }]);
+    let origin = navigation.origin();
+    hasher.update((origin.len() as u64).to_le_bytes());
+    hasher.update(origin.as_bytes());
+    hasher.update((segment.len() as u64).to_le_bytes());
     hasher.update(segment.as_bytes());
     let digest = hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>();
     PathSegmentClass::Opaque { digest: format!("sha256:{digest}") }
