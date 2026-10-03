@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-/// Errors returned by the fixture-only vertical slice.
+/// Errors returned by fixture tooling and explicit local journal surfaces.
 #[derive(Debug, Error)]
 pub enum GhostraceError {
     #[error("invalid event: {0}")]

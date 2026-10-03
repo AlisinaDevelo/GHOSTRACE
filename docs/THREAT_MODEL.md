@@ -1,6 +1,7 @@
 # Threat model
 
-This model covers the local fixture headstart and the future opt-in macOS journal.
+This model covers fixture tooling, the explicit local macOS journal surfaces,
+and planned integrations whose release gates remain incomplete.
 It is a design boundary, not a claim that every implementation risk has been
 eliminated. GHOSTRACE records diagnostic evidence; it does not create legal chain of
 custody.
@@ -12,7 +13,8 @@ custody.
 3. Preserve provenance, ordering limits, and gaps without overstating causality.
 4. Protect production payloads and keys at rest.
 5. Make exports and other plaintext transitions deliberate and visible.
-6. Keep the baseline local, offline, and free of silent upload paths.
+6. Keep GHOSTRACE free of a network client or silent upload path. The explicit
+   `run` wrapper does not network-sandbox the deliberately requested child.
 
 ## Assets
 
@@ -124,8 +126,10 @@ explicit limitation rather than a completeness claim.
 - The lifecycle adapter and selected-root collector cannot make an FSEvents callback
   complete or attributable. They retain normalized flags, lifecycle state, explicit
   overflow gaps, policy outcomes, volume transition metadata, and durable metadata,
-  but volume-bound cursor persistence, recovery, and source completeness remain
-  later gates.
+  including persisted volume-bound cursors and durable restart/replay recovery.
+  Complete target-device lifecycle, source-loss reconciliation, release-scale
+  evidence and source-completeness limitations remain distinct gates; a persisted
+  cursor does not make missing callbacks complete or actor-attributed.
 - A user may intentionally export sensitive data to an insecure destination.
 - A compromised dependency, toolchain, or build host can violate the local-only
   contract. CI checks reduce this risk; they do not prove source intent.

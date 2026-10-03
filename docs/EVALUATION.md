@@ -421,7 +421,9 @@ Task 0013 adds the first live-source gate: explicit consent confirmation, exact
 root mapping, path-free filesystem payloads, lifecycle records, writer admission,
 controlled create/modify/move/delete integration, and revocation before pending
 events commit. Task 0068 adds the descriptor-backed no-follow walk for later opens;
-cursor/recovery, exclusion, and ambient capture work below remains separate.
+cursor/recovery and exclusion evidence below is evaluated separately, not absent
+from the implementation. Complete target-device lifecycle and ambient-capture
+release gates remain incomplete.
 Cross-platform lifecycle-model tests inject schedule/start failures and assert that
 stop, invalidate, and release occur exactly once. AddressSanitizer is a required
 macOS evidence lane when the pinned nightly sanitizer toolchain is available; a

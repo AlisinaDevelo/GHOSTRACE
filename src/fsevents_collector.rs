@@ -11,7 +11,8 @@
 //! A separate descriptor-backed [`SelectedRoot::open_contained`] boundary is
 //! available to later consumers that must open an existing path; it refuses
 //! symlink replacement, hard-link aliases, and component races without reading
-//! file content. Exclusion precedence and cursor recovery remain later gates.
+//! file content. Exclusion and durable cursor/replay contracts are implemented;
+//! complete target-device lifecycle and release-scale recovery remain gates.
 
 use std::{
     collections::{BTreeSet, VecDeque},
