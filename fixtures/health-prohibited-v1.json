@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "canaries": [
+    "/Users/health-canary/Documents/private-project",
+    "https://health-canary.example/private?token=credential-canary",
+    "origin-canary-profile-identity",
+    "event-canary-f67f0302-6094-4a43-9e4e-44b525aef32e",
+    "command-canary --password credential-canary",
+    "title-canary Private Document",
+    "credential-canary-secret-key",
+    "raw-error-canary: SELECT private_data FROM private_table"
+  ]
+}

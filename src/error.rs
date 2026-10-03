@@ -111,6 +111,9 @@ pub enum GhostraceError {
     #[error("journal path changed during secure open")]
     PathRace,
 
+    #[error("read-only SQLite sidecar resource limit exceeded")]
+    ReadOnlyResourceLimit,
+
     #[error("journal path owner is unexpected")]
     UnexpectedOwner,
 
