@@ -43,6 +43,8 @@ pub mod live;
 #[cfg(unix)]
 pub mod local_service;
 pub mod model;
+#[cfg(unix)]
+pub mod native_bridge;
 pub mod native_host;
 #[cfg(unix)]
 pub mod native_host_manifest;
@@ -211,9 +213,12 @@ pub use keychain::{
 };
 #[cfg(unix)]
 pub use local_service::{
-    request as service_request, LocalService, ServiceCapability, ServiceError, ServiceHandler,
-    ServiceRequest, ServiceResponse, LOCAL_SERVICE_PROTOCOL_VERSION, MAX_SERVICE_DEADLINE,
-    MAX_SERVICE_MESSAGE_BYTES, SERVICE_SOCKET_NAME,
+    browser_navigation_from_request, browser_navigation_request, ingest_browser_navigation,
+    request as service_request, BrowserNavigationAck, BrowserNavigationAdmission, LocalService,
+    ServiceCapability, ServiceError, ServiceHandler, ServiceRequest, ServiceResponse,
+    BROWSER_NAVIGATION_INGEST_METHOD, LOCAL_SERVICE_PROTOCOL_VERSION, MAX_BROWSER_INGEST_MISSING,
+    MAX_BROWSER_INGEST_SEQUENCES, MAX_SERVICE_DEADLINE, MAX_SERVICE_MESSAGE_BYTES,
+    SERVICE_SOCKET_NAME,
 };
 pub use model::{
     AppChange, ApplicationId, BookmarkChange, BookmarkId, BranchName,
@@ -230,6 +235,18 @@ pub use model::{
     MAX_APP_IDENTIFIER_BYTES, MAX_BRANCH_BYTES, MAX_BROWSER_URL_BYTES, MAX_CURSOR_BYTES,
     MAX_EVENT_PAYLOAD_BYTES, MAX_IDENTIFIER_BYTES, PROVENANCE_VERSION, REPAIR_PROVENANCE_VERSION,
     SHA256_DIGEST_BYTES,
+};
+#[cfg(unix)]
+pub use native_bridge::{
+    read_native_service_endpoint, run_stdio as run_native_host_stdio,
+    run_stdio_with_timeout as run_native_host_stdio_with_timeout, validate_caller_origin,
+    validate_pairing_request, write_native_service_endpoint, BridgeOutput, BrowserIngestService,
+    LocalServiceClient, NativeBridge, NativeBridgeError, NativeBridgeSink, NativeHostRunSummary,
+    NativeServiceEndpoint, PairingApproval, PairingStore, PairingView, MAX_NATIVE_HOST_READ_CHUNK,
+    MAX_NATIVE_SERVICE_ENDPOINT_BYTES, MAX_PAIRING_RECORDS, MAX_PAIRING_STORE_BYTES,
+    NATIVE_HOST_STORE_DIR, NATIVE_HOST_WRITE_TIMEOUT, NATIVE_SERVICE_ENDPOINT_FILE,
+    NATIVE_SERVICE_ENDPOINT_SCHEMA_VERSION, PAIRING_KEY_FILE, PAIRING_LOCK_FILE,
+    PAIRING_LOCK_TIMEOUT, PAIRING_STATE_FILE, PAIRING_STORE_DOMAIN, PAIRING_STORE_SCHEMA_VERSION,
 };
 pub use native_host::{encode_hex, HostMessage, HostOutput, NativeHostSession, NativeSessionError};
 #[cfg(unix)]

@@ -5,8 +5,8 @@
 //! is mode 0600. No TCP listener exists. Every connection is checked for peer
 //! credentials (same effective user), and every request for protocol version,
 //! service instance, byte size, deadline, replay, and capability before the
-//! handler sees it. Capabilities (read, export, policy, lifecycle, admin) are
-//! separate and denied unless the service granted them.
+//! handler sees it. Capabilities (browser ingest, read, export, policy,
+//! lifecycle, admin) are separate and denied unless the service granted them.
 
 use std::{
     collections::{BTreeSet, HashSet, VecDeque},
@@ -21,10 +21,16 @@ use std::{
     time::Duration,
 };
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
+
+use crate::{
+    browser_origin::{CanonicalNavigation, NavigationHostClass, UrlShapePolicy},
+    model::BrowserName,
+};
 
 /// Version of the local service protocol.
 pub const LOCAL_SERVICE_PROTOCOL_VERSION: u32 = 1;
@@ -36,6 +42,12 @@ pub const MAX_SERVICE_DEADLINE: Duration = Duration::from_secs(30);
 pub const SERVICE_REPLAY_WINDOW: usize = 4096;
 /// File name of the socket inside the service directory.
 pub const SERVICE_SOCKET_NAME: &str = "ghostrace.sock";
+/// The only browser-ingestion method exposed by the local service.
+pub const BROWSER_NAVIGATION_INGEST_METHOD: &str = "browser_navigation_v1";
+/// A missing-message count is metadata, not a loop bound for arbitrary work.
+pub const MAX_BROWSER_INGEST_MISSING: u64 = 1_000_000;
+/// The native bridge can submit one gap and one navigation in one admission.
+pub const MAX_BROWSER_INGEST_SEQUENCES: usize = 2;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Error, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -62,17 +74,90 @@ pub enum ServiceError {
     Replay,
     #[error("the capability is not granted")]
     CapabilityDenied,
+    #[error("the browser ingestion request is malformed")]
+    BrowserIngestMalformed,
+    #[error("the browser ingestion request was refused")]
+    BrowserIngestRefused,
 }
 
 /// Separately grantable capabilities. Nothing is granted by default.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ServiceCapability {
+    /// Admission of canonicalized, metadata-only browser navigation records.
+    Ingest,
     Read,
     Export,
     Policy,
     Lifecycle,
     Admin,
+}
+
+/// The typed, already-canonicalized payload accepted by the browser-ingestion
+/// service method. It deliberately has no raw URL, query, fragment, userinfo,
+/// extension secret, or filesystem path.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrowserNavigationAdmission {
+    pub event_id: Uuid,
+    pub browser: BrowserName,
+    pub navigation: CanonicalNavigation,
+    pub observed_at: DateTime<Utc>,
+    pub missing: u64,
+}
+
+impl BrowserNavigationAdmission {
+    pub fn validate(&self) -> Result<(), ServiceError> {
+        if self.event_id.is_nil()
+            || self.navigation.path_segment.is_some()
+            || self.missing > MAX_BROWSER_INGEST_MISSING
+            || !is_canonical_origin(&self.navigation)
+        {
+            return Err(ServiceError::BrowserIngestMalformed);
+        }
+        Ok(())
+    }
+}
+
+fn is_canonical_origin(navigation: &CanonicalNavigation) -> bool {
+    // Private-network hosts intentionally have no retained host. Reconstruct
+    // the same withheld class with a local-only sentinel rather than parsing
+    // `private-network` back as an ordinary public domain.
+    let origin = if navigation.host_class == NavigationHostClass::PrivateNetwork
+        && navigation.host.is_none()
+    {
+        match navigation.port {
+            Some(port) => format!("{}://localhost:{port}", navigation.scheme),
+            None => format!("{}://localhost", navigation.scheme),
+        }
+    } else {
+        navigation.origin()
+    };
+    CanonicalNavigation::from_url(&origin, false, UrlShapePolicy::OriginOnly)
+        .map(|canonical| canonical == *navigation)
+        .unwrap_or(false)
+}
+
+/// The service acknowledgement for one browser admission.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrowserNavigationAck {
+    pub event_id: Uuid,
+    pub ingest_sequences: Vec<u64>,
+    pub missing: u64,
+}
+
+impl BrowserNavigationAck {
+    pub fn validate(&self) -> Result<(), ServiceError> {
+        if self.event_id.is_nil()
+            || self.ingest_sequences.is_empty()
+            || self.ingest_sequences.len() > MAX_BROWSER_INGEST_SEQUENCES
+            || self.missing > MAX_BROWSER_INGEST_MISSING
+        {
+            return Err(ServiceError::BrowserIngestMalformed);
+        }
+        Ok(())
+    }
 }
 
 /// A request as sent by a client.
@@ -100,6 +185,74 @@ pub enum ServiceResponse {
 /// A dispatched method. It receives only requests that passed every check.
 pub trait ServiceHandler {
     fn handle(&self, request: &ServiceRequest) -> Result<Value, ServiceError>;
+}
+
+/// Decode and validate the one typed browser-ingestion request. Keeping this
+/// at the service boundary prevents a handler from accidentally accepting a
+/// raw URL or a path-bearing navigation in a future call site.
+pub fn browser_navigation_from_request(
+    request: &ServiceRequest,
+) -> Result<BrowserNavigationAdmission, ServiceError> {
+    if request.capability != ServiceCapability::Ingest
+        || request.method != BROWSER_NAVIGATION_INGEST_METHOD
+    {
+        return Err(ServiceError::BrowserIngestMalformed);
+    }
+    let admission: BrowserNavigationAdmission = serde_json::from_value(request.params.clone())
+        .map_err(|_| ServiceError::BrowserIngestMalformed)?;
+    admission.validate()?;
+    Ok(admission)
+}
+
+/// Build a bounded service request for a canonical browser admission.
+pub fn browser_navigation_request(
+    service_instance: Uuid,
+    request_id: Uuid,
+    deadline_ms: u64,
+    admission: BrowserNavigationAdmission,
+) -> Result<ServiceRequest, ServiceError> {
+    admission.validate()?;
+    if service_instance.is_nil() || request_id.is_nil() {
+        return Err(ServiceError::BrowserIngestMalformed);
+    }
+    if deadline_ms == 0 || Duration::from_millis(deadline_ms) > MAX_SERVICE_DEADLINE {
+        return Err(ServiceError::InvalidDeadline);
+    }
+    let params =
+        serde_json::to_value(admission).map_err(|_| ServiceError::BrowserIngestMalformed)?;
+    Ok(ServiceRequest {
+        protocol_version: LOCAL_SERVICE_PROTOCOL_VERSION,
+        service_instance,
+        request_id,
+        deadline_ms,
+        capability: ServiceCapability::Ingest,
+        method: BROWSER_NAVIGATION_INGEST_METHOD.to_owned(),
+        params,
+    })
+}
+
+/// Send one typed browser admission through the authenticated local service.
+pub fn ingest_browser_navigation(
+    socket_path: &Path,
+    service_instance: Uuid,
+    request_id: Uuid,
+    deadline_ms: u64,
+    admission: BrowserNavigationAdmission,
+) -> Result<BrowserNavigationAck, ServiceError> {
+    let service_request =
+        browser_navigation_request(service_instance, request_id, deadline_ms, admission)?;
+    match request(socket_path, &service_request)? {
+        ServiceResponse::Ok { request_id: response_id, result }
+            if response_id == service_request.request_id =>
+        {
+            let acknowledgement: BrowserNavigationAck =
+                serde_json::from_value(result).map_err(|_| ServiceError::BrowserIngestMalformed)?;
+            acknowledgement.validate()?;
+            Ok(acknowledgement)
+        }
+        ServiceResponse::Ok { .. } => Err(ServiceError::Malformed),
+        ServiceResponse::Refused { error } => Err(error),
+    }
 }
 
 /// The bound service socket and its admission state.
@@ -169,6 +322,7 @@ impl LocalService {
     pub fn serve_one<H: ServiceHandler>(&mut self, handler: &H) -> Result<(), ServiceError> {
         let (mut stream, _) = self.listener.accept().map_err(|_| ServiceError::Io)?;
         stream.set_read_timeout(Some(MAX_SERVICE_DEADLINE)).map_err(|_| ServiceError::Io)?;
+        stream.set_write_timeout(Some(MAX_SERVICE_DEADLINE)).map_err(|_| ServiceError::Io)?;
         let response = match self.admit(&mut stream) {
             Ok(request) => match handler.handle(&request) {
                 Ok(result) => ServiceResponse::Ok { request_id: request.request_id, result },
@@ -206,6 +360,9 @@ impl LocalService {
             || Duration::from_millis(request.deadline_ms) > MAX_SERVICE_DEADLINE
         {
             return Err(ServiceError::InvalidDeadline);
+        }
+        if request.request_id.is_nil() {
+            return Err(ServiceError::Malformed);
         }
         if request.method.is_empty() || request.method.len() > 64 {
             return Err(ServiceError::Malformed);
@@ -260,6 +417,7 @@ pub fn request(
     let mut stream = UnixStream::connect(socket_path).map_err(|_| ServiceError::Io)?;
     let deadline = Duration::from_millis(request.deadline_ms);
     stream.set_read_timeout(Some(deadline)).map_err(|_| ServiceError::Io)?;
+    stream.set_write_timeout(Some(deadline)).map_err(|_| ServiceError::Io)?;
     write_message(&mut stream, &serde_json::to_vec(request).map_err(|_| ServiceError::Malformed)?)?;
     let body = read_message(&mut stream)?;
     serde_json::from_slice(&body).map_err(|_| ServiceError::Malformed)

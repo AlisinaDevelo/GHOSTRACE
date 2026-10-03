@@ -103,6 +103,7 @@ fn capabilities_are_separate_and_denied_by_default() {
     let mut service =
         LocalService::bind(&parent.path().join("svc"), [ServiceCapability::Read]).expect("bind");
     for capability in [
+        ServiceCapability::Ingest,
         ServiceCapability::Export,
         ServiceCapability::Policy,
         ServiceCapability::Lifecycle,

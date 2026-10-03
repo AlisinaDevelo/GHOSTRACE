@@ -963,8 +963,9 @@ Journals that committed the earlier `cursor-<id>` form continue forward.
 ## Native-messaging protocol
 
 `src/native_messaging.rs` is the strict codec for the extension-to-host channel
-proposed in [ADR 0005](adr/0005-browser-transport-and-permissions.md); no native
-host binary or extension ships yet. `FrameDecoder` reads Chromium's 4-byte
+in [ADR 0005](adr/0005-browser-transport-and-permissions.md). The executable
+bridge is exposed as `ghostrace native-host run`, but no browser extension or
+release manifest is claimed by this slice. `FrameDecoder` reads Chromium's 4-byte
 native-endian length prefix incrementally and refuses a zero, oversized (above
 64 KiB), or truncated frame before allocating its body. `parse_message` rejects
 invalid UTF-8, then scans structure (at most 8 levels of nesting and 256 JSON
@@ -984,12 +985,20 @@ frames with no panic and no echoed content.
 ## Local service socket
 
 `LocalService` (`src/local_service.rs`) is the only way a local client will reach
-the service; it exposes no methods of its own yet. It binds `ghostrace.sock` in a
+the service. Its `browser_navigation_v1` method is the sole browser-ingestion
+entry point in this slice: the request contains an event ID, approved browser
+label, `CanonicalNavigation`, observation time, and a bounded missing count. It
+has no raw URL, query, fragment, userinfo, or path. The service rejects a
+path-bearing `CanonicalNavigation` rather than silently dropping the field. It
+binds `ghostrace.sock` in a
 directory that must be a real directory owned by the current user with no group
 or other access (created with mode 0700 if absent, never followed through a
 symbolic link), sets the socket to mode 0600, and replaces only a stale socket it
 owns; any other file at that path is refused and kept. No TCP, UDP, or HTTP
-listener exists.
+listener exists. The native host receives the current service socket and
+per-start instance UUID explicitly; it never opens the journal or receives its
+key. `BrowserIngestService` is the service-side single-writer adapter that
+projects the accepted admission through the existing `Writer`.
 
 Each connection is admitted in order: the peer must be the same effective user
 (`getpeereid` on macOS, `SO_PEERCRED` on Linux); the length-prefixed request must
@@ -997,7 +1006,7 @@ be at most 64 KiB of strict JSON; the protocol version must be 1; the request mu
 name the service's per-start instance ID, so a client cannot talk to a different
 or restarted service by accident; the deadline must be between 1 ms and 30 s; the
 request ID must not have been seen in the replay window; and the requested
-capability (`read`, `export`, `policy`, `lifecycle`, `admin`) must have been
+capability (`ingest`, `read`, `export`, `policy`, `lifecycle`, `admin`) must have been
 granted when the service was bound. Nothing is granted by default, and refusals
 are fixed error values. `tests/local_service.rs` covers each check.
 
@@ -1067,3 +1076,43 @@ replay, deadline, and rate rules; then a navigation is reduced by
 `CanonicalNavigation` or counted as refused. The caller closes the connection on
 any error. `tests/native_host_session.rs` drives the full handshake from the
 extension's side.
+
+## Native host bridge and pairing storage
+
+`NativeBridge` (`src/native_bridge.rs`) is the executable per-connection
+boundary. It reads the bounded encrypted pairing store, selects the requested
+pairing record, re-checks revocation and
+approval expiry on every post-handshake frame, keeps `UrlShapePolicy::OriginOnly`, and forwards a
+typed admission to `LocalServiceClient`. The pairing CLI (`pair`, `list`, and
+`revoke`) is explicit and user-consented; pairing records are bounded,
+authenticated, and atomically persisted in `pairings.enc` beside an independent
+0600 `pairing.key`. The one-time extension secret is printed only by the approval
+receipt and is absent from list output; the host retains its copy inside the
+authenticated ciphertext so a restart can authenticate the paired extension.
+Each admitted frame holds a shared pairing-store lease through the service's
+durable acknowledgement. Revocation needs an exclusive lease, so a successful
+revocation receipt cannot race an in-flight admission; lock contention returns
+the fixed `pairing_busy` refusal after at most five seconds. Atomic publications
+sync the file and parent directory before acknowledgement.
+
+The production stdio loop polls the native-messaging file descriptor before each
+read, so the pre-hello and partial-frame cases have a real idle deadline rather
+than relying on a blocking `Read`; the protocol's connection-start anchor means
+rejected pre-hello frames cannot extend that deadline. Native stdout writes are
+also nonblocking and deadline-bounded, so a browser that stops reading cannot
+hold the process forever. A clean `goodbye` closes the protocol; any complete or
+partial bytes after it are refused as trailing/framing data. Chrome
+launches the absolute manifest binary with exactly one `chrome-extension://id/`
+argument. `main` validates that argument before opening the pairing store or
+consuming stdin, and the authenticated `hello.extension_id` must match it. The
+service publishes only a bounded, private endpoint receipt containing its socket
+path and fresh instance UUID; it never publishes a journal path or key.
+
+The retained-fields approval is intentionally constrained to `origin` because
+the existing browser event payload has no field for `CanonicalNavigation`'s
+optional path class. A path-retaining request is refused during pairing, and a
+path-bearing service admission is refused at the service boundary. This is a
+deliberate visible policy boundary, not silent field loss. Synthetic tests cover
+restart, revocation, key/permission drift, replayed transcripts, private-context
+refusal, framed stdio, service capability denial, and the journal projection;
+they do not claim a browser installation or release integration.

@@ -30,8 +30,14 @@ pub enum HostMessage {
     /// The pairing was admitted; the extension derives the session key from
     /// its secret, its client nonce, and `host_nonce`.
     Welcome { protocol_version: u32, host_nonce: String },
+    /// A navigation was admitted and committed through the LocalService writer.
+    Accepted { event_id: Uuid, missing: u64 },
+    /// A heartbeat was authenticated and accepted.
+    Heartbeat { missing: u64 },
     /// The session ends; `reason` is a fixed code.
     Refused { reason: String },
+    /// The extension ended the session cleanly.
+    Closed,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Error)]
@@ -79,11 +85,38 @@ pub struct NativeHostSession {
     protocol: ProtocolSession,
     paired: Option<PairedSession>,
     policy: UrlShapePolicy,
+    expected_extension_id: Option<String>,
 }
 
 impl NativeHostSession {
     pub fn new(policy: UrlShapePolicy) -> Self {
-        Self { protocol: ProtocolSession::new(), paired: None, policy }
+        Self::with_expected_extension_id(policy, None)
+    }
+
+    /// Construct a session whose browser-supplied caller origin has already
+    /// been reduced to an exact extension ID. The check is kept inside the
+    /// post-admission parse path so malformed input cannot bypass ingress
+    /// accounting or make the bridge inspect bytes before the rate budget.
+    pub fn with_expected_extension_id(
+        policy: UrlShapePolicy,
+        expected_extension_id: Option<String>,
+    ) -> Self {
+        Self::with_expected_extension_id_at(policy, expected_extension_id, None)
+    }
+
+    /// Construct a session anchored to its connection start. The runner uses
+    /// this form so rejected or malformed pre-hello frames cannot keep moving
+    /// the handshake deadline forward indefinitely.
+    pub fn with_expected_extension_id_at(
+        policy: UrlShapePolicy,
+        expected_extension_id: Option<String>,
+        started_at: Option<Duration>,
+    ) -> Self {
+        let protocol = match started_at {
+            Some(started_at) => ProtocolSession::new_at(started_at),
+            None => ProtocolSession::new(),
+        };
+        Self { protocol, paired: None, policy, expected_extension_id }
     }
 
     /// Handle one frame body. `pairing` looks up an approval by its ID.
@@ -97,16 +130,27 @@ impl NativeHostSession {
     where
         F: FnOnce(Uuid) -> Option<PairingRecord>,
     {
+        // Count every complete frame before parsing or authentication. The
+        // caller-origin check and the MAC check below must not provide a way
+        // around the protocol ingress budget.
+        self.protocol.admit_attempt(now)?;
         let message = parse_message(body)?;
         if let ExtensionMessage::Hello {
-            pairing_id,
             extension_id,
+            pairing_id,
             extension_key_digest,
             permissions_digest,
             client_nonce,
             ..
         } = &message
         {
+            if self
+                .expected_extension_id
+                .as_deref()
+                .is_some_and(|expected| expected != extension_id)
+            {
+                return Err(NativeSessionError::Pairing(PairingError::NotPaired));
+            }
             if self.paired.is_none() {
                 let record = pairing(*pairing_id).ok_or(PairingError::NotPaired)?;
                 let hello = ClientHello {
@@ -117,7 +161,7 @@ impl NativeHostSession {
                     client_nonce: decode_hex32(client_nonce)?,
                 };
                 let session = PairedSession::open(&record, &hello, wall_clock)?;
-                self.protocol.receive(body, now)?;
+                self.protocol.receive_after_admission(body, now)?;
                 let host_nonce = encode_hex(&session.host_nonce);
                 self.paired = Some(session);
                 return Ok(HostOutput::Reply(HostMessage::Welcome {
@@ -126,7 +170,7 @@ impl NativeHostSession {
                 }));
             }
             // A second hello is handled (and refused) by the protocol rules.
-            self.protocol.receive(body, now)?;
+            self.protocol.receive_after_admission(body, now)?;
             return Err(NativeSessionError::Protocol(NativeMessagingError::DuplicateHello));
         }
 
@@ -139,7 +183,7 @@ impl NativeHostSession {
             .verify(message.seq(), &input, &mac)
             .map_err(|_| NativeSessionError::Unauthenticated)?;
 
-        let (accepted, missing) = match self.protocol.receive(body, now)? {
+        let (accepted, missing) = match self.protocol.receive_after_admission(body, now)? {
             SessionEvent::Accepted(message) => (message, 0),
             SessionEvent::AcceptedAfterGap { message, missing } => (message, missing),
             SessionEvent::Closed => return Ok(HostOutput::Closed),
