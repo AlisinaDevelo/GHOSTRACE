@@ -1,7 +1,7 @@
 ---
 id: 0126
 title: Ship a redacted self-diagnostic health report
-status: backlog
+status: in-progress
 agent: sre
 model: human
 release: M7
@@ -27,4 +27,7 @@ Give users an offline way to inspect collector, policy, key, journal, cursor, ga
 Support evidence should explain system health without becoming a secondary sensitive journal.
 
 ## Notes
-Planned in the 2026–2031 GHOSTRACE program. Completion requires the acceptance evidence above; issue closure alone is not evidence.
+Implementing bounded key-free offline inspection with fixed status/remediation
+codes and aggregate counts. Unknown runtime, permissions, keys and update state
+must remain explicitly not checked. Dependency 0040 remains a release gate;
+implementation and local acceptance do not close the operational program.

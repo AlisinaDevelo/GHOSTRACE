@@ -58,16 +58,80 @@ pub(crate) fn open_database(path: &Path) -> Result<Connection, GhostraceError> {
 /// Open the current database as a read-only SQLite connection after the same
 /// sidecar and ownership checks used by the writer.
 pub(crate) fn open_read_only_database(path: &Path) -> Result<Connection, GhostraceError> {
-    verify_database_artifacts(path)?;
+    open_read_only_database_inner(path, None)
+}
+
+/// Refuse oversized SQLite recovery/coordination input before SQLite opens it.
+pub(crate) fn open_bounded_read_only_database(
+    path: &Path,
+    max_sidecar_bytes: u64,
+) -> Result<Connection, GhostraceError> {
+    open_read_only_database_inner(path, Some(max_sidecar_bytes))
+}
+
+fn open_read_only_database_inner(
+    path: &Path,
+    max_sidecar_bytes: Option<u64>,
+) -> Result<Connection, GhostraceError> {
+    let parent = parent_directory(path)?;
+    let parent_identity = verify_existing_private_directory(parent)?;
+    verify_read_only_artifacts(path, max_sidecar_bytes)?;
     let mut options = OpenOptions::new();
     options.read(true);
     add_no_follow(&mut options);
     let file = options.open(path).map_err(|error| secure_open_error(path, error))?;
-    verify_file_handle(path, &file)?;
-    drop(file);
+    let file_identity = verify_file_handle(path, &file)?;
+    run_test_open_hook(path);
+    if verify_existing_private_directory(parent)? != parent_identity
+        || verify_private_file(path)? != file_identity
+    {
+        return Err(GhostraceError::PathRace);
+    }
+    verify_read_only_artifacts(path, max_sidecar_bytes)?;
     let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-    verify_database_artifacts(path)?;
+    // Keep the verified descriptor alive until SQLite's path-based open and
+    // the second identity comparison have completed.
+    if verify_existing_private_directory(parent)? != parent_identity
+        || verify_private_file(path)? != file_identity
+    {
+        return Err(GhostraceError::PathRace);
+    }
+    verify_read_only_artifacts(path, max_sidecar_bytes)?;
+    drop(file);
     Ok(connection)
+}
+
+fn verify_existing_private_directory(path: &Path) -> Result<FileIdentity, GhostraceError> {
+    check_directory_components(path, false)?;
+    let metadata = symlink_metadata(path)?;
+    verify_directory_metadata(path, &metadata, true)?;
+    Ok(file_identity(&metadata))
+}
+
+fn verify_read_only_artifacts(
+    path: &Path,
+    max_sidecar_bytes: Option<u64>,
+) -> Result<(), GhostraceError> {
+    verify_existing_private_directory(parent_directory(path)?)?;
+    verify_private_file(path)?;
+    let mut total_bytes = 0_u64;
+    for suffix in DATABASE_ARTIFACT_SUFFIXES {
+        let sidecar = sidecar_path(path, suffix)?;
+        match fs::symlink_metadata(&sidecar) {
+            Ok(metadata) => {
+                verify_file_metadata(&sidecar, &metadata)?;
+                total_bytes = total_bytes
+                    .checked_add(metadata.len())
+                    .ok_or(GhostraceError::ReadOnlyResourceLimit)?;
+                if max_sidecar_bytes.is_some_and(|limit| total_bytes > limit) {
+                    return Err(GhostraceError::ReadOnlyResourceLimit);
+                }
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(io_error(&sidecar, error)),
+        }
+    }
+    Ok(())
 }
 
 /// Ensure the journal's database directory exists and is private to the
@@ -304,6 +368,10 @@ fn verify_directory_metadata(
 }
 
 fn ensure_directory_components(path: &Path) -> Result<(), GhostraceError> {
+    check_directory_components(path, true)
+}
+
+fn check_directory_components(path: &Path, create_missing: bool) -> Result<(), GhostraceError> {
     if path.as_os_str().is_empty()
         || path.components().any(|component| matches!(component, Component::ParentDir))
     {
@@ -335,6 +403,9 @@ fn ensure_directory_components(path: &Path) -> Result<(), GhostraceError> {
                         }
                     }
                     Err(error) if error.kind() == ErrorKind::NotFound => {
+                        if !create_missing {
+                            return Err(io_error(&current, error));
+                        }
                         fs::create_dir(&current).map_err(|create_error| {
                             if create_error.kind() == ErrorKind::AlreadyExists {
                                 GhostraceError::PathRace
@@ -388,8 +459,9 @@ fn parent_directory(path: &Path) -> Result<&Path, GhostraceError> {
 }
 
 fn sidecar_path(path: &Path, suffix: &str) -> Result<PathBuf, GhostraceError> {
-    let name = path.file_name().ok_or(GhostraceError::UnsafePath)?.to_string_lossy();
-    Ok(path.with_file_name(format!("{name}{suffix}")))
+    let mut name = path.file_name().ok_or(GhostraceError::UnsafePath)?.to_os_string();
+    name.push(suffix);
+    Ok(path.with_file_name(name))
 }
 
 fn is_sidecar_path(path: &Path) -> bool {
@@ -521,23 +593,22 @@ fn owned_by_current_user(metadata: &Metadata) -> bool {
 
 #[cfg(test)]
 mod test_hooks {
-    use std::{
-        path::Path,
-        sync::{Mutex, OnceLock},
-    };
+    use std::{cell::RefCell, path::Path};
 
     type Hook = Box<dyn FnOnce(&Path) + Send + 'static>;
 
-    static OPEN_HOOK: OnceLock<Mutex<Option<Hook>>> = OnceLock::new();
+    thread_local! {
+        static OPEN_HOOK: RefCell<Option<Hook>> = const { RefCell::new(None) };
+    }
 
     pub(super) fn install(hook: Hook) {
-        let slot = OPEN_HOOK.get_or_init(|| Mutex::new(None));
-        let mut guard = slot.lock().expect("test hook lock");
-        assert!(guard.replace(hook).is_none(), "test hook already installed");
+        OPEN_HOOK.with(|slot| {
+            assert!(slot.borrow_mut().replace(hook).is_none(), "test hook already installed");
+        });
     }
 
     pub(super) fn take() -> Option<Hook> {
-        OPEN_HOOK.get().and_then(|slot| slot.lock().expect("test hook lock").take())
+        OPEN_HOOK.with(|slot| slot.borrow_mut().take())
     }
 }
 
@@ -564,6 +635,17 @@ mod tests {
     fn private(path: &Path) {
         fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_DIRECTORY_MODE))
             .expect("private mode");
+    }
+
+    #[test]
+    fn sidecar_suffixes_preserve_non_utf8_path_bytes() {
+        use std::{
+            ffi::OsString,
+            os::unix::ffi::{OsStrExt, OsStringExt},
+        };
+        let path = PathBuf::from(OsString::from_vec(b"journal-\xff.sqlite3".to_vec()));
+        let sidecar = sidecar_path(&path, "-wal").unwrap();
+        assert_eq!(sidecar.as_os_str().as_bytes(), b"journal-\xff.sqlite3-wal");
     }
 
     #[test]
@@ -628,6 +710,44 @@ mod tests {
 
         fs::remove_file(&parent).expect("remove replacement symlink");
         fs::rename(&moved, &parent).expect("restore journal directory");
+    }
+
+    #[test]
+    fn readonly_database_rejects_private_file_or_parent_replacement() {
+        for replace_parent in [false, true] {
+            let root = tempdir().unwrap();
+            let root_path = fs::canonicalize(root.path()).unwrap();
+            private(&root_path);
+            let parent = root_path.join("journal");
+            fs::create_dir(&parent).unwrap();
+            private(&parent);
+            let path = parent.join("journal.sqlite3");
+            let database = open_database(&path).unwrap();
+            database.execute_batch("CREATE TABLE original(value TEXT)").unwrap();
+            drop(database);
+            let original = if replace_parent { parent.clone() } else { path.clone() };
+            let moved = root_path.join("moved");
+            let replacement = original.clone();
+            test_hooks::install(Box::new(move |_| {
+                fs::rename(&original, &moved).unwrap();
+                if replace_parent {
+                    fs::create_dir(&replacement).unwrap();
+                    private(&replacement);
+                    let new_database = replacement.join("journal.sqlite3");
+                    fs::write(&new_database, b"").unwrap();
+                    set_file_mode(&new_database).unwrap();
+                } else {
+                    fs::write(&replacement, b"").unwrap();
+                    set_file_mode(&replacement).unwrap();
+                }
+            }));
+            let result = open_read_only_database(&path);
+            let _ = test_hooks::take();
+            assert!(
+                matches!(result, Err(GhostraceError::PathRace)),
+                "must refuse a different private inode, replace_parent={replace_parent}"
+            );
+        }
     }
 
     #[test]

@@ -100,6 +100,10 @@ cargo +1.88.0 run -- integrity-check \
 cargo +1.88.0 run -- authenticated-check \
   --journal "$JOURNAL"
 
+# Inspect only offline aggregate health, without accessing a key. Unchecked
+# runtime/permission/update state stays unknown; availability is not integrity.
+cargo +1.88.0 run -- health --journal "$JOURNAL" --json
+
 # Create a signed, path-free local verification checkpoint. It binds the
 # checkpointed database bytes, schema, policy digest, authenticated chain
 # position, key generation, integrity receipt, and verification time.
