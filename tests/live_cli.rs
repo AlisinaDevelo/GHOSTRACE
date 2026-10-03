@@ -243,8 +243,12 @@ fn init_run_timeline_and_forget_round_trip() {
             let _ = ghostrace(&["live", "forget", "--home", self.0, "--yes"]);
         }
     }
-    assert!(ghostrace(&["live", "init", "--home", home]).status.success());
+    let initialized = ghostrace(&["live", "init", "--home", home]);
+    assert!(initialized.status.success());
     let _forget = Forget(home);
+    let init_message = String::from_utf8_lossy(&initialized.stdout);
+    assert!(init_message.contains("`ghostrace run -- <command>` requires"));
+    assert!(init_message.contains("policy-gated without requiring shell consent"));
 
     // Without consent, `run` refuses before spawning anything.
     let marker = directory.path().join("spawned");

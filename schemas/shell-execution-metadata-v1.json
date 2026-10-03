@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/AlisinaDevelo/GHOSTRACE/schemas/shell-execution-metadata-v1.json",
   "title": "GHOSTRACE explicit shell execution metadata v1",
-  "description": "Metadata-only record for a command deliberately routed through a future wrapper. Raw command text, arguments, environment, terminal streams, and shell state have no schema representation.",
+  "description": "Metadata-only record for a command deliberately routed through the explicit wrapper. Raw command text, arguments, environment, terminal streams, and shell state have no schema representation.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "wrapper_session_id", "executable_id", "working_directory", "started_at", "ended_at", "status", "exit_code", "signal"],

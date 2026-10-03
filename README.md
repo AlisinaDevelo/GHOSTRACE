@@ -145,7 +145,7 @@ The demo output labels evidence as direct, contextual, inferred, or unknown, and
 surfaces gaps instead of filling them with a guess. The same fixture and event ID
 produce the same explanation after a process restart. `demo --fixture ...` remains
 available as an in-memory shortcut. The durable CLI path uses a deterministic
-synthetic key only for this fixture-only headstart; it is not a production
+synthetic key only for this fixture CLI; it is not a production
 encryption or key-management claim.
 
 ## What is implemented now
@@ -174,7 +174,7 @@ encryption or key-management claim.
 | ghostrace archive --export ... --output ... --yes | Opt-in (`--features parquet`); writes a plaintext Parquet cold archive from a validated JSONL export, reads it back and compares every record before an atomic 0600 publish, and never replaces an existing file |
 | ghostrace verify-archive --archive ... --export ... | Opt-in; rechecks an archive against its footer digests and its source export |
 | ghostrace shell-schema | Available; prints the strict v1 metadata-only contract; this schema command executes no shell |
-| ghostrace live init / status / timeline / explain / forget | Available on macOS; an explicitly created private home with encrypted payloads and opt-in login-Keychain custody, bounded reads, and confirmed deletion |
+| ghostrace live init / status / timeline / explain / forget | Available on macOS; an explicitly created private home with encrypted payloads and opt-in login-Keychain custody, and confirmed deletion. Status/timeline currently materialize the full journal before counting/limiting output; large-journal read scalability is not proven |
 | ghostrace live watch <folder> [--seconds N] [--yes] | Available on macOS after a consent preview; observes only the requested root until the deadline or Ctrl-C, with source gaps and internal-output suppression; not ambient capture |
 | ghostrace run -- <program> [args...] | Available on macOS after persisted revocable shell consent; deliberately runs one requested program and records only bounded identity/timing/outcome metadata |
 | ghostrace live git-snapshot <repository> | Available on macOS; explicitly runs hardened read-only Git plumbing and projects bounded metadata/history limits into the journal; no remote fetch |
@@ -291,6 +291,8 @@ GHOSTRACE is designed around a narrow local boundary:
   only when an operator explicitly runs its GitHub commands. The checked-in
   network-denied runner verifies direct IP denial while preserving Unix IPC;
   local proxy containment is outside that guarantee (see ADR 0004).
+  The explicit `run` wrapper is not a network sandbox: its deliberately requested
+  child inherits the caller's environment and terminal and may use networking.
 - **User-authorized:** the selected-root collector requires explicit consent, selected
   scope, and a versioned policy. No event is retained before policy evaluation.
 - **Minimized:** the baseline records bounded metadata about changes. It does not

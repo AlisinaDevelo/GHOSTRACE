@@ -1,6 +1,6 @@
 //! Privacy-bounded Git snapshot metadata.
 //!
-//! This module is the input contract for a future, explicitly requested Git
+//! This module is the input contract for the explicitly requested Git
 //! snapshot adapter.  It accepts already-normalized metadata and never accepts
 //! a path, a ref name, a remote, a command line, or an object reader.  In
 //! particular, constructing or validating a snapshot cannot open a Git object

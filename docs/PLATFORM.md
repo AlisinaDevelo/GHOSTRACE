@@ -1,7 +1,7 @@
 # Platform policy
 
-GHOSTRACE is macOS-first because its first live source and its future protected key
-store are macOS facilities. The current fixture core is intentionally portable
+GHOSTRACE is macOS-first because its live sources and Keychain providers are
+macOS facilities. The current fixture core is intentionally portable
 enough to build and test on Linux; portability must not weaken the macOS privacy
 boundary.
 
@@ -13,7 +13,7 @@ boundary.
 | Architectures | Apple silicon and Intel are design targets; each must be tested against the supported macOS floor before release |
 | Fixture core | Linux and macOS CI exercise parsing, policy, storage, explain, and export without ambient capture |
 | Distribution | No signed, notarized, or bundled release artifact is shipped in the headstart |
-| Permissions | The fixture path requests none; live permissions are a future, explicit decision |
+| Permissions | The fixture path requests none; current local live paths require their explicit consent/policy boundaries without root, Full Disk Access, Accessibility or Automation; new permission classes remain separate release decisions |
 
 The complete, machine-readable support and permission contract is in the
 [support matrix](SUPPORT_MATRIX.md). It records target versus verified macOS
@@ -58,7 +58,8 @@ consent, and release evidence.
 
 ## Keychain constraints
 
-The journal wrapping key is scoped to the macOS data-protection Keychain. The provider
+The default library provider scopes the journal wrapping key to the macOS
+data-protection Keychain. The provider
 uses the `com.alisinadevelo.ghostrace.journal` service and
 `journal-wrapping-key-v1` account, disables iCloud synchronization, and requires
 `WhenUnlockedThisDeviceOnly` access control. The default application uses no access
@@ -66,6 +67,10 @@ group. A command-line helper or extension must be code-signed with the same bund
 identity and any explicitly configured Keychain access group; otherwise the provider
 reports a bounded failure. Key reads are available only in an unlocked user login
 session, and no legacy-keychain fallback is permitted.
+
+The unsigned explicit live CLI instead selects login-Keychain custody deliberately;
+it is not a fallback after a data-protection failure. Signed/entitled production
+data-protection distribution and the broader device matrix remain release gates.
 
 ## FSEvents boundary
 
@@ -88,9 +93,9 @@ adapter never opens a reported path. Consumers that must open an existing item u
 keeps each directory descriptor as the authority for the next component, rejects
 different-device descendants and regular files with hard-link aliases, and returns
 an explicit refusal when a component is replaced. Symlink and hard-link callbacks
-remain source facts and are not opened. Exclusion matching, volume/cursor recovery,
-and release-scale persistence remain separate gates; no FSEvents cursor is persisted
-by this first slice, so the ambient CLI remains refused.
+remain source facts and are not opened. Exclusion and durable volume/cursor
+contracts are implemented separately; complete sleep/wake, logout, detach and
+release-scale evidence remain gates. Ambient CLI capture stays refused.
 
 The shipped lifecycle adapter is the native stream fence beneath the collector. It requires a
 single owner thread and that thread's current Core Foundation run loop; it does not
@@ -100,8 +105,8 @@ never allowed to unwind through the C ABI, and a native stream is released only
 after invalidation. The separate selected-root consent preview now makes canonical
 opaque roots, exclusions, retained fields, and FSEvents coverage limits explicit
 before a grant; descriptor-backed no-follow symlink and hard-link containment is now
-explicit for later opens, while exclusions, cursor recovery, and release-scale
-persistence remain no-go gates for ambient capture. Path digests use a
+explicit for later opens, while complete lifecycle/recovery and release-scale
+acceptance remain no-go gates for ambient capture. Path digests use a
 versioned scope containing the opaque root ID and filesystem identity, and are stable only
 within that root's OS canonicalization and digest scope—not as cross-volume identifiers.
 
@@ -118,9 +123,10 @@ policy.
 
 ## Private contexts
 
-Private browsing and private application contexts are excluded by default. A future
-browser or frontmost adapter must define how it detects private context and must not
-turn it on merely because a user selected a filesystem root.
+Private browsing is excluded by policy; the browser collector remains unimplemented.
+The opt-in frontmost adapter withholds password managers and explicit exclusions,
+but does not inspect windows or detect a browser's private mode. Selecting a
+filesystem root never authorizes recording another source or private context.
 
 ## CI and cross-platform work
 

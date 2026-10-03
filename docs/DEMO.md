@@ -60,13 +60,14 @@ $G live forget
 $ ghostrace live init --home <workspace>/home
 GHOSTRACE home created at <workspace>/home
 Key custody: login keychain (explicit opt-in for unsigned builds).
-Nothing is recorded until you ask: `ghostrace live consent-shell` then
-`ghostrace run -- <command>`, `ghostrace live watch <folder>`, or
-`ghostrace live git-snapshot`. Never recorded: file contents or readable
+Nothing is recorded until you ask. `ghostrace run -- <command>` requires
+`ghostrace live consent-shell`; `ghostrace live watch <folder>` has its own
+consent preview, and `ghostrace live git-snapshot` is explicitly invoked and
+policy-gated without requiring shell consent. Never recorded: file contents or readable
 file names, command arguments, environment, terminal input or output,
 branch or remote names, or which app made a change.
 
-## 2. Nothing runs through GHOSTRACE until you consent
+## 2. The run wrapper requires persisted shell consent
 $ ghostrace run --home <workspace>/home -- /usr/bin/true
 error: invalid event: `ghostrace run` needs your consent first; run `ghostrace live consent-shell`
 $ ghostrace live consent-shell --home <workspace>/home --yes

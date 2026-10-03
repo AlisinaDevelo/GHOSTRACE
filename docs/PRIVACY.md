@@ -239,7 +239,7 @@ it only verifies that the application does not retain them.
 
 ### Git repository and worktree identity
 
-The Git identity contract is metadata-only and path-free. A future adapter may read
+The Git identity contract is metadata-only and path-free. The explicit adapter reads
 the common object database and worktree directory metadata, but persistence receives
 only domain-separated digests of their device/file identities, an opaque selected-root
 ID, an explicit source scope, and a repository-kind enum. Remote URLs, credential
@@ -248,11 +248,12 @@ rejected by strict deserialization. The checked-in synthetic matrix covers move,
 clone, linked-worktree, submodule, bare, source-scope rebinding, and repository
 reinitialization outcomes. A move is continuous only after the selected-root binding
 is deliberately retained; clone and reinitialization break repository continuity.
-This contract does not run Git, fetch remotes, or claim authorship, intent, or source
-completeness.
+The identity type itself does not run Git. The separate snapshot adapter uses
+read-only Git plumbing, never fetches remotes, and does not establish authorship,
+intent, or source completeness.
 
 The companion [`GitSnapshotMetadata`](GIT_SNAPSHOT.md) contract is the baseline
-for any future explicit snapshot. It retains only an opaque repository identity,
+for the explicit snapshot adapter. It retains only an opaque repository identity,
 algorithm-tagged optional HEAD/tree/index IDs, branch and operation classes,
 bounded status counts, and required limitation states for partial clones,
 replace refs, shallow history, submodules, and alternate object databases.
@@ -260,6 +261,9 @@ Ref names, messages, authors, remotes, config, reflogs, diffs, patches,
 filenames, untracked content, and paths have no representation. The constructor
 accepts normalized values only and performs no object or filesystem reads;
 unknown source conditions remain explicit `unknown` limitations.
+The user-invoked `live git-snapshot` validates and projects this metadata and
+history gaps into the journal. It uses Git source policy, not the persisted shell
+consent required by `run`; it is not an ambient repository watcher.
 
 ## Retention and deletion
 

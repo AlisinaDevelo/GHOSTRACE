@@ -163,7 +163,7 @@ place without replacing an existing file. Any failure removes the temporary.
 ### Explicit shell-wrapper metadata
 
 [`schemas/shell-execution-metadata-v1.json`](../schemas/shell-execution-metadata-v1.json)
-defines the only metadata a future user-invoked shell wrapper may submit. The
+defines the only metadata the explicit user-invoked shell wrapper may submit. The
 strict v1 record contains an opaque wrapper session, a normalized executable
 basename identity, a working-directory class plus root-scoped digest, start and
 end timestamps, an outcome class, an exit code, and a signal. The raw working
@@ -178,12 +178,12 @@ input/output, shell history, aliases, command text, or expanded command text.
 `ShellExecutionMetadata` uses deny-unknown-fields deserialization plus semantic
 validation, and its field registry records the semantic and sensitivity class of
 every retained field. This is a data contract, not a shell executor or ambient
-collector; a later wrapper must remain explicit and policy-gated.
+collector; the separate implemented wrapper remains explicit and consent-gated.
 
 ### Git repository and worktree identity
 
 [`git-repository-worktree-identity-v1.json`](../schemas/git-repository-worktree-identity-v1.json)
-defines the path-free identity boundary for the future explicit Git adapter. The
+defines the path-free identity boundary used by the explicit Git adapter. The
 adapter resolves Git's common object database and worktree metadata, then passes
 only device/file identity values to `GitIdentity::from_stable_parts` (or
 `from_paths`, which reads and immediately discards directory metadata). The
@@ -204,16 +204,18 @@ output into retained evidence.
 
 ### Metadata-only Git snapshot boundary
 
-[`GitSnapshotMetadata`](GIT_SNAPSHOT.md) is the privacy contract for the next
-Git integration stage. It accepts an opaque repository identity, an explicit
+[`GitSnapshotMetadata`](GIT_SNAPSHOT.md) is the pure-data privacy contract used by
+the explicit Git snapshot adapter. It accepts an opaque repository identity, an explicit
 SHA-1 or SHA-256 format, optional algorithm-tagged HEAD/tree/index IDs, bounded
 status counts, branch and operation classes, and required source limitations.
 It has no path, ref name, remote, message, author, filename, diff, patch, or
 object-content field. Its constructors perform no filesystem, Git, network, or
-object-database I/O; a future adapter must normalize metadata before calling
+object-database I/O; the separate adapter normalizes metadata before calling
 them and must discard all other command output. Unknown source conditions are
 represented explicitly rather than promoted to complete history. The snapshot
-schema and digest are validated before any future event projection.
+schema and digest are validated before `live git-snapshot` projects metadata and
+history gaps into the journal. This explicit policy-gated command does not require
+the persisted shell consent that `run` requires.
 
 ### Shell-wrapper lifecycle reference harness
 
@@ -271,15 +273,15 @@ within one process because these dispositions are process-global. `executable_id
 
 [`fixtures/shell-secret-leakage-v1.json`](../fixtures/shell-secret-leakage-v1.json)
 and `tests/shell_secret_leakage.rs` are a synthetic, unique-sentinel corpus for the
-future wrapper boundary. The tests inject sentinels into arguments, environment,
+wrapper data boundary. The tests inject sentinels into arguments, environment,
 standard input/output/error, executable names, working paths, failure messages,
 prompt text, process titles, diagnostics, crash-report context, and command text.
 Metadata validation, journal ingestion, diagnostics, exports, CLI output, and panic
 output reject or omit every sentinel before GHOSTRACE retention. Process inspection
 and operating-system crash reporting may expose synthetic process state outside the
 application; those rows are documented as `os_visible_not_retained`, not claimed as
-privacy guarantees. This red-team contract adds no event fields and does not ship a
-shell executor or ambient capture path.
+privacy guarantees. This red-team contract adds no event fields or executor of
+its own; the separate consented `run` wrapper does not authorize ambient capture.
 
 ### Frontmost-application identity boundary
 
@@ -664,6 +666,11 @@ pages, in addition to the matching-row count used to detect retention deletion.
 | Journal | Store local event metadata and encrypted payloads | SQLite/WAL, migrations, replay boundaries and authenticated state implemented; explicit live path uses login Keychain, not a signed production data-protection release |
 | Explain/export | Produce deterministic evidence-linked explanations and explicit exports | Fixture and explicit live surfaces, preview-bound JSONL, optional Parquet and offline HTML |
 | Query | Return bounded, policy-scoped pages from a stable logical ingest snapshot | Encrypted-token pagination is implemented and covered by concurrent-ingest, deletion, token-negative, and migration tests |
+
+The live CLI's `status` and `timeline` currently call `Journal::events`, which
+materializes and decrypts all events before counting or limiting displayed rows.
+Their output limit is not a read-memory bound; release-scale read performance
+remains unverified. This path is distinct from the paginated query API above.
 
 ## Event lifecycle
 

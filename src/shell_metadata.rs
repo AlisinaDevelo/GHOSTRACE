@@ -1,7 +1,7 @@
 //! Strict metadata-only contract for an explicitly invoked shell wrapper.
 //!
 //! This module is deliberately separate from the ambient collector and from
-//! command execution. It describes the small record a future wrapper may
+//! command execution. It describes the small record the explicit wrapper may
 //! submit after a user deliberately routes a command through it. Raw command
 //! text, arguments, environment, terminal streams, and shell state have no
 //! representation in these types or in the checked-in schema.

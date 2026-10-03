@@ -945,9 +945,10 @@ mod live {
                 println!("GHOSTRACE home created at {}", dir.display());
                 println!("Key custody: login keychain (explicit opt-in for unsigned builds).");
                 println!(
-                    "Nothing is recorded until you ask: `ghostrace live consent-shell` then\n\
-                     `ghostrace run -- <command>`, `ghostrace live watch <folder>`, or\n\
-                     `ghostrace live git-snapshot`. Never recorded: file contents or readable\n\
+                    "Nothing is recorded until you ask. `ghostrace run -- <command>` requires\n\
+                     `ghostrace live consent-shell`; `ghostrace live watch <folder>` has its own\n\
+                     consent preview, and `ghostrace live git-snapshot` is explicitly invoked and\n\
+                     policy-gated without requiring shell consent. Never recorded: file contents or readable\n\
                      file names, command arguments, environment, terminal input or output,\n\
                      branch or remote names, or which app made a change."
                 );
