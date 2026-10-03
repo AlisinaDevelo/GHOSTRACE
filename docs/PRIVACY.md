@@ -392,7 +392,7 @@ and `.lan`) are treated the same way, because they reveal internal services just
 an address would. An
 opt-in `first_path_segment` policy keeps the first path segment only when it is a
 short lowercase word (at most 16 characters and one separator); anything else
-becomes an origin-scoped digest, so the same token on two origins is not
+becomes an origin-scoped digest, so the same token on two different retained origins is not
 represented by the same digest. The pre-collector v2 digest domain binds the
 host class, complete retained origin (including scheme and non-default port),
 and length-framed segment. Withheld private hosts intentionally share the

@@ -166,6 +166,11 @@ fn opaque_path_digests_bind_the_complete_retained_origin() {
     ] {
         assert_eq!(baseline, shape(equivalent), "canonical equivalence");
     }
+    assert_eq!(
+        shape("http://example.com/Zt7xQ"),
+        shape("HTTP://EXAMPLE.COM:80/Zt7xQ"),
+        "HTTP default port"
+    );
     // Withheld private hosts intentionally share the same minimized origin.
     // A digest is not evidence that two internal services are the same host.
     assert_eq!(shape("https://10.1.2.3/Zt7xQ"), shape("https://nas.local/Zt7xQ"));
@@ -179,6 +184,17 @@ fn opaque_path_digests_bind_the_complete_retained_origin() {
         shape("https://private-network/Zt7xQ"),
         "host class boundary"
     );
+    let private_port = shape("https://10.1.2.3:8443/Zt7xQ");
+    assert_ne!(private_port, shape("https://10.1.2.3/Zt7xQ"), "private port boundary");
+    for raw in ["https://nas.local.:8443/Zt7xQ", "https://[fd00::7]:8443/Zt7xQ"] {
+        let navigation =
+            CanonicalNavigation::from_url(raw, false, UrlShapePolicy::FirstPathSegment)
+                .expect("private navigation");
+        assert_eq!(navigation.host, None);
+        assert_eq!(navigation.path_segment, Some(private_port.clone()));
+        let json = serde_json::to_string(&navigation).expect("JSON");
+        assert!(!json.contains("nas.local") && !json.contains("fd00"));
+    }
 }
 
 #[test]
