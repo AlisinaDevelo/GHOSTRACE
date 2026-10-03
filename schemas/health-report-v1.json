@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ghostrace.local/schemas/health-report-v1.json",
+  "title": "GHOSTRACE offline health report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "software_version", "journal_schema_version", "journal", "key", "collectors", "policy", "cursors", "coverage", "service", "permissions", "updates", "counts"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "software_version": {"type": "string", "maxLength": 64, "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+([+-][A-Za-z0-9.-]+)?$"},
+    "journal_schema_version": {"type": ["integer", "null"], "minimum": 0, "maximum": 4294967295},
+    "journal": {"$ref": "#/$defs/component"},
+    "key": {"$ref": "#/$defs/component"},
+    "collectors": {"$ref": "#/$defs/component"},
+    "policy": {"$ref": "#/$defs/component"},
+    "cursors": {"$ref": "#/$defs/component"},
+    "coverage": {"$ref": "#/$defs/component"},
+    "service": {"$ref": "#/$defs/component"},
+    "permissions": {"$ref": "#/$defs/component"},
+    "updates": {"$ref": "#/$defs/component"},
+    "counts": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/counts"}]}
+  },
+  "$defs": {
+    "component": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "reason", "remediation"],
+      "properties": {
+        "status": {"enum": ["available_unverified", "needs_attention", "not_checked", "unavailable"]},
+        "reason": {"enum": ["metadata_readable", "missing_storage", "unsafe_storage", "unreadable_storage", "unsupported_format", "storage_busy", "storage_budget_exceeded", "query_budget_exceeded", "coverage_gaps", "inactive_or_unknown_cursor", "no_policy_records", "no_events_observed", "no_cursor_records", "key_not_read", "runtime_not_probed", "permission_not_probed", "offline_no_update_check"]},
+        "remediation": {"enum": ["verify_with_configured_key", "select_existing_journal", "review_private_storage", "preserve_and_inspect_recovery", "use_compatible_version", "retry_at_quiet_time", "review_coverage_locally", "review_cursor_locally", "review_policy_locally", "review_key_custody", "inspect_runtime_locally", "review_permissions_locally", "review_release_locally"]}
+      }
+    },
+    "count": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615},
+    "counts": {
+      "type": "object", "additionalProperties": false,
+      "required": ["events", "gaps", "policy_versions", "cursors", "inactive_or_unknown_cursors", "diagnostics"],
+      "properties": {
+        "events": {"$ref": "#/$defs/count"}, "gaps": {"$ref": "#/$defs/count"},
+        "policy_versions": {"$ref": "#/$defs/count"}, "cursors": {"$ref": "#/$defs/count"},
+        "inactive_or_unknown_cursors": {"$ref": "#/$defs/count"}, "diagnostics": {"$ref": "#/$defs/count"}
+      }
+    }
+  }
+}

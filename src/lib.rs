@@ -32,6 +32,7 @@ pub mod git_history;
 pub mod git_hooks;
 pub mod git_identity;
 pub mod git_snapshot;
+pub mod health;
 pub mod integrity;
 pub mod journal;
 pub mod key_lifecycle;

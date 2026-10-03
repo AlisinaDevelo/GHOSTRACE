@@ -2954,6 +2954,101 @@ fn validate_final_schema(
     Ok(())
 }
 
+/// Validate the current format without migration or loading unbounded ledger
+/// text. This is structural readability, not authenticated journal integrity.
+pub(crate) fn validate_read_only_schema(connection: &Connection) -> Result<u32, GhostraceError> {
+    let specs = migration_specs();
+    let expected_version = specs.last().expect("migration catalog is non-empty").schema_version;
+    let database_version = read_user_version(connection)?;
+    if database_version > expected_version {
+        return Err(GhostraceError::FutureMigration { version: database_version });
+    }
+    if database_version < expected_version {
+        return Err(GhostraceError::UnsupportedDowngrade {
+            recorded: expected_version,
+            database: database_version,
+        });
+    }
+    // Build the expected column contract from the exact compiled catalog, so a
+    // future migration cannot leave a duplicate health schema silently stale.
+    // These statements affect only an empty, private in-memory connection.
+    let expected = Connection::open_in_memory()?;
+    for spec in &specs {
+        expected.execute_batch(spec.sql)?;
+    }
+    let mut tables = expected.prepare(
+        "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+    )?;
+    let table_names = tables.query_map([], |row| row.get::<_, String>(0))?;
+    for name in table_names {
+        let name = name?;
+        let ordinary_table: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_list WHERE schema='main' AND name=?1 AND type='table')",
+            [&name], |row| row.get(0),
+        )?;
+        if !ordinary_table
+            || schema_columns(connection, &name)? != schema_columns(&expected, &name)?
+        {
+            return Err(GhostraceError::MigrationLedger(
+                "table contract is inconsistent".to_owned(),
+            ));
+        }
+    }
+    // Bound all ledger strings before the normal validator materializes them.
+    let bounded_ledger: bool = connection.query_row(
+        "SELECT (SELECT COUNT(1) FROM migration_records)=?1 AND NOT EXISTS(
+            SELECT 1 FROM migration_records WHERE
+            typeof(version)!='integer' OR typeof(schema_version)!='integer' OR
+            typeof(migration_id)!='text' OR length(CAST(migration_id AS BLOB))>96 OR
+            typeof(checksum)!='text' OR length(CAST(checksum AS BLOB))!=64 OR
+            typeof(tool_version)!='text' OR length(CAST(tool_version AS BLOB))>64 OR
+            typeof(applied_at)!='text' OR length(CAST(applied_at AS BLOB))>64) AND
+            (SELECT COUNT(1) FROM schema_versions)=?2 AND
+            (SELECT COUNT(1) FROM migration_state)=1 AND
+            NOT EXISTS(SELECT 1 FROM migration_state WHERE typeof(state_key)!='text' OR length(CAST(state_key AS BLOB))>16 OR typeof(state_value)!='text' OR length(CAST(state_value AS BLOB))>32) AND
+            NOT EXISTS(SELECT 1 FROM journal_metadata WHERE typeof(metadata_key)!='text' OR length(CAST(metadata_key AS BLOB))>128 OR typeof(metadata_value)!='text' OR length(CAST(metadata_value AS BLOB))>1024) AND
+            EXISTS(SELECT 1 FROM migration_state WHERE state_key='mode' AND state_value IN ('new','legacy-v1')) AND
+            EXISTS(SELECT 1 FROM journal_metadata WHERE metadata_key='format' AND metadata_value='ghostrace-journal-v1')",
+        params![specs.len() as i64, specs.len() as i64 - 1], |row| row.get(0),
+    )?;
+    if !bounded_ledger {
+        return Err(GhostraceError::MigrationLedger(
+            "read-only ledger bounds are inconsistent".to_owned(),
+        ));
+    }
+    validate_final_schema(connection, &specs).map_err(|error| match error {
+        GhostraceError::Database(_) => error,
+        // At the current user_version, inconsistent records are corruption or
+        // interrupted migration, not evidence that another version is needed.
+        _ => GhostraceError::MigrationLedger("current schema ledger is inconsistent".to_owned()),
+    })?;
+    Ok(expected_version)
+}
+
+type SchemaColumn = (String, String, bool, Option<String>, u32, u32);
+
+fn schema_columns(
+    connection: &Connection,
+    table: &str,
+) -> Result<Vec<SchemaColumn>, GhostraceError> {
+    let oversized: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_xinfo(?1) WHERE length(CAST(name AS BLOB))>64 OR length(CAST(type AS BLOB))>64 OR length(CAST(dflt_value AS BLOB))>128)",
+        [table], |row| row.get(0),
+    )?;
+    if oversized {
+        return Err(GhostraceError::MigrationLedger(
+            "column metadata exceeds read-only bounds".to_owned(),
+        ));
+    }
+    let mut statement = connection.prepare(
+        "SELECT name,type,\"notnull\",dflt_value,pk,hidden FROM pragma_table_xinfo(?1) ORDER BY cid",
+    )?;
+    let columns = statement.query_map([table], |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?))
+    })?;
+    columns.collect::<rusqlite::Result<Vec<_>>>().map_err(GhostraceError::from)
+}
+
 fn load_applied_migrations(
     connection: &Connection,
 ) -> Result<Vec<AppliedMigration>, GhostraceError> {

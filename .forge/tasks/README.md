@@ -129,7 +129,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0123 | Practice disaster recovery and incident response | M6 | backlog | release-scale | incident-responder | 0040 | 0023, 0037, 0089 |
 | 0124 | Build the Endpoint Security attribution evaluation harness | M6 | backlog | release-scale | security-researcher | 0042 | 0017, 0019, 0037 |
 | 0125 | Pass the v1.1 operational resilience gate | M7 | backlog | operations | tech-lead | — | 0040, 0126, 0127, 0128, 0129, 0130, 0131 |
-| 0126 | Ship a redacted self-diagnostic health report | M7 | backlog | operations | sre | 0125 | 0040 |
+| 0126 | Ship a redacted self-diagnostic health report | M7 | in-progress | operations | sre | 0125 | 0040 |
 | 0127 | Build guided backup, restore, and upgrade recovery | M7 | backlog | operations | database-expert | 0125 | 0040 |
 | 0128 | Operate an annual macOS compatibility lab | M7 | backlog | operations | macos-engineer | 0125 | 0040, 0045 |
 | 0129 | Complete accessibility and localization certification | M7 | backlog | operations | accessibility-specialist | 0125 | 0036, 0040 |

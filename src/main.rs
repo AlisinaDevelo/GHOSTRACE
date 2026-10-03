@@ -23,6 +23,13 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Inspect offline aggregate health without reading a key or retained payloads.
+    Health {
+        #[arg(long)]
+        journal: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
     /// Run one command and record its metadata (never its arguments, output, or environment).
     Run {
         /// GHOSTRACE home (default: ~/Library/Application Support/GHOSTRACE).
@@ -355,6 +362,19 @@ fn parquet_unavailable() -> GhostraceError {
 
 fn run(cli: Cli) -> Result<(), GhostraceError> {
     match cli.command {
+        Command::Health { journal, json } => {
+            let report = ghostrace::health::HealthReport::inspect(&journal);
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print!("{}", report.human());
+            }
+            if !report.readable() {
+                // The bounded report is the entire refusal, including on stderr.
+                std::process::exit(1);
+            }
+            Ok(())
+        }
         Command::Run { home, command } => live::run(home, command),
         Command::Live { command } => live::dispatch(command),
         Command::Init { journal } => {

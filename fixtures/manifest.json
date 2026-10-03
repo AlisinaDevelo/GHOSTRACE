@@ -222,6 +222,14 @@
       "seed": "ghostrace-fixture-seed-v1",
       "sha256": "f33cb022fbb65bd3e8afa73bb7686ebebab31d199135f225eed87a7b9ffa9b4f",
       "bytes": 8394
+    },
+    {
+      "path": "fixtures/health-prohibited-v1.json",
+      "format": "json",
+      "generator_version": "ghostrace-fixture-manifest-v1",
+      "seed": "ghostrace-fixture-seed-v1",
+      "sha256": "722caf68343c46788616f7a8d56cb1d80596a6a575560e0ac7c0bc8c69761337",
+      "bytes": 452
     }
   ],
   "privacy": {

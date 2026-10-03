@@ -363,6 +363,11 @@ fn persistent_journal_does_not_record_feedback_from_internal_denials() {
         )
         .expect("collector");
         collector.start().expect("start");
+        // Drain startup delivery before binding the export snapshot. Startup
+        // journal writes can already produce excluded-path notifications;
+        // those notifications are not evidence that the write below arrived.
+        collector.flush().expect("flush startup delivery");
+        let denials_before = collector.status().internal_path_denials;
         let export_path = directory.path().join("preview.jsonl");
         let export_policy = ghostrace::PolicyProfile::from_document(&policy()).expect("policy");
         let preview = ghostrace::preview_export(
@@ -376,11 +381,14 @@ fn persistent_journal_does_not_record_feedback_from_internal_denials() {
             .expect("internal write");
         for _ in 0..100 {
             collector.run_current_run_loop_for(Duration::from_millis(50)).expect("drive");
-            if collector.status().internal_path_denials > 0 {
+            if collector.status().internal_path_denials > denials_before {
                 break;
             }
         }
-        assert!(collector.status().internal_path_denials > 0, "internal write not observed");
+        assert!(
+            collector.status().internal_path_denials > denials_before,
+            "a new internal write was not observed after the startup boundary"
+        );
         let after_internal_write = ghostrace::preview_export(
             &collector.journal(),
             &export_policy,
