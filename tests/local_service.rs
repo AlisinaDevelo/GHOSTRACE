@@ -7,11 +7,11 @@ use std::{
     io::{Read, Write},
     os::unix::{
         fs::{symlink, MetadataExt, PermissionsExt},
-        net::UnixStream,
+        net::{UnixListener, UnixStream},
     },
     path::Path,
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use ghostrace::{
@@ -26,6 +26,23 @@ struct Echo;
 impl ServiceHandler for Echo {
     fn handle(&self, request: &ServiceRequest) -> Result<Value, ServiceError> {
         Ok(json!({"method": request.method}))
+    }
+}
+
+struct DeadlineEcho;
+
+impl ServiceHandler for DeadlineEcho {
+    fn handle(&self, request: &ServiceRequest) -> Result<Value, ServiceError> {
+        Ok(json!({"method": request.method}))
+    }
+
+    fn handle_with_deadline(
+        &self,
+        request: &ServiceRequest,
+        context: ghostrace::local_service::ServiceRequestContext,
+    ) -> Result<Value, ServiceError> {
+        assert!(!context.is_expired());
+        self.handle(request)
     }
 }
 
@@ -51,6 +68,14 @@ fn request_for(service: &LocalService, capability: ServiceCapability) -> Service
 /// waits a fixed time rather than the request's own deadline, so a request
 /// the server must refuse for its deadline still gets its answer read.
 fn roundtrip(service: &mut LocalService, request: &ServiceRequest) -> ServiceResponse {
+    roundtrip_with(service, request, &Echo)
+}
+
+fn roundtrip_with<H: ServiceHandler>(
+    service: &mut LocalService,
+    request: &ServiceRequest,
+    handler: &H,
+) -> ServiceResponse {
     let path = service.socket_path().to_path_buf();
     let body = serde_json::to_vec(request).expect("request JSON");
     let client = thread::spawn(move || {
@@ -64,7 +89,7 @@ fn roundtrip(service: &mut LocalService, request: &ServiceRequest) -> ServiceRes
         stream.read_exact(&mut response).expect("response body");
         serde_json::from_slice::<ServiceResponse>(&response).expect("response JSON")
     });
-    service.serve_one(&Echo).expect("serve");
+    service.serve_one(handler).expect("serve");
     client.join().expect("client")
 }
 
@@ -103,6 +128,7 @@ fn capabilities_are_separate_and_denied_by_default() {
     let mut service =
         LocalService::bind(&parent.path().join("svc"), [ServiceCapability::Read]).expect("bind");
     for capability in [
+        ServiceCapability::Ingest,
         ServiceCapability::Export,
         ServiceCapability::Policy,
         ServiceCapability::Lifecycle,
@@ -118,6 +144,18 @@ fn capabilities_are_separate_and_denied_by_default() {
 }
 
 #[test]
+fn compatible_handler_receives_a_monotonic_deadline_context() {
+    let parent = private_parent();
+    let mut service =
+        LocalService::bind(&parent.path().join("svc"), [ServiceCapability::Read]).expect("bind");
+    let request = request_for(&service, ServiceCapability::Read);
+    assert!(matches!(
+        roundtrip_with(&mut service, &request, &DeadlineEcho),
+        ServiceResponse::Ok { .. }
+    ));
+}
+
+#[test]
 fn the_client_refuses_an_invalid_deadline_before_connecting() {
     let parent = private_parent();
     let service =
@@ -130,6 +168,21 @@ fn the_client_refuses_an_invalid_deadline_before_connecting() {
             Err(ServiceError::InvalidDeadline)
         );
     }
+}
+
+#[test]
+fn client_budget_covers_a_connected_socket_that_never_answers() {
+    let parent = private_parent();
+    let service =
+        LocalService::bind(&parent.path().join("svc"), [ServiceCapability::Read]).expect("bind");
+    let request =
+        ServiceRequest { deadline_ms: 25, ..request_for(&service, ServiceCapability::Read) };
+    let started = Instant::now();
+    assert_eq!(
+        service_request(service.socket_path(), &request),
+        Err(ServiceError::DeadlineExceeded)
+    );
+    assert!(started.elapsed() < Duration::from_secs(2));
 }
 
 #[test]
@@ -223,13 +276,57 @@ fn unsafe_directories_and_socket_paths_are_refused_without_following_links() {
     fs::write(squatted.join("ghostrace.sock"), "not a socket").expect("file");
     assert_eq!(LocalService::bind(&squatted, []).err(), Some(ServiceError::UnsafeSocketPath));
     assert_eq!(fs::read_to_string(squatted.join("ghostrace.sock")).expect("kept"), "not a socket");
+}
 
-    // A stale socket from an earlier run is replaced.
-    let service = LocalService::bind(&parent.path().join("svc"), []).expect("first");
-    let socket = service.socket_path().to_path_buf();
-    std::mem::forget(service);
+#[test]
+fn stale_socket_is_reclaimed_but_a_second_active_binder_is_refused() {
+    let parent = private_parent();
+    let directory = parent.path().join("svc");
+    fs::create_dir(&directory).expect("dir");
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).expect("chmod");
+    let socket = directory.join("ghostrace.sock");
+    let stale = UnixListener::bind(&socket).expect("stale listener");
+    drop(stale);
+    let first = LocalService::bind(&directory, []).expect("reclaim stale socket");
     assert!(socket.exists());
-    LocalService::bind(&parent.path().join("svc"), []).expect("rebind over stale socket");
+    assert_eq!(LocalService::bind(&directory, []).err(), Some(ServiceError::AlreadyRunning));
+    drop(first);
+}
+
+#[test]
+fn an_active_unmanaged_socket_is_not_unlinked() {
+    let parent = private_parent();
+    let directory = parent.path().join("svc");
+    fs::create_dir(&directory).expect("dir");
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).expect("chmod");
+    let socket = directory.join("ghostrace.sock");
+    let active = UnixListener::bind(&socket).expect("active listener");
+    assert_eq!(LocalService::bind(&directory, []).err(), Some(ServiceError::AlreadyRunning));
+    assert!(socket.exists(), "active listener path must not be unlinked");
+    drop(active);
+}
+
+#[test]
+fn stale_socket_probe_is_bounded_nonblocking_and_refuses_unknown_results() {
+    let source = include_str!("../src/local_service.rs");
+    assert!(source.contains("STALE_SOCKET_PROBE_BUDGET"));
+    assert!(source.contains("connect_nonblocking_outcome"));
+    assert!(source.contains("wait_for_connect"));
+    assert!(source.contains("NonblockingConnect::TimedOut | NonblockingConnect::Unknown"));
+    assert!(!source.contains("UnixStream::connect(socket_path)"));
+}
+
+#[test]
+fn dropping_an_old_owner_does_not_unlink_a_replacement_inode() {
+    let parent = private_parent();
+    let directory = parent.path().join("svc");
+    let first = LocalService::bind(&directory, []).expect("first");
+    let socket = first.socket_path().to_path_buf();
+    fs::remove_file(&socket).expect("simulate displacement");
+    let replacement = UnixListener::bind(&socket).expect("replacement listener");
+    drop(first);
+    assert!(socket.exists(), "old owner must not unlink replacement");
+    drop(replacement);
 }
 
 #[test]

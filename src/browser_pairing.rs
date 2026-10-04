@@ -10,6 +10,12 @@
 //! sequence number and body, so a transcript from an earlier session never
 //! verifies. A different extension ID is refused; a changed key or permission
 //! set, an expired approval, or a revoked pairing requires re-pairing.
+//!
+//! The browser channel, profile class, extension ID, and extension-provided
+//! key/permission digests are user- and credential-declared scope. They are
+//! not OS-attested browser identity or proof that a particular profile
+//! launched the process; the native host treats them only as claims bound to
+//! the approved pairing credential.
 
 use std::collections::BTreeSet;
 
@@ -20,10 +26,21 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::browser_origin::CanonicalNavigation;
+
 /// How long an approval stays valid before the user must re-pair.
 pub const PAIRING_LIFETIME_DAYS: i64 = 90;
 const SESSION_KEY_DOMAIN: &[u8] = b"ghostrace-browser-session-v1\0";
 const MESSAGE_MAC_DOMAIN: &[u8] = b"ghostrace-browser-message-v1\0";
+const DELIVERY_EVENT_ID_DOMAIN: &[u8] = b"ghostrace-browser-delivery-event-v1\0";
+/// Domain for the host-to-service credential. It is distinct from the
+/// extension message MAC and delivery-ID domains so a valid transcript cannot
+/// be replayed across either protocol.
+pub const BROWSER_RELAY_PROOF_DOMAIN: &[u8] = b"ghostrace-browser-relay-proof-v1\0";
+/// Maximum encoded transcript size for one canonical service admission.
+/// Canonical origin-only navigation is far smaller; this is a defensive cap
+/// for direct callers and future schema growth.
+pub const MAX_BROWSER_RELAY_TRANSCRIPT_BYTES: usize = 4 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Error, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -153,6 +170,161 @@ pub struct ClientHello {
     pub extension_key_digest: String,
     pub permissions_digest: String,
     pub client_nonce: [u8; 32],
+}
+
+/// Derive the durable identity of one browser delivery attempt.
+///
+/// This identifier binds the approved pairing identity, the extension's
+/// reconnect-stable client nonce, and its sequence number. Authentication
+/// still comes from the per-session MAC; the value is a deduplication key, not
+/// a credential. Its separate domain prevents cross-protocol digest reuse.
+pub fn delivery_event_id(pairing_id: Uuid, client_nonce: &[u8; 32], seq: u64) -> Uuid {
+    let mut input = Vec::with_capacity(DELIVERY_EVENT_ID_DOMAIN.len() + 16 + 32 + 8);
+    input.extend_from_slice(DELIVERY_EVENT_ID_DOMAIN);
+    input.extend_from_slice(pairing_id.as_bytes());
+    input.extend_from_slice(client_nonce);
+    input.extend_from_slice(&seq.to_be_bytes());
+    let digest = Sha256::digest(input);
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    // Keep UUID variant/version bits conventional without implying random
+    // UUID-v4 semantics; this value is deterministic by contract.
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Uuid::from_bytes(bytes)
+}
+
+/// Build the authenticated host-to-service relay transcript.
+///
+/// Every identity and admission component is length-framed, including the
+/// canonical navigation JSON. The proof therefore binds the service instance,
+/// request ID, stable delivery ID, original observation timestamp, browser,
+/// canonical navigation, missing count, pairing, reconnect-stable client
+/// nonce, and accepted sequence. No raw URL or journal key is part of this
+/// transcript.
+// Explicit transcript fields keep every authenticated component visible at call sites.
+#[allow(clippy::too_many_arguments)]
+fn browser_relay_proof_transcript(
+    pairing_id: Uuid,
+    client_nonce: &[u8; 32],
+    sequence: u64,
+    service_instance: Uuid,
+    request_id: Uuid,
+    event_id: Uuid,
+    observed_at: DateTime<Utc>,
+    browser: &str,
+    navigation: &CanonicalNavigation,
+    missing: u64,
+) -> Result<Vec<u8>, PairingError> {
+    let navigation = serde_json::to_vec(navigation).map_err(|_| PairingError::BadMac)?;
+    if navigation.len() > MAX_BROWSER_RELAY_TRANSCRIPT_BYTES {
+        return Err(PairingError::BadMac);
+    }
+
+    let sequence_bytes = sequence.to_be_bytes();
+    let timestamp_seconds = observed_at.timestamp().to_be_bytes();
+    let timestamp_nanos = observed_at.timestamp_subsec_nanos().to_be_bytes();
+    let missing_bytes = missing.to_be_bytes();
+    let mut transcript = Vec::with_capacity(MAX_BROWSER_RELAY_TRANSCRIPT_BYTES);
+    transcript.extend_from_slice(BROWSER_RELAY_PROOF_DOMAIN);
+    for field in [
+        pairing_id.as_bytes(),
+        client_nonce.as_slice(),
+        &sequence_bytes,
+        service_instance.as_bytes(),
+        request_id.as_bytes(),
+        event_id.as_bytes(),
+        &timestamp_seconds,
+        &timestamp_nanos,
+        browser.as_bytes(),
+        &navigation,
+        &missing_bytes,
+    ] {
+        let field_len = u32::try_from(field.len()).map_err(|_| PairingError::BadMac)?;
+        let required = transcript
+            .len()
+            .checked_add(4)
+            .and_then(|length| length.checked_add(field.len()))
+            .ok_or(PairingError::BadMac)?;
+        if required > MAX_BROWSER_RELAY_TRANSCRIPT_BYTES {
+            return Err(PairingError::BadMac);
+        }
+        transcript.extend_from_slice(&field_len.to_be_bytes());
+        transcript.extend_from_slice(field);
+    }
+    Ok(transcript)
+}
+
+/// Compute the MAC carried by the Unix LocalService `BrowserRelayProof`.
+/// The transport struct remains in the Unix LocalService module; this helper
+/// deliberately returns only the MAC so the pairing module does not gain a
+/// dependency on that platform-specific wire type.
+// Explicit transcript fields keep every authenticated component visible at call sites.
+#[allow(clippy::too_many_arguments)]
+pub fn browser_relay_proof_mac(
+    secret: &[u8; 32],
+    pairing_id: Uuid,
+    client_nonce: &[u8; 32],
+    sequence: u64,
+    service_instance: Uuid,
+    request_id: Uuid,
+    event_id: Uuid,
+    observed_at: DateTime<Utc>,
+    browser: &str,
+    navigation: &CanonicalNavigation,
+    missing: u64,
+) -> Result<[u8; 32], PairingError> {
+    let transcript = browser_relay_proof_transcript(
+        pairing_id,
+        client_nonce,
+        sequence,
+        service_instance,
+        request_id,
+        event_id,
+        observed_at,
+        browser,
+        navigation,
+        missing,
+    )?;
+    Ok(hmac_sha256(secret, &transcript))
+}
+
+/// Verify a relay proof MAC in constant time.
+// Explicit transcript fields keep every authenticated component visible at call sites.
+#[allow(clippy::too_many_arguments)]
+pub fn verify_browser_relay_proof_mac(
+    secret: &[u8; 32],
+    mac: &[u8; 32],
+    pairing_id: Uuid,
+    client_nonce: &[u8; 32],
+    sequence: u64,
+    service_instance: Uuid,
+    request_id: Uuid,
+    event_id: Uuid,
+    observed_at: DateTime<Utc>,
+    browser: &str,
+    navigation: &CanonicalNavigation,
+    missing: u64,
+) -> Result<(), PairingError> {
+    let expected = browser_relay_proof_mac(
+        secret,
+        pairing_id,
+        client_nonce,
+        sequence,
+        service_instance,
+        request_id,
+        event_id,
+        observed_at,
+        browser,
+        navigation,
+        missing,
+    )?;
+    let difference = expected.iter().zip(mac).fold(0u8, |acc, (a, b)| acc | (a ^ b));
+    if difference == 0 {
+        Ok(())
+    } else {
+        Err(PairingError::BadMac)
+    }
 }
 
 /// One authenticated session. Its key exists only for this host start and

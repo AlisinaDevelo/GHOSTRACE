@@ -25,6 +25,7 @@ use thiserror::Error;
 pub const NATIVE_HOST_NAME: &str = "com.alisinadevelo.ghostrace";
 /// Receipt kept beside the manifest.
 pub const NATIVE_HOST_RECEIPT_SUFFIX: &str = ".ghostrace-receipt";
+const NATIVE_HOST_PENDING_RECEIPT_SUFFIX: &str = ".ghostrace-receipt.pending";
 /// The browsers this host supports, each with its per-user manifest directory
 /// below the user's `Library/Application Support`.
 pub const NATIVE_HOST_CHANNELS: [(&str, &str); 4] = [
@@ -130,6 +131,7 @@ impl NativeHostInstaller {
 
     pub fn plan(&self, channel: &str) -> Result<NativeHostChange, NativeHostError> {
         let (channel, directory) = self.directory(channel)?;
+        reconcile_pending(&directory)?;
         let path = directory.join(format!("{NATIVE_HOST_NAME}.json"));
         let desired = self.manifest_bytes();
         let action = match (read_regular(&path)?, read_receipt(&directory)?) {
@@ -155,28 +157,46 @@ impl NativeHostInstaller {
         }
         ensure_safe_directory(&directory)?;
         let desired = self.manifest_bytes();
+        let receipt = Receipt { schema_version: 1, manifest_sha256: digest(&desired) };
+        let receipt_bytes = serde_json::to_vec_pretty(&receipt).map_err(|_| NativeHostError::Io)?;
         match change.action {
-            NativeHostAction::Create => write_new(&change.path, &desired)?,
-            NativeHostAction::Replace => replace(&change.path, &desired)?,
+            NativeHostAction::Create | NativeHostAction::Replace => {
+                // Publish a recovery receipt before replacing the manifest.
+                // If the process dies between the two renames, the next
+                // planner can reconcile this exact digest instead of treating
+                // its own half-publication as a foreign manifest.
+                replace(&pending_receipt_path(&directory), &receipt_bytes)?;
+                if change.action == NativeHostAction::Create {
+                    write_new(&change.path, &desired)?;
+                } else {
+                    replace(&change.path, &desired)?;
+                }
+            }
             _ => {}
         }
-        let receipt = Receipt { schema_version: 1, manifest_sha256: digest(&desired) };
-        replace(
-            &receipt_path(&directory),
-            &serde_json::to_vec_pretty(&receipt).map_err(|_| NativeHostError::Io)?,
-        )?;
+        if matches!(change.action, NativeHostAction::Create | NativeHostAction::Replace) {
+            replace(&receipt_path(&directory), &receipt_bytes)?;
+            fs::remove_file(pending_receipt_path(&directory)).map_err(|_| NativeHostError::Io)?;
+            sync_directory(&directory)?;
+        }
         Ok(change)
     }
 
     pub fn verify(&self, channel: &str) -> Result<NativeHostHealth, NativeHostError> {
         let (_, directory) = self.directory(channel)?;
-        let Some(receipt) = read_receipt(&directory)? else {
-            return Ok(NativeHostHealth::NotInstalled);
-        };
         let path = directory.join(format!("{NATIVE_HOST_NAME}.json"));
+        let Some(receipt) = read_receipt(&directory)? else {
+            return Ok(match read_regular(&path)? {
+                None => NativeHostHealth::NotInstalled,
+                Some(_) => NativeHostHealth::Drifted,
+            });
+        };
+        let desired = self.manifest_bytes();
         Ok(match read_regular(&path) {
             Ok(None) => NativeHostHealth::Missing,
-            Ok(Some(current)) if digest(&current) == receipt.manifest_sha256 => {
+            Ok(Some(current))
+                if digest(&current) == receipt.manifest_sha256 && current == desired =>
+            {
                 NativeHostHealth::Intact
             }
             _ => NativeHostHealth::Drifted,
@@ -185,6 +205,7 @@ impl NativeHostInstaller {
 
     pub fn uninstall(&self, channel: &str) -> Result<NativeHostChange, NativeHostError> {
         let (channel, directory) = self.directory(channel)?;
+        reconcile_pending(&directory)?;
         let path = directory.join(format!("{NATIVE_HOST_NAME}.json"));
         let Some(receipt) = read_receipt(&directory)? else {
             return match read_regular(&path)? {
@@ -195,11 +216,13 @@ impl NativeHostInstaller {
         match read_regular(&path)? {
             Some(current) if digest(&current) == receipt.manifest_sha256 => {
                 fs::remove_file(&path).map_err(|_| NativeHostError::Io)?;
+                sync_directory(&directory)?;
             }
             Some(_) => return Err(NativeHostError::Drift),
             None => {}
         }
         fs::remove_file(receipt_path(&directory)).map_err(|_| NativeHostError::Io)?;
+        sync_directory(&directory)?;
         Ok(NativeHostChange { channel, path, action: NativeHostAction::Remove })
     }
 
@@ -254,6 +277,10 @@ fn receipt_path(directory: &Path) -> PathBuf {
     directory.join(format!("{NATIVE_HOST_NAME}{NATIVE_HOST_RECEIPT_SUFFIX}"))
 }
 
+fn pending_receipt_path(directory: &Path) -> PathBuf {
+    directory.join(format!("{NATIVE_HOST_NAME}{NATIVE_HOST_PENDING_RECEIPT_SUFFIX}"))
+}
+
 fn current_uid() -> u32 {
     // SAFETY: geteuid has no preconditions.
     unsafe { libc::geteuid() }
@@ -288,11 +315,49 @@ fn read_regular(path: &Path) -> Result<Option<Vec<u8>>, NativeHostError> {
 fn read_receipt(directory: &Path) -> Result<Option<Receipt>, NativeHostError> {
     match read_regular(&receipt_path(directory))? {
         None => Ok(None),
-        Some(bytes) => serde_json::from_slice::<Receipt>(&bytes)
-            .ok()
-            .filter(|receipt| receipt.schema_version == 1)
-            .map(Some)
-            .ok_or(NativeHostError::Drift),
+        Some(bytes) => decode_receipt(&bytes).map(Some),
+    }
+}
+
+fn decode_receipt(bytes: &[u8]) -> Result<Receipt, NativeHostError> {
+    serde_json::from_slice::<Receipt>(bytes)
+        .ok()
+        .filter(|receipt| receipt.schema_version == 1)
+        .ok_or(NativeHostError::Drift)
+}
+
+fn reconcile_pending(directory: &Path) -> Result<(), NativeHostError> {
+    let pending = pending_receipt_path(directory);
+    let Some(bytes) = read_regular(&pending)? else {
+        return Ok(());
+    };
+    let receipt = decode_receipt(&bytes)?;
+    let manifest = directory.join(format!("{NATIVE_HOST_NAME}.json"));
+    let final_receipt = read_receipt(directory)?;
+    match read_regular(&manifest)? {
+        Some(current) if digest(&current) == receipt.manifest_sha256 => {
+            replace(&receipt_path(directory), &bytes)?;
+            fs::remove_file(&pending).map_err(|_| NativeHostError::Io)?;
+            sync_directory(directory)
+        }
+        Some(current)
+            if final_receipt
+                .as_ref()
+                .is_some_and(|installed| installed.manifest_sha256 == digest(&current)) =>
+        {
+            // The process died before publishing the new manifest. The
+            // previous manifest/receipt pair is still coherent, so discard
+            // only our pending marker and let the normal plan retry.
+            fs::remove_file(&pending).map_err(|_| NativeHostError::Io)?;
+            sync_directory(directory)
+        }
+        None if final_receipt.is_none() => {
+            // Initial publication died before creating the manifest. Nothing
+            // was installed, so the pending marker can be safely abandoned.
+            fs::remove_file(&pending).map_err(|_| NativeHostError::Io)?;
+            sync_directory(directory)
+        }
+        Some(_) | None => Err(NativeHostError::Drift),
     }
 }
 
@@ -307,7 +372,9 @@ fn write_new(path: &Path, bytes: &[u8]) -> Result<(), NativeHostError> {
         },
     )?;
     file.write_all(bytes).map_err(|_| NativeHostError::Io)?;
-    file.sync_all().map_err(|_| NativeHostError::Io)
+    file.sync_all().map_err(|_| NativeHostError::Io)?;
+    let parent = path.parent().ok_or(NativeHostError::Io)?;
+    sync_directory(parent)
 }
 
 fn replace(path: &Path, bytes: &[u8]) -> Result<(), NativeHostError> {
@@ -317,5 +384,16 @@ fn replace(path: &Path, bytes: &[u8]) -> Result<(), NativeHostError> {
     fs::rename(&temporary, path).map_err(|_| {
         let _ = fs::remove_file(&temporary);
         NativeHostError::Io
-    })
+    })?;
+    let parent = path.parent().ok_or(NativeHostError::Io)?;
+    sync_directory(parent)
+}
+
+fn sync_directory(path: &Path) -> Result<(), NativeHostError> {
+    let directory = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|_| NativeHostError::Io)?;
+    directory.sync_all().map_err(|_| NativeHostError::Io)
 }

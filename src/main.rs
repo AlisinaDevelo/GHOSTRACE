@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{collections::BTreeSet, io::Write, path::PathBuf};
 
 use chrono::{DateTime, TimeZone, Utc};
 use clap::{Parser, Subcommand};
@@ -9,6 +9,16 @@ use ghostrace::{
     Evidence, ExportRequest, GhostraceError, IngestionOrigin, ReasonCode, RepairInterval,
     RetentionConfirmation, RetentionPolicy, RootId, SnapshotDigest, EVENT_SCHEMA_JSON,
     PARQUET_ARCHIVE_PROFILE_JSON, SHELL_METADATA_SCHEMA_JSON,
+};
+#[cfg(all(unix, target_os = "macos"))]
+use ghostrace::{
+    read_native_service_endpoint, run_native_host_stdio, validate_caller_origin,
+    LocalServiceClient, NativeHostHealth, NativeHostInstaller, UrlShapePolicy,
+    NATIVE_HOST_CHANNELS,
+};
+#[cfg(unix)]
+use ghostrace::{
+    BrowserEventClass, PairingRequest, PairingStore, ProfileClass, NATIVE_HOST_STORE_DIR,
 };
 use uuid::Uuid;
 
@@ -43,6 +53,12 @@ enum Command {
     Live {
         #[command(subcommand)]
         command: LiveCommand,
+    },
+    /// Manage explicit browser pairing or run the stdio native-messaging host.
+    #[cfg(unix)]
+    NativeHost {
+        #[command(subcommand)]
+        command: NativeHostCommand,
     },
     /// Create or open the durable fixture-only journal.
     Init {
@@ -213,6 +229,55 @@ enum Command {
     Capture,
 }
 
+#[cfg(unix)]
+#[derive(Debug, Subcommand)]
+enum NativeHostCommand {
+    /// Show the approval request and persist a new pairing after confirmation.
+    Pair {
+        #[arg(long)]
+        home: Option<PathBuf>,
+        #[arg(long, default_value = "chrome")]
+        browser: String,
+        #[arg(long, default_value = "default")]
+        profile: String,
+        #[arg(long)]
+        extension_id: String,
+        #[arg(long)]
+        extension_key_digest: String,
+        #[arg(long)]
+        permissions_digest: String,
+        /// Skip the interactive approval prompt only when the user has already
+        /// confirmed the printed request out of band.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// List secret-free persisted pairing approvals.
+    List {
+        #[arg(long)]
+        home: Option<PathBuf>,
+    },
+    /// Revoke one pairing and retain a tombstone against replay.
+    Revoke {
+        #[arg(long)]
+        home: Option<PathBuf>,
+        pairing_id: Uuid,
+    },
+    /// Run the browser-launched stdio host against an already-running LocalService.
+    Run {
+        #[arg(long)]
+        home: Option<PathBuf>,
+        /// User-owned LocalService Unix socket; no TCP fallback exists.
+        #[arg(long)]
+        service_socket: PathBuf,
+        /// Current LocalService instance UUID, published out of band.
+        #[arg(long)]
+        service_instance: Uuid,
+        /// Exact Chromium caller origin supplied for this host process.
+        #[arg(long)]
+        caller_origin: String,
+    },
+}
+
 #[derive(Debug, Subcommand)]
 enum LiveCommand {
     /// Create a private GHOSTRACE home with its key in your login keychain.
@@ -360,6 +425,190 @@ fn parquet_unavailable() -> GhostraceError {
     )
 }
 
+#[cfg(unix)]
+fn native_failure(error: impl std::fmt::Display) -> GhostraceError {
+    GhostraceError::InvalidEvent(format!("native host operation failed: {error}"))
+}
+
+#[cfg(unix)]
+fn native_home(dir: Option<PathBuf>) -> Result<PathBuf, GhostraceError> {
+    let dir = match dir {
+        Some(dir) => dir,
+        None => {
+            let home = std::env::var_os("HOME")
+                .ok_or_else(|| native_failure("GHOSTRACE home is not configured"))?;
+            PathBuf::from(home).join("Library/Application Support/GHOSTRACE")
+        }
+    };
+    let metadata = std::fs::symlink_metadata(&dir).map_err(native_failure)?;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    if !metadata.is_dir()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.permissions().mode() & 0o077 != 0
+    {
+        return Err(native_failure("GHOSTRACE home is not private to this user"));
+    }
+    Ok(dir)
+}
+
+#[cfg(unix)]
+fn native_store(home: Option<PathBuf>) -> Result<PairingStore, GhostraceError> {
+    let home = native_home(home)?;
+    PairingStore::open(home.join(NATIVE_HOST_STORE_DIR)).map_err(native_failure)
+}
+
+#[cfg(unix)]
+fn native_profile_class(value: &str) -> Result<ProfileClass, GhostraceError> {
+    match value {
+        "default" => Ok(ProfileClass::Default),
+        "named" => Ok(ProfileClass::Named),
+        _ => Err(native_failure("profile must be default or named")),
+    }
+}
+
+#[cfg(unix)]
+fn native_confirmation() -> Result<bool, GhostraceError> {
+    print!("Approve this browser pairing? [y/N] ");
+    std::io::stdout().flush().map_err(native_failure)?;
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer).map_err(native_failure)?;
+    Ok(matches!(answer.trim(), "y" | "Y" | "yes"))
+}
+
+#[cfg(unix)]
+fn dispatch_native_host(command: NativeHostCommand) -> Result<(), GhostraceError> {
+    match command {
+        NativeHostCommand::Pair {
+            home,
+            browser,
+            profile,
+            extension_id,
+            extension_key_digest,
+            permissions_digest,
+            yes,
+        } => {
+            let store = native_store(home)?;
+            let request = PairingRequest {
+                browser_channel: browser,
+                profile_class: native_profile_class(&profile)?,
+                extension_id,
+                extension_key_digest,
+                permissions_digest,
+                event_classes: BTreeSet::from([BrowserEventClass::TopLevelNavigation]),
+                retained_fields: vec!["origin".to_owned()],
+                private_context_policy: "refuse_private_context".to_owned(),
+            };
+            println!("{}", serde_json::to_string_pretty(&request)?);
+            if !yes && !native_confirmation()? {
+                println!("Pairing not approved; no secret was generated.");
+                return Ok(());
+            }
+            let approval = store.approve(request, Utc::now()).map_err(native_failure)?;
+            println!("{}", serde_json::to_string_pretty(&approval)?);
+            Ok(())
+        }
+        NativeHostCommand::List { home } => {
+            let store = native_store(home)?;
+            println!("{}", serde_json::to_string_pretty(&store.list().map_err(native_failure)?)?);
+            Ok(())
+        }
+        NativeHostCommand::Revoke { home, pairing_id } => {
+            let store = native_store(home)?;
+            let changed = store.revoke(pairing_id).map_err(native_failure)?;
+            println!("{}", serde_json::json!({ "pairing_id": pairing_id, "revoked": changed }));
+            Ok(())
+        }
+        NativeHostCommand::Run { home, service_socket, service_instance, caller_origin } => {
+            native_host_run(home, service_socket, service_instance, caller_origin)
+        }
+    }
+}
+
+#[cfg(all(unix, target_os = "macos"))]
+fn native_host_run(
+    home: Option<PathBuf>,
+    service_socket: PathBuf,
+    service_instance: Uuid,
+    caller_origin: String,
+) -> Result<(), GhostraceError> {
+    // Chrome supplies the caller origin as argv[1]. Validate it before opening
+    // or consuming stdin so an invalid launch context cannot reach framing or
+    // pairing code.
+    validate_caller_origin(&caller_origin).map_err(native_failure)?;
+    let home = native_home(home)?;
+    let store = PairingStore::open(home.join(NATIVE_HOST_STORE_DIR)).map_err(native_failure)?;
+    let service = LocalServiceClient::new(service_socket, service_instance);
+    let result = run_native_host_stdio(
+        std::io::stdin().lock(),
+        std::io::stdout().lock(),
+        store,
+        service,
+        UrlShapePolicy::OriginOnly,
+        &caller_origin,
+    );
+    let summary = result.map_err(native_failure)?;
+    eprintln!(
+        "native host stopped after {} frame(s), {} recorded event(s)",
+        summary.frames, summary.recorded_events
+    );
+    Ok(())
+}
+
+#[cfg(all(unix, target_os = "macos"))]
+fn native_host_entry(caller_origin: String) -> Result<(), GhostraceError> {
+    // This is the manifest-launched shape: Chrome invokes the absolute binary
+    // with exactly one argument (the caller origin), never a subcommand or
+    // service flags. The LocalService owner publishes the current endpoint
+    // receipt beside pairing state before installing/using the manifest.
+    let extension_id = validate_caller_origin(&caller_origin).map_err(native_failure)?;
+    let home = native_home(None)?;
+    verify_native_host_manifest(&home, &extension_id)?;
+    let endpoint = read_native_service_endpoint(&home).map_err(native_failure)?;
+    native_host_run(Some(home), endpoint.socket_path, endpoint.service_instance, caller_origin)
+}
+
+#[cfg(all(unix, target_os = "macos"))]
+fn verify_native_host_manifest(
+    home: &std::path::Path,
+    extension_id: &str,
+) -> Result<(), GhostraceError> {
+    let support_root =
+        home.parent().ok_or_else(|| native_failure("native host support root is unavailable"))?;
+    let host_binary = std::env::current_exe().map_err(native_failure)?;
+    let installer = NativeHostInstaller::new(support_root, host_binary, extension_id)
+        .map_err(native_failure)?;
+    let mut installed = false;
+    for (channel, _) in NATIVE_HOST_CHANNELS {
+        match installer.verify(channel).map_err(native_failure)? {
+            NativeHostHealth::Intact => installed = true,
+            NativeHostHealth::NotInstalled => {}
+            NativeHostHealth::Missing | NativeHostHealth::Drifted => {
+                return Err(native_failure("native host manifest verification failed"));
+            }
+        }
+    }
+    if !installed {
+        return Err(native_failure("native host manifest is not installed"));
+    }
+    Ok(())
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn native_host_entry(caller_origin: String) -> Result<(), GhostraceError> {
+    let _ = caller_origin;
+    Err(native_failure("the native host requires macOS live support"))
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn native_host_run(
+    _: Option<PathBuf>,
+    _: PathBuf,
+    _: Uuid,
+    _: String,
+) -> Result<(), GhostraceError> {
+    Err(native_failure("the native host requires macOS live support"))
+}
+
 fn run(cli: Cli) -> Result<(), GhostraceError> {
     match cli.command {
         Command::Health { journal, json } => {
@@ -377,6 +626,8 @@ fn run(cli: Cli) -> Result<(), GhostraceError> {
         }
         Command::Run { home, command } => live::run(home, command),
         Command::Live { command } => live::dispatch(command),
+        #[cfg(unix)]
+        Command::NativeHost { command } => dispatch_native_host(command),
         Command::Init { journal } => {
             let journal = open_fixture_journal(journal)?;
             journal.initialize_authenticated_state()?;
@@ -1092,6 +1343,30 @@ mod live {
 }
 
 fn main() {
+    #[cfg(unix)]
+    {
+        let mut arguments = std::env::args_os();
+        let _binary = arguments.next();
+        let first = arguments.next();
+        let has_extra = arguments.next().is_some();
+        if let Some(first) = first.and_then(|value| value.into_string().ok()) {
+            if first.starts_with("chrome-extension://") {
+                if has_extra {
+                    // A manifest launch has exactly one caller-origin
+                    // argument. Reject malformed argv before Clap can echo an
+                    // untrusted origin/argument and before touching HOME or
+                    // consuming stdin.
+                    eprintln!("error: native host operation failed: invalid native host arguments");
+                    std::process::exit(1);
+                }
+                if let Err(error) = native_host_entry(first) {
+                    eprintln!("error: {error}");
+                    std::process::exit(1);
+                }
+                return;
+            }
+        }
+    }
     let cli = Cli::parse();
     if let Err(error) = run(cli) {
         eprintln!("error: {error}");

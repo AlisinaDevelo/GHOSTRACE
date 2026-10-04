@@ -193,3 +193,24 @@ fn moving_the_host_binary_is_an_upgrade_of_an_intact_manifest() {
     .expect("json");
     assert_eq!(manifest["path"], moved.to_string_lossy().as_ref());
 }
+
+#[test]
+fn an_interrupted_receipt_publication_is_reconciled_before_planning() {
+    let fixture = Fixture::new();
+    let installer = fixture.installer();
+    installer.install("chrome").expect("install");
+    let directory = fixture.support.join("Google/Chrome/NativeMessagingHosts");
+    let receipt = directory.join(format!("{NATIVE_HOST_NAME}.ghostrace-receipt"));
+    let pending = directory.join(format!("{NATIVE_HOST_NAME}.ghostrace-receipt.pending"));
+    let bytes = fs::read(&receipt).expect("receipt");
+    fs::remove_file(&receipt).expect("simulate receipt publication interruption");
+    fs::write(&pending, &bytes).expect("pending receipt");
+
+    assert_eq!(
+        installer.plan("chrome").expect("reconciled plan").action,
+        NativeHostAction::Unchanged
+    );
+    assert!(receipt.exists());
+    assert!(!pending.exists());
+    assert_eq!(installer.verify("chrome").expect("verify"), NativeHostHealth::Intact);
+}

@@ -267,7 +267,7 @@ impl Writer {
     }
 
     #[cfg(test)]
-    fn new_with_gate(
+    pub(crate) fn new_with_gate(
         journal: Journal,
         config: WriterConfig,
         gate: TestGate,
@@ -299,6 +299,27 @@ impl Writer {
         self.enqueue_with_boundary(origin, events, policy, diagnostics, None)
     }
 
+    /// Carry an admission lease into the worker so acknowledgement timeouts
+    /// cannot release authorization while a transaction remains in flight.
+    #[cfg(unix)]
+    pub(crate) fn enqueue_with_commit_guard(
+        &self,
+        origin: IngestionOrigin,
+        events: Vec<EventEnvelope>,
+        policy: PolicyProfile,
+        diagnostics: Vec<DiagnosticRecord>,
+        guard: Arc<dyn Send + Sync>,
+    ) -> Result<WriterSubmission, GhostraceError> {
+        self.enqueue_with_boundary_mode(
+            origin,
+            events,
+            policy,
+            diagnostics,
+            None,
+            EnqueueMode { status_reservation: false, commit_guard: Some(guard) },
+        )
+    }
+
     pub fn enqueue_with_boundary(
         &self,
         origin: IngestionOrigin,
@@ -307,7 +328,14 @@ impl Writer {
         diagnostics: Vec<DiagnosticRecord>,
         boundary: Option<ReplayBoundary>,
     ) -> Result<WriterSubmission, GhostraceError> {
-        self.enqueue_with_boundary_mode(origin, events, policy, diagnostics, boundary, false)
+        self.enqueue_with_boundary_mode(
+            origin,
+            events,
+            policy,
+            diagnostics,
+            boundary,
+            EnqueueMode::default(),
+        )
     }
 
     #[cfg(test)]
@@ -319,7 +347,14 @@ impl Writer {
         diagnostics: Vec<DiagnosticRecord>,
         boundary: Option<ReplayBoundary>,
     ) -> Result<WriterSubmission, GhostraceError> {
-        self.enqueue_with_boundary_mode(origin, events, policy, diagnostics, boundary, true)
+        self.enqueue_with_boundary_mode(
+            origin,
+            events,
+            policy,
+            diagnostics,
+            boundary,
+            EnqueueMode { status_reservation: true, ..EnqueueMode::default() },
+        )
     }
 
     fn enqueue_with_boundary_mode(
@@ -329,8 +364,9 @@ impl Writer {
         policy: PolicyProfile,
         diagnostics: Vec<DiagnosticRecord>,
         boundary: Option<ReplayBoundary>,
-        status_reservation: bool,
+        mode: EnqueueMode,
     ) -> Result<WriterSubmission, GhostraceError> {
+        let status_reservation = mode.status_reservation;
         let source = validate_batch(&events, &self.config)?;
         let bytes = estimate_request_bytes(&events, &policy, &diagnostics, boundary.as_ref())?;
         let max_memory_bytes = if status_reservation {
@@ -379,6 +415,7 @@ impl Writer {
             policy,
             diagnostics,
             response_sender,
+            _commit_guard: mode.commit_guard,
             cancelled: Arc::clone(&cancelled),
             started: Arc::clone(&started),
             boundary,
@@ -451,7 +488,7 @@ impl Writer {
             policy,
             diagnostics,
             boundary,
-            status_reservation,
+            EnqueueMode { status_reservation, ..EnqueueMode::default() },
         )? {
             WriterSubmission::Queued(ticket) => match ticket.wait() {
                 Ok(ack) => Ok(WriterOutcome::Committed(ack)),
@@ -574,7 +611,16 @@ impl AdmissionState {
     }
 }
 
+#[derive(Default)]
+struct EnqueueMode {
+    status_reservation: bool,
+    commit_guard: Option<Arc<dyn Send + Sync>>,
+}
+
 struct WriteRequest {
+    // Retain authorization until processing and the receipt have finished,
+    // even if the caller drops its ticket or times out.
+    _commit_guard: Option<Arc<dyn Send + Sync>>,
     request_id: Uuid,
     source: EventSource,
     origin: IngestionOrigin,
@@ -722,7 +768,7 @@ fn estimate_request_bytes(
 
 #[cfg(test)]
 #[derive(Clone, Default)]
-struct TestGate {
+pub(crate) struct TestGate {
     state: Arc<(Mutex<TestGateState>, Condvar)>,
 }
 
@@ -735,7 +781,7 @@ struct TestGateState {
 
 #[cfg(test)]
 impl TestGate {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
@@ -749,7 +795,7 @@ impl TestGate {
         }
     }
 
-    fn wait_until_entered(&self) {
+    pub(crate) fn wait_until_entered(&self) {
         let (lock, wake) = &*self.state;
         let mut state = lock.lock().expect("test gate lock");
         while !state.entered {
@@ -757,7 +803,7 @@ impl TestGate {
         }
     }
 
-    fn release(&self) {
+    pub(crate) fn release(&self) {
         let (lock, wake) = &*self.state;
         let mut state = lock.lock().expect("test gate lock");
         state.release = true;
