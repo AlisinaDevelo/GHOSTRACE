@@ -1,5 +1,7 @@
 # Rust build output
 /target/
+/fuzz/target/
+/fuzz/artifacts/
 /coverage/
 /dist/
 
