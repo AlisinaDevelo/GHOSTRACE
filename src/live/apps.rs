@@ -3,9 +3,9 @@
 //!
 //! Samples come from the NSWorkspace adapter, which must run on the main
 //! thread. Each change of launch instance is an activation; the tracker closes
-//! the previous session at that moment by inference. An observed login window
-//! becomes a coverage boundary, never time spent in an application. Polling does
-//! not establish complete lock/session or sleep/wake coverage.
+//! the previous session at that moment by inference. A locked screen, another
+//! user on the console, or sleep is a coverage boundary, never time spent in an
+//! application (see `FrontmostLifecycleMonitor`).
 
 use std::time::{Duration, Instant};
 
@@ -18,10 +18,10 @@ use super::{op, LiveError, LiveHome};
 use crate::{
     frontmost::{
         FrontmostApp, FrontmostBasis, FrontmostCoverageState, FrontmostExclusions,
-        FrontmostNormalizer, FrontmostRecord, FrontmostSessionTracker, FrontmostSystemEvent,
-        FrontmostTransition,
+        FrontmostLifecycleMonitor, FrontmostNormalizer, FrontmostRecord, FrontmostSessionSample,
+        FrontmostSessionTracker, FrontmostSystemEvent, FrontmostTransition,
     },
-    frontmost_macos::{is_main_thread, FrontmostProbe},
+    frontmost_macos::{is_main_thread, session_state, FrontmostProbe},
     model::{
         AppChange, ApplicationId, CollectorLifecyclePayload, EventEnvelope, EventKind,
         EventPayload, EventSource, Evidence, FrontmostAppChangedPayload, GapPayload,
@@ -51,10 +51,11 @@ until you stop it:\n\
   - its bundle ID, developer-set name and version, and signing class\n\
   - when it came to the front and how long it stayed\n\
 Never recorded: window titles, documents, web addresses, what you type or see, or\n\
-anything from password managers and the applications you exclude. An observed login\n\
-window pauses application observations. Sleep/wake and complete lock-lifecycle detection\n\
-are not yet integrated; dwell can span an unobserved boundary. Stop collection before\n\
-locking or sleeping if those intervals must not enter an application's dwell.\n\
+anything from password managers and the applications you exclude. While the screen is\n\
+locked, another user has the console, or the Mac sleeps, no application is observed:\n\
+the interval is recorded as a gap and ends the application's dwell when it began.\n\
+Boundaries are found by polling every 250 ms, so they are accurate to that interval;\n\
+a clock change forward also looks like sleep and is recorded as a gap.\n\
 No Accessibility or Screen Recording permission is used.";
 
 /// What an apps session recorded.
@@ -176,6 +177,10 @@ impl Recorder {
                         (FrontmostCoverageState::Resumed, FrontmostSystemEvent::DidWake) => {
                             "frontmost_asleep"
                         }
+                        (
+                            FrontmostCoverageState::Resumed,
+                            FrontmostSystemEvent::SessionBecameActive,
+                        ) => "frontmost_session_inactive",
                         (FrontmostCoverageState::Resumed, _) => "frontmost_not_observed",
                         _ => continue,
                     };
@@ -270,28 +275,48 @@ impl LiveHome {
             FrontmostSessionTracker::with_exclusions(FrontmostNormalizer::new(salt), exclusions);
         let mut probe = FrontmostProbe::new();
         let started = Instant::now();
-        let mut locked = false;
         recorder.lifecycle(EventKind::CollectorStarted)?;
         recorder
             .records(tracker.observe_system(FrontmostSystemEvent::ObserverStarted, Utc::now()))?;
+        let mut monitor = FrontmostLifecycleMonitor::new();
+        let mut login_window_front = false;
         while !stop() && deadline.is_none_or(|limit| started.elapsed() < limit) {
-            let Some(raw) = probe.poll(POLL) else { continue };
-            if raw.bundle_identifier.as_deref() == Some(LOGIN_WINDOW) {
-                if !locked {
-                    locked = true;
-                    recorder.records(
-                        tracker.observe_system(FrontmostSystemEvent::ScreenLocked, raw.observed_at),
-                    )?;
-                }
+            let raw = probe.poll(POLL);
+            if let Some(raw) = &raw {
+                login_window_front = raw.bundle_identifier.as_deref() == Some(LOGIN_WINDOW);
+            }
+            let (on_console, screen_locked) = session_state();
+            // `started` is an Instant, which does not advance while the Mac
+            // sleeps; wall time does, which is how sleep is detected.
+            let (events, observing) = monitor.sample(FrontmostSessionSample {
+                wall: Utc::now(),
+                uptime: started.elapsed(),
+                on_console,
+                screen_locked,
+                login_window_front,
+            });
+            let resumed = events.iter().any(|(event, _)| {
+                matches!(
+                    event,
+                    FrontmostSystemEvent::DidWake
+                        | FrontmostSystemEvent::ScreenUnlocked
+                        | FrontmostSystemEvent::SessionBecameActive
+                )
+            });
+            for (event, at) in events {
+                recorder.records(tracker.observe_system(event, at))?;
+            }
+            if resumed {
+                // Whatever is in front now starts a new session, even if it
+                // is the same application as before the boundary.
+                probe.reset();
                 continue;
             }
-            if locked {
-                locked = false;
-                recorder.records(
-                    tracker.observe_system(FrontmostSystemEvent::ScreenUnlocked, raw.observed_at),
-                )?;
+            if let (true, Some(raw)) = (observing, raw) {
+                if !login_window_front {
+                    recorder.records(tracker.observe(&raw))?;
+                }
             }
-            recorder.records(tracker.observe(&raw))?;
         }
         recorder
             .records(tracker.observe_system(FrontmostSystemEvent::ObserverStopped, Utc::now()))?;

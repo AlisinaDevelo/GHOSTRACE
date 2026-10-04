@@ -622,3 +622,107 @@ fn observation(
         basis,
     }
 }
+
+/// Wall time running ahead of uptime by more than this between two samples
+/// means the Mac slept in between.
+pub const FRONTMOST_SLEEP_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// What an adapter samples about the login session on every poll, besides the
+/// frontmost application. `uptime` must not advance while the Mac sleeps (on
+/// macOS, `std::time::Instant` does not).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FrontmostSessionSample {
+    pub wall: DateTime<Utc>,
+    pub uptime: std::time::Duration,
+    /// Whether this login session owns the console; `None` if unknown.
+    pub on_console: Option<bool>,
+    /// Whether the screen is locked; `None` if unknown.
+    pub screen_locked: Option<bool>,
+    /// Whether the login window is the frontmost application.
+    pub login_window_front: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SessionCoverage {
+    Active,
+    Locked,
+    OffConsole,
+}
+
+/// Turns session samples into the system events [`FrontmostSessionTracker`]
+/// needs, so a locked screen, fast user switching, or sleep is coverage, never
+/// time spent in an application.
+///
+/// - Sleep is inferred when wall time outruns uptime by more than
+///   [`FRONTMOST_SLEEP_THRESHOLD`] between samples. It is reported as
+///   `WillSleep` at the last awake sample. A manual clock change forward looks
+///   the same and is recorded as a gap too, which errs toward less coverage.
+/// - A locked screen (or the login window in front) suspends coverage until it
+///   is unlocked; a session that leaves the console suspends it until it
+///   returns. Coverage resumes only when the session is active again.
+#[derive(Debug)]
+pub struct FrontmostLifecycleMonitor {
+    last: Option<(DateTime<Utc>, std::time::Duration)>,
+    state: SessionCoverage,
+}
+
+impl Default for FrontmostLifecycleMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FrontmostLifecycleMonitor {
+    pub fn new() -> Self {
+        Self { last: None, state: SessionCoverage::Active }
+    }
+
+    /// Process one sample. Returns the system events to pass to the tracker,
+    /// in order, and whether applications may be observed now.
+    pub fn sample(
+        &mut self,
+        sample: FrontmostSessionSample,
+    ) -> (Vec<(FrontmostSystemEvent, DateTime<Utc>)>, bool) {
+        let mut events = Vec::new();
+        let slept = self.last.is_some_and(|(wall, uptime)| {
+            let wall_elapsed = (sample.wall - wall).to_std().unwrap_or_default();
+            let awake_elapsed = sample.uptime.saturating_sub(uptime);
+            wall_elapsed.saturating_sub(awake_elapsed) > FRONTMOST_SLEEP_THRESHOLD
+        });
+        if slept {
+            let (asleep_at, _) = self.last.expect("slept implies a previous sample");
+            events.push((FrontmostSystemEvent::WillSleep, asleep_at));
+        }
+        let state = if sample.on_console == Some(false) {
+            SessionCoverage::OffConsole
+        } else if sample.screen_locked == Some(true) || sample.login_window_front {
+            SessionCoverage::Locked
+        } else {
+            SessionCoverage::Active
+        };
+        match state {
+            SessionCoverage::Active => {
+                if slept {
+                    events.push((FrontmostSystemEvent::DidWake, sample.wall));
+                } else if self.state != SessionCoverage::Active {
+                    let resume = match self.state {
+                        SessionCoverage::OffConsole => FrontmostSystemEvent::SessionBecameActive,
+                        _ => FrontmostSystemEvent::ScreenUnlocked,
+                    };
+                    events.push((resume, sample.wall));
+                }
+            }
+            suspended if suspended != self.state || slept => {
+                let suspend = match suspended {
+                    SessionCoverage::OffConsole => FrontmostSystemEvent::SessionResignedActive,
+                    _ => FrontmostSystemEvent::ScreenLocked,
+                };
+                events.push((suspend, sample.wall));
+            }
+            _ => {}
+        }
+        self.last = Some((sample.wall, sample.uptime));
+        self.state = state;
+        (events, state == SessionCoverage::Active)
+    }
+}

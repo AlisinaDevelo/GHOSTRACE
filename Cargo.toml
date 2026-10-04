@@ -45,7 +45,7 @@ name = "frontmost_macos"
 harness = false
 
 [dev-dependencies]
-jsonschema = { version = "0.57", default-features = false }
+jsonschema = { version = "0.58", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
