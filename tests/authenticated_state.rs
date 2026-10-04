@@ -1,4 +1,11 @@
-use std::{fs, path::Path, process::Command};
+use std::{
+    fs,
+    path::Path,
+    process::Command,
+    sync::mpsc,
+    thread,
+    time::{Duration, Instant},
+};
 
 use chrono::{TimeZone, Utc};
 use ghostrace::{
@@ -85,7 +92,7 @@ fn fresh_ingest_and_control_state_have_a_valid_local_anchor() {
     assert_eq!(report.event_count, 1);
     assert_eq!(report.stored_event_count, 1);
     let state = journal.authenticated_state().expect("anchor");
-    assert_eq!(state.schema_version, 1);
+    assert_eq!(state.schema_version, 2);
     assert_eq!(state.chain_epoch, 0);
     assert_eq!(state.deletion_count, 0);
 }
@@ -318,7 +325,7 @@ fn cli_authentication_check_is_json_and_fails_closed_on_tamper() {
 }
 
 #[test]
-fn two_processes_writing_one_journal_never_see_each_other_as_tampering() {
+fn two_connections_writing_one_journal_never_see_each_other_as_tampering() {
     // Two handles are two SQLite connections, as two GHOSTRACE processes would
     // be. Before the pre-write check ran under the write lock, one writer
     // could read the event count before the other's commit and the anchor
@@ -357,4 +364,279 @@ fn two_processes_writing_one_journal_never_see_each_other_as_tampering() {
     let journal = open(&path);
     assert_eq!(journal.events().expect("events").len(), 300);
     assert!(journal.authenticated_state_report().expect("report").valid);
+}
+
+/// Device acceptance lane for issue #403.  It is intentionally ignored in the
+/// ordinary suite: the seed is large enough to characterize the reference
+/// device rather than to act as a CI smoke test.  Seed/setup timing is emitted
+/// separately from the hot-write timing; any v1-to-v2 promotion measurement
+/// must be collected in the legacy migration lane, while the measured writes
+/// here use the retained v2 commitment state.
+#[test]
+#[ignore = "reference-device 100,000-event acceptance lane; run explicitly"]
+fn one_hundred_thousand_events_and_two_default_timeout_writers() {
+    const SEED_EVENTS: u128 = 100_000;
+    const SEED_BATCH: u128 = 1_000;
+    const HOT_WRITES: u128 = 64;
+    const CONCURRENT_WRITES: u128 = 32;
+
+    let (_directory, path) = private_path("authenticated-100k-acceptance.sqlite3");
+    let journal = open(&path);
+    let seed_origin =
+        IngestionOrigin::fixture_instance("fixture-authenticated-100k-seed").expect("seed origin");
+    let seed_policy = policy();
+    let seed_started = Instant::now();
+    for batch in 0..(SEED_EVENTS / SEED_BATCH) {
+        let first = batch * SEED_BATCH + 1;
+        let events = (first..first + SEED_BATCH)
+            .map(|id| event_from(&seed_origin, id, &format!("seq-0-{id}")))
+            .collect::<Vec<_>>();
+        journal.ingest_batch(&seed_origin, &events, &seed_policy).expect("seed batch");
+    }
+    let seed_elapsed_ms = seed_started.elapsed().as_millis();
+    assert_eq!(journal.authenticated_state().expect("seed anchor").event_count, SEED_EVENTS as u64);
+
+    drop(journal);
+    let journal = open(&path);
+    // This is deliberately one separately timed write: a newly opened connection must
+    // perform the full external-commit/startup preflight outside BEGIN
+    // IMMEDIATE.  It must not be included in the steady-state bound below.
+    let hot_origin =
+        IngestionOrigin::fixture_instance("fixture-authenticated-100k-hot").expect("hot origin");
+    let startup_started = Instant::now();
+    journal
+        .ingest(&hot_origin, &event_from(&hot_origin, 200_001, "seq-0-1"), &seed_policy)
+        .expect("hot-path warm write");
+    let startup_write_ms = startup_started.elapsed().as_millis();
+    println!("AUTH_100K_SETUP seed_events={SEED_EVENTS} seed_ms={seed_elapsed_ms} startup_write_ms={startup_write_ms}");
+    let mut hot_write_us = Vec::with_capacity(HOT_WRITES as usize);
+    for index in 0..HOT_WRITES {
+        let started = Instant::now();
+        journal
+            .ingest(
+                &hot_origin,
+                &event_from(&hot_origin, 200_002 + index, &format!("seq-0-{}", index + 2)),
+                &seed_policy,
+            )
+            .expect("hot-path write");
+        hot_write_us.push(started.elapsed().as_micros());
+    }
+    let max_hot_write_us = hot_write_us.iter().copied().max().unwrap_or(0);
+    println!("AUTH_100K_HOT whole_write_us={hot_write_us:?} max_hot_write_us={max_hot_write_us}");
+    let hot_bound_ms = std::env::var("GHOSTRACE_AUTH_HOT_WRITE_BOUND_MS")
+        .expect("set GHOSTRACE_AUTH_HOT_WRITE_BOUND_MS to the measured reference-device bound")
+        .parse::<u128>()
+        .expect("GHOSTRACE_AUTH_HOT_WRITE_BOUND_MS must be an integer");
+    assert!(
+        max_hot_write_us <= hot_bound_ms * 1_000,
+        "steady-state authenticated write exceeded reference bound: max={max_hot_write_us}us bound={hot_bound_ms}ms"
+    );
+
+    // Reopen two independent connections after the 100k seed.  The default
+    // 250ms timeout is part of this lane; a custom 10s timeout would hide the
+    // regression that issue #403 is intended to prevent.
+    drop(journal);
+    const WRITER_READY_TIMEOUT: Duration = Duration::from_secs(30);
+    const WRITER_COMPLETION_TIMEOUT: Duration = Duration::from_secs(300);
+
+    // Finish all fallible setup before spawning. A worker's first operation is
+    // a readiness signal; the coordinator releases both workers only after
+    // both signals arrive, so setup failures cannot strand a peer at a
+    // Barrier. The bounded completion channel covers writer failures and the
+    // test's failure path. The acceptance command still runs under an outer
+    // process-group watchdog because Rust cannot cancel an uninterruptible
+    // SQLite call or force-join a stuck thread.
+    let prepared_writers = (0..2_u128)
+        .map(|writer| {
+            let journal = open(&path);
+            assert_eq!(
+                journal.busy_timeout_ms().expect("writer busy timeout"),
+                250,
+                "acceptance lane must use the default 250ms busy timeout"
+            );
+            let origin = IngestionOrigin::fixture_instance(format!(
+                "fixture-authenticated-100k-writer-{writer}"
+            ))
+            .expect("writer origin");
+            (writer, journal, origin, seed_policy.clone())
+        })
+        .collect::<Vec<_>>();
+    let (ready_tx, ready_rx) = mpsc::sync_channel::<u128>(2);
+    let (done_tx, done_rx) = mpsc::sync_channel::<(u128, Result<(), String>)>(2);
+    let mut starts = Vec::with_capacity(prepared_writers.len());
+    let mut writers = Vec::with_capacity(prepared_writers.len());
+    for (writer, journal, origin, policy) in prepared_writers {
+        let (start_tx, start_rx) = mpsc::channel::<()>();
+        starts.push(start_tx);
+        let ready_tx = ready_tx.clone();
+        let done_tx = done_tx.clone();
+        let handle = thread::spawn(move || -> Result<(), String> {
+            let result: Result<(), String> = (|| {
+                ready_tx
+                    .send(writer)
+                    .map_err(|_| "acceptance coordinator dropped readiness".to_owned())?;
+                start_rx
+                    .recv_timeout(WRITER_COMPLETION_TIMEOUT)
+                    .map_err(|error| format!("writer {writer} start timeout: {error}"))?;
+                for index in 0..CONCURRENT_WRITES {
+                    let id = 300_000 + writer * CONCURRENT_WRITES + index;
+                    journal
+                        .ingest(
+                            &origin,
+                            &event_from(&origin, id, &format!("seq-0-{}", index + 1)),
+                            &policy,
+                        )
+                        .map_err(|error| error.to_string())?;
+                    thread::yield_now();
+                }
+                Ok(())
+            })();
+            let completion = result.as_ref().map(|_| ()).map_err(|error| error.clone());
+            let _ = done_tx.send((writer, completion));
+            result
+        });
+        writers.push((writer, handle));
+    }
+    drop(ready_tx);
+    drop(done_tx);
+
+    for _ in 0..2 {
+        if let Err(error) = ready_rx.recv_timeout(WRITER_READY_TIMEOUT) {
+            for start in starts {
+                let _ = start.send(());
+            }
+            drop(writers);
+            panic!("authenticated writer readiness timed out: {error}");
+        }
+    }
+    for start in starts {
+        if let Err(error) = start.send(()) {
+            drop(writers);
+            panic!("authenticated writer start failed: {error}");
+        }
+    }
+
+    let mut completed = 0;
+    while completed < 2 {
+        match done_rx.recv_timeout(WRITER_COMPLETION_TIMEOUT) {
+            Ok((_writer, Ok(()))) => completed += 1,
+            Ok((writer, Err(error))) => {
+                drop(writers);
+                panic!("authenticated writer {writer} failed: {error}");
+            }
+            Err(error) => {
+                drop(writers);
+                panic!("authenticated writers did not complete: {error}");
+            }
+        }
+    }
+    for (_writer, handle) in writers {
+        handle.join().expect("acceptance writer thread").expect("default-timeout write");
+    }
+
+    // Exercise separate operating-system processes as well as independent
+    // connections. Opening sequentially via readiness files avoids measuring
+    // migration setup contention; the shared start marker releases both
+    // writers with the original 250ms busy timeout.
+    let mut children = Vec::new();
+    for writer in 0..2 {
+        let child = Command::new(std::env::current_exe().expect("test executable"))
+            .args(["--exact", "authenticated_acceptance_child_writer", "--ignored", "--nocapture"])
+            .env("GHOSTRACE_AUTH_ACCEPTANCE_JOURNAL", &path)
+            .env("GHOSTRACE_AUTH_ACCEPTANCE_WRITER", writer.to_string())
+            .spawn()
+            .expect("spawn acceptance writer");
+        children.push(child);
+        let ready = path.with_extension(format!("ready-{writer}"));
+        let deadline = Instant::now() + WRITER_READY_TIMEOUT;
+        while !ready.exists() {
+            if Instant::now() >= deadline
+                || children.last_mut().unwrap().try_wait().unwrap().is_some()
+            {
+                for child in &mut children {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+                panic!("process writer {writer} failed to become ready");
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+    fs::write(path.with_extension("start"), b"start").expect("release process writers");
+    let process_started = Instant::now();
+    let mut statuses = [None, None];
+    while statuses.iter().any(Option::is_none) {
+        for (index, child) in children.iter_mut().enumerate() {
+            if statuses[index].is_none() {
+                statuses[index] = child.try_wait().expect("poll acceptance writer");
+            }
+        }
+        if statuses.iter().flatten().any(|status| !status.success())
+            || process_started.elapsed() >= WRITER_COMPLETION_TIMEOUT
+        {
+            for child in &mut children {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            panic!("process acceptance writers failed or timed out: {statuses:?}");
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    let process_elapsed_ms = process_started.elapsed().as_millis();
+    let final_journal = open(&path);
+    let final_state = final_journal.authenticated_state().expect("final anchor");
+    assert_eq!(
+        final_state.event_count,
+        SEED_EVENTS as u64 + 1 + HOT_WRITES as u64 + 4 * CONCURRENT_WRITES as u64
+    );
+    let full_check_started = Instant::now();
+    assert!(final_journal.authenticated_state_report().expect("final report").valid);
+    let full_check_ms = full_check_started.elapsed().as_millis();
+    println!(
+        "AUTH_100K_ACCEPTANCE seed_events={SEED_EVENTS} seed_ms={seed_elapsed_ms} startup_write_ms={startup_write_ms} full_check_ms={full_check_ms} hot_writes={HOT_WRITES} max_hot_write_us={max_hot_write_us} hot_bound_ms={hot_bound_ms} concurrent_connections=2 concurrent_processes=2 concurrent_writes_per_writer={CONCURRENT_WRITES} process_writers_ms={process_elapsed_ms} busy_timeout_ms=250 PASS"
+    );
+}
+
+/// Helper for the process lane; requires the parent's private fixture path.
+#[test]
+#[ignore = "spawned by the 100,000-event acceptance coordinator"]
+fn authenticated_acceptance_child_writer() {
+    let path = std::path::PathBuf::from(
+        std::env::var_os("GHOSTRACE_AUTH_ACCEPTANCE_JOURNAL").expect("parent journal"),
+    );
+    let writer: u128 = std::env::var("GHOSTRACE_AUTH_ACCEPTANCE_WRITER")
+        .expect("parent writer ID")
+        .parse()
+        .expect("writer ID");
+    assert!(writer < 2);
+    let journal = open(&path);
+    assert_eq!(journal.busy_timeout_ms().expect("busy timeout"), 250);
+    let origin =
+        IngestionOrigin::fixture_instance(format!("fixture-authenticated-100k-process-{writer}"))
+            .expect("process origin");
+    fs::write(path.with_extension(format!("ready-{writer}")), b"ready").expect("signal readiness");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !path.with_extension("start").exists() {
+        assert!(Instant::now() < deadline, "parent start timeout");
+        thread::sleep(Duration::from_millis(10));
+    }
+    let started = Instant::now();
+    for index in 0..32_u128 {
+        journal
+            .ingest(
+                &origin,
+                &event_from(
+                    &origin,
+                    400_000 + writer * 32 + index,
+                    &format!("seq-0-{}", index + 1),
+                ),
+                &policy(),
+            )
+            .expect("process write with default timeout");
+        thread::yield_now();
+    }
+    println!(
+        "AUTH_100K_PROCESS writer={writer} writes=32 elapsed_ms={} busy_timeout_ms=250 PASS",
+        started.elapsed().as_millis()
+    );
 }

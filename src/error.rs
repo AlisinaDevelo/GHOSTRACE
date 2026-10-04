@@ -102,6 +102,14 @@ pub enum GhostraceError {
     #[error("authenticated journal state is invalid: {0}")]
     AuthenticatedStateInvalid(String),
 
+    #[error("authenticated journal changed during preflight verification")]
+    AuthenticatedStatePreflightChanged,
+
+    #[error(
+        "authenticated journal state changed during write preflight after {attempts} attempt(s)"
+    )]
+    AuthenticatedStateRetryExhausted { attempts: u32 },
+
     #[error("journal directory permissions are not private (expected no group/world access)")]
     InsecurePermissions(PathBuf),
 

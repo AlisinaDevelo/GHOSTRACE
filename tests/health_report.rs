@@ -46,7 +46,7 @@ fn report_is_read_only_bounded_and_does_not_claim_unchecked_health() {
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let report = report(&output.stdout);
     assert_eq!(report["schema_version"], 1);
-    assert_eq!(report["journal_schema_version"], 5);
+    assert_eq!(report["journal_schema_version"], 6);
     assert_eq!(report["counts"]["events"], 0);
     assert_eq!(report["journal"]["status"], "available_unverified");
     assert_eq!(report["coverage"]["status"], "not_checked");
