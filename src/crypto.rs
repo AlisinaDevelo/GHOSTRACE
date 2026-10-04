@@ -4,7 +4,10 @@
 //! intentionally queryable for indexing.  The payload bytes are encrypted and
 //! authenticated before insertion; callers must not treat metadata as secret.
 
-use std::sync::Arc;
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex},
+};
 
 use chacha20poly1305::{
     aead::{Aead, KeyInit},
@@ -222,6 +225,47 @@ pub trait KeyProvider: Send + Sync {
         } else {
             Err(CryptoError::KeyProvider("key generation is unavailable".to_owned()))
         }
+    }
+}
+
+/// Keys resolved for one journal write, including its read-side preflight and
+/// any retries. Nothing is retained between writes. Pin the active generation
+/// so authentication and payload encryption use the same generation/key even
+/// if the backing provider changes while this operation is in progress.
+/// Rotation or retained older ciphertext may require another generation; each
+/// distinct generation is resolved at most once in this scope.
+pub(crate) struct WriteKeyProvider<'provider> {
+    provider: &'provider dyn KeyProvider,
+    generation: u32,
+    keys: Mutex<BTreeMap<u32, [u8; 32]>>,
+}
+
+impl<'provider> WriteKeyProvider<'provider> {
+    pub(crate) fn new(provider: &'provider dyn KeyProvider) -> Self {
+        Self { provider, generation: provider.key_generation(), keys: Mutex::new(BTreeMap::new()) }
+    }
+}
+
+impl KeyProvider for WriteKeyProvider<'_> {
+    fn key(&self) -> Result<[u8; 32], CryptoError> {
+        self.key_for_generation(self.generation)
+    }
+
+    fn key_generation(&self) -> u32 {
+        self.generation
+    }
+
+    fn key_for_generation(&self, generation: u32) -> Result<[u8; 32], CryptoError> {
+        let mut keys = self
+            .keys
+            .lock()
+            .map_err(|_| CryptoError::KeyProvider("write key mutex poisoned".to_owned()))?;
+        if let Some(key) = keys.get(&generation) {
+            return Ok(*key);
+        }
+        let key = self.provider.key_for_generation(generation)?;
+        keys.insert(generation, key);
+        Ok(key)
     }
 }
 

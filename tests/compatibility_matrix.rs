@@ -130,7 +130,7 @@ fn legacy_journal_survives_upgrade_query_explain_export_verify_and_delete() {
 
     // Upgrade.
     let journal = Journal::open_fixture(&path, provider()).expect("upgrade legacy journal");
-    assert_eq!(journal.schema_version().expect("schema"), 5);
+    assert_eq!(journal.schema_version().expect("schema"), 6);
     let policy = PolicyProfile::fixture_default();
     let report = ingest_fixture(root("fixtures/causal-chain.jsonl"), &journal, &policy)
         .expect("ingest golden fixture");

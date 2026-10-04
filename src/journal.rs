@@ -6,12 +6,19 @@ use std::{
     fmt::Write as _,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::Instant,
+    thread,
+    time::{Duration, Instant},
 };
+
+#[cfg(test)]
+use std::cell::RefCell;
 
 use chrono::{DateTime, Utc};
 use rusqlite::{
-    params, types::Type, Connection, OptionalExtension, Transaction, TransactionBehavior,
+    hooks::{AuthAction, Authorization},
+    params,
+    types::Type,
+    Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -19,10 +26,12 @@ use uuid::Uuid;
 
 use crate::{
     authenticated::{
-        self, AuthenticatedDeletionMarker, AuthenticatedState, AuthenticatedStateReport,
+        self, AuthenticatedAnchorIdentity, AuthenticatedDeletionMarker, AuthenticatedState,
+        AuthenticatedStateReport,
     },
     crypto::{
         decrypt_payload, encrypt_payload, CiphertextEnvelope, KeyProvider, SharedKeyProvider,
+        WriteKeyProvider,
     },
     cursor::{CursorIdentity, CursorKind, CursorState, CursorStatus, CursorToken, ReplayBoundary},
     error::GhostraceError,
@@ -61,8 +70,60 @@ const MIGRATION_CURSOR_CONTRACT: &str = include_str!("../migrations/0003_cursor_
 const MIGRATION_REPLAY_BOUNDARY: &str = include_str!("../migrations/0004_replay_boundary.sql");
 const MIGRATION_AUTHENTICATED_STATE: &str =
     include_str!("../migrations/0005_authenticated_state.sql");
+const MIGRATION_INCREMENTAL_AUTHENTICATED_STATE: &str =
+    include_str!("../migrations/0006_incremental_authenticated_state.sql");
 const MIGRATION_TOOL_VERSION: &str = concat!("ghostrace/", env!("CARGO_PKG_VERSION"));
 const MIGRATION_MODE_KEY: &str = "mode";
+// A legitimate peer commit can make a read-side snapshot stale while this
+// connection waits for SQLite's writer guard. Keep retries bounded, but allow
+// both collectors to make progress under the default 250 ms busy timeout.
+const AUTH_WRITE_PREFLIGHT_ATTEMPTS: u32 = 64;
+// A failed same-anchor/data-version fence yields the scheduler before starting
+// another full read-side verification. The observed verification duration is
+// the backoff base, scaled by the retry number and capped at 32 ms. Across the
+// fixed 64-attempt limit this permits at most about 2 s of outside-lock peer
+// handoff, enough to cover the finite 150-write fixture observed at 0.90-1.27
+// s while remaining a bounded failure rather than a busy-timeout extension.
+const AUTH_WRITE_PREFLIGHT_RETRY_MIN: Duration = Duration::from_millis(1);
+const AUTH_WRITE_PREFLIGHT_RETRY_MAX: Duration = Duration::from_millis(32);
+
+#[cfg(test)]
+thread_local! {
+    static AUTH_PREWRITE_TEST_HOOK: RefCell<Option<Box<dyn FnOnce()>>> = const { RefCell::new(None) };
+    static AUTH_PREVERIFY_TEST_HOOK: RefCell<Option<Box<dyn FnOnce()>>> = const { RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn set_auth_prewrite_test_hook<F>(hook: F)
+where
+    F: FnOnce() + 'static,
+{
+    AUTH_PREWRITE_TEST_HOOK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+}
+
+#[cfg(test)]
+pub(crate) fn set_auth_preverify_test_hook<F>(hook: F)
+where
+    F: FnOnce() + 'static,
+{
+    AUTH_PREVERIFY_TEST_HOOK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+}
+
+#[cfg(test)]
+fn run_auth_prewrite_test_hook() {
+    let hook = AUTH_PREWRITE_TEST_HOOK.with(|slot| slot.borrow_mut().take());
+    if let Some(hook) = hook {
+        hook();
+    }
+}
+
+#[cfg(test)]
+fn run_auth_preverify_test_hook() {
+    let hook = AUTH_PREVERIFY_TEST_HOOK.with(|slot| slot.borrow_mut().take());
+    if let Some(hook) = hook {
+        hook();
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 struct MigrationSpec {
@@ -178,9 +239,14 @@ pub struct Journal {
     conn: Arc<Mutex<Connection>>,
     key_provider: SharedKeyProvider,
     path: Option<PathBuf>,
+    // Named shared-memory databases keep the writer and a separate read-only
+    // snapshot connection on the same SQLite database. An anonymous
+    // `:memory:` connection cannot be opened read-only by a second handle.
+    memory_uri: Option<String>,
     wal_policy: WalPolicy,
     faults: FaultPlan,
     integrity_data_version: Arc<Mutex<Option<i64>>>,
+    authenticated_write_version: Arc<Mutex<Option<i64>>>,
 }
 
 impl Journal {
@@ -262,7 +328,7 @@ impl Journal {
         faults.hit(FaultPoint::StorageBeforeOpen)?;
         let connection = storage::open_database(&path)?;
         faults.hit(FaultPoint::StorageAfterOpen)?;
-        Self::from_connection(connection, provider, Some(path), wal_policy, faults)
+        Self::from_connection(connection, provider, Some(path), None, wal_policy, faults)
     }
 
     pub fn in_memory<K>(provider: K) -> Result<Self, GhostraceError>
@@ -279,10 +345,18 @@ impl Journal {
     where
         K: KeyProvider + 'static,
     {
+        let memory_uri = shared_memory_uri();
+        let connection = Connection::open_with_flags(
+            &memory_uri,
+            OpenFlags::SQLITE_OPEN_READ_WRITE
+                | OpenFlags::SQLITE_OPEN_CREATE
+                | OpenFlags::SQLITE_OPEN_URI,
+        )?;
         Self::from_connection(
-            Connection::open_in_memory()?,
+            connection,
             Arc::new(provider),
             None,
+            Some(memory_uri),
             wal_policy,
             FaultPlan::none(),
         )
@@ -306,10 +380,18 @@ impl Journal {
     where
         K: KeyProvider + 'static,
     {
+        let memory_uri = shared_memory_uri();
+        let connection = Connection::open_with_flags(
+            &memory_uri,
+            OpenFlags::SQLITE_OPEN_READ_WRITE
+                | OpenFlags::SQLITE_OPEN_CREATE
+                | OpenFlags::SQLITE_OPEN_URI,
+        )?;
         Self::from_connection(
-            Connection::open_in_memory()?,
+            connection,
             Arc::new(provider),
             None,
+            Some(memory_uri),
             wal_policy,
             faults,
         )
@@ -319,6 +401,7 @@ impl Journal {
         connection: Connection,
         provider: SharedKeyProvider,
         path: Option<PathBuf>,
+        memory_uri: Option<String>,
         wal_policy: WalPolicy,
         faults: FaultPlan,
     ) -> Result<Self, GhostraceError> {
@@ -334,9 +417,11 @@ impl Journal {
             conn: Arc::new(Mutex::new(connection)),
             key_provider: provider,
             path,
+            memory_uri,
             wal_policy,
             faults,
             integrity_data_version: Arc::new(Mutex::new(None)),
+            authenticated_write_version: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -462,9 +547,12 @@ impl Journal {
         self.checkpoint(CheckpointMode::Truncate)
     }
 
-    /// Execute a read-only transaction on a separate connection for a
-    /// file-backed journal. The transaction is rolled back when its elapsed
-    /// lifetime exceeds the configured reader limit so it cannot pin the WAL.
+    /// Execute a read-only transaction on a separate connection. The SQL
+    /// connection is opened read-only, query-only, and deny-by-default for
+    /// mutating authorizer actions; this protects ordinary SQL callbacks, but
+    /// is not a sandbox for arbitrary trusted Rust code. The transaction is
+    /// rolled back when its elapsed lifetime exceeds the configured reader
+    /// limit so it cannot pin the WAL.
     pub fn with_read_snapshot<T, F>(&self, reader: F) -> Result<T, GhostraceError>
     where
         F: FnOnce(&Connection) -> Result<T, GhostraceError>,
@@ -475,8 +563,21 @@ impl Journal {
             return run_read_snapshot(&connection, self.wal_policy, reader);
         }
 
-        let connection = self.lock_connection()?;
-        run_read_snapshot(&connection, self.wal_policy, reader)
+        let writer = self.lock_connection()?;
+        let memory_uri =
+            self.memory_uri.as_deref().ok_or_else(|| GhostraceError::BackupUnavailable)?;
+        let connection = Connection::open_with_flags(
+            memory_uri,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+        )?;
+        configure_reader_connection(&connection, self.wal_policy)?;
+        // Keep the writer handle alive and locked while the separate
+        // read-only shared-memory connection runs its snapshot. Dropping the
+        // last writer handle would destroy the named in-memory database.
+        let result = run_read_snapshot(&connection, self.wal_policy, reader);
+        drop(connection);
+        drop(writer);
+        result
     }
 
     /// Build a deterministic, read-only retention plan on one SQLite
@@ -513,8 +614,9 @@ impl Journal {
             return Err(GhostraceError::RetentionConfirmationMismatch);
         }
 
-        let mut connection = self.lock_connection()?;
-        let transaction = self.ensure_authenticated_for_write(&mut connection)?;
+        let connection = self.lock_connection()?;
+        let keys = WriteKeyProvider::new(self.key_provider.as_ref());
+        let transaction = self.ensure_authenticated_for_write(&connection, &keys)?;
         let live_boundary = transaction
             .query_row("SELECT COALESCE(MAX(ingest_seq), 0) FROM events", [], |row| {
                 row.get::<_, i64>(0)
@@ -535,8 +637,7 @@ impl Journal {
             return Err(GhostraceError::RetentionConfirmationMismatch);
         }
 
-        let current_plan =
-            plan_from_connection(&transaction, self.key_provider.as_ref(), &plan.policy)?;
+        let current_plan = plan_from_connection(&transaction, &keys, &plan.policy)?;
         if current_plan.plan_digest != plan.plan_digest
             || current_plan.candidate_set_digest != plan.candidate_set_digest
             || current_plan.snapshot_boundary != plan.snapshot_boundary
@@ -544,8 +645,7 @@ impl Journal {
             return Err(GhostraceError::RetentionConfirmationMismatch);
         }
 
-        let mut candidates =
-            candidate_events_from_plan(&transaction, self.key_provider.as_ref(), plan)?;
+        let mut candidates = candidate_events_from_plan(&transaction, &keys, plan)?;
         ensure_retention_references(&transaction, &candidates)?;
         candidates.sort_by_key(|candidate| Reverse(candidate.ingest_seq));
         for candidate in &candidates {
@@ -568,13 +668,10 @@ impl Journal {
                 requested_event_count: plan.affected_event_count,
                 deleted_event_count,
             };
-            authenticated::refresh_transaction(
-                &transaction,
-                self.key_provider.as_ref(),
-                Some(&marker),
-            )?;
+            authenticated::refresh_transaction(&transaction, &keys, Some(&marker))?;
         }
         transaction.commit()?;
+        self.publish_authenticated_version(&connection, deleted_event_count > 0)?;
 
         if let Some(path) = self.path.as_deref() {
             storage::verify_database_artifacts(path)?;
@@ -861,7 +958,8 @@ impl Journal {
     /// initialized receipt may invoke this command-level operation.
     pub fn initialize_authenticated_state(&self) -> Result<(), GhostraceError> {
         let mut connection = self.lock_connection()?;
-        authenticated::ensure_anchor(&mut connection, self.key_provider.as_ref())
+        let keys = WriteKeyProvider::new(self.key_provider.as_ref());
+        authenticated::ensure_anchor(&mut connection, &keys)
     }
 
     /// Verify ordering, cursor state, policy history, diagnostics, and
@@ -1006,21 +1104,21 @@ impl Journal {
             diagnostic.validate()?;
         }
         self.faults.hit(FaultPoint::IngestBeforeTransaction)?;
-        let mut connection = self.lock_connection()?;
-        let transaction = self.ensure_authenticated_for_write(&mut connection)?;
+        let connection = self.lock_connection()?;
+        let keys = WriteKeyProvider::new(self.key_provider.as_ref());
+        let transaction = self.ensure_authenticated_for_write(&connection, &keys)?;
+        let previous_key_generation =
+            authenticated::anchor_identity(&transaction)?.map(|anchor| anchor.key_generation);
         self.faults.hit(FaultPoint::IngestAfterTransaction)?;
         record_policy_profile(&transaction, policy)?;
-        let sequences = insert_events(
-            &transaction,
-            events,
-            self.key_provider.as_ref(),
-            &self.faults,
-            boundary,
-        )?;
+        let sequences = insert_events(&transaction, events, &keys, &self.faults, boundary)?;
         insert_diagnostics(&transaction, diagnostics, &self.faults)?;
-        authenticated::refresh_transaction(&transaction, self.key_provider.as_ref(), None)?;
+        authenticated::refresh_transaction(&transaction, &keys, None)?;
         self.faults.hit(FaultPoint::IngestBeforeCommit)?;
         transaction.commit()?;
+        let rotated =
+            previous_key_generation.is_some_and(|generation| generation != keys.key_generation());
+        self.publish_authenticated_version(&connection, rotated)?;
         self.faults.hit(FaultPoint::IngestAfterCommit)?;
         if let Some(path) = self.path.as_deref() {
             self.faults.hit(FaultPoint::StorageBeforeVerify)?;
@@ -1046,8 +1144,11 @@ impl Journal {
         for interval in intervals {
             policy.enable_source(interval.source);
         }
-        let mut connection = self.lock_connection()?;
-        let transaction = self.ensure_authenticated_for_write(&mut connection)?;
+        let connection = self.lock_connection()?;
+        let keys = WriteKeyProvider::new(self.key_provider.as_ref());
+        let transaction = self.ensure_authenticated_for_write(&connection, &keys)?;
+        let previous_key_generation =
+            authenticated::anchor_identity(&transaction)?.map(|anchor| anchor.key_generation);
         let mut selected = HashSet::new();
         let mut counts = Vec::with_capacity(intervals.len());
         let mut dropped_event_count = 0_u64;
@@ -1167,16 +1268,13 @@ impl Journal {
                 Evidence::Direct,
                 None,
             )?;
-            insert_events(
-                &transaction,
-                std::slice::from_ref(&event),
-                self.key_provider.as_ref(),
-                &self.faults,
-                None,
-            )?;
+            insert_events(&transaction, std::slice::from_ref(&event), &keys, &self.faults, None)?;
         }
-        authenticated::refresh_transaction(&transaction, self.key_provider.as_ref(), None)?;
+        authenticated::refresh_transaction(&transaction, &keys, None)?;
         transaction.commit()?;
+        let rotated =
+            previous_key_generation.is_some_and(|generation| generation != keys.key_generation());
+        self.publish_authenticated_version(&connection, rotated)?;
         if let Some(path) = self.path.as_deref() {
             storage::verify_database_artifacts(path)?;
         }
@@ -1263,8 +1361,11 @@ impl Journal {
     /// [`Journal::wrap_cursor`] establishes a new epoch.
     pub fn invalidate_cursor(&self, identity: &CursorIdentity) -> Result<(), GhostraceError> {
         self.faults.hit(FaultPoint::ControlBeforeTransaction)?;
-        let mut connection = self.lock_connection()?;
-        let transaction = self.ensure_authenticated_for_write(&mut connection)?;
+        let connection = self.lock_connection()?;
+        let keys = WriteKeyProvider::new(self.key_provider.as_ref());
+        let transaction = self.ensure_authenticated_for_write(&connection, &keys)?;
+        let previous_key_generation =
+            authenticated::anchor_identity(&transaction)?.map(|anchor| anchor.key_generation);
         self.faults.hit(FaultPoint::ControlAfterTransaction)?;
         let changed = transaction.execute(
             "UPDATE cursors SET state = 'invalidated' WHERE source = ?1 AND collector_instance = ?2",
@@ -1273,9 +1374,12 @@ impl Journal {
         if changed == 0 {
             return Err(GhostraceError::CursorStateMissing { event_source: identity.source });
         }
-        authenticated::refresh_transaction(&transaction, self.key_provider.as_ref(), None)?;
+        authenticated::refresh_transaction(&transaction, &keys, None)?;
         self.faults.hit(FaultPoint::ControlBeforeCommit)?;
         transaction.commit()?;
+        let rotated =
+            previous_key_generation.is_some_and(|generation| generation != keys.key_generation());
+        self.publish_authenticated_version(&connection, rotated)?;
         self.faults.hit(FaultPoint::ControlAfterCommit)?;
         Ok(())
     }
@@ -1297,8 +1401,11 @@ impl Journal {
             return Err(GhostraceError::CursorControlInvalid);
         }
         self.faults.hit(FaultPoint::ControlBeforeTransaction)?;
-        let mut connection = self.lock_connection()?;
-        let transaction = self.ensure_authenticated_for_write(&mut connection)?;
+        let connection = self.lock_connection()?;
+        let keys = WriteKeyProvider::new(self.key_provider.as_ref());
+        let transaction = self.ensure_authenticated_for_write(&connection, &keys)?;
+        let previous_key_generation =
+            authenticated::anchor_identity(&transaction)?.map(|anchor| anchor.key_generation);
         self.faults.hit(FaultPoint::ControlAfterTransaction)?;
         record_policy_profile(&transaction, policy)?;
         let current: Option<(u64, Option<String>)> = transaction
@@ -1345,9 +1452,12 @@ impl Journal {
                 boundary.map(serde_json::to_string).transpose()?,
             ],
         )?;
-        authenticated::refresh_transaction(&transaction, self.key_provider.as_ref(), None)?;
+        authenticated::refresh_transaction(&transaction, &keys, None)?;
         self.faults.hit(FaultPoint::ControlBeforeCommit)?;
         transaction.commit()?;
+        let rotated =
+            previous_key_generation.is_some_and(|generation| generation != keys.key_generation());
+        self.publish_authenticated_version(&connection, rotated)?;
         self.faults.hit(FaultPoint::ControlAfterCommit)?;
         Ok(())
     }
@@ -1476,42 +1586,222 @@ impl Journal {
 
     fn ensure_authenticated_for_write<'connection>(
         &self,
-        connection: &'connection mut Connection,
+        connection: &'connection Connection,
+        provider: &dyn KeyProvider,
     ) -> Result<Transaction<'connection>, GhostraceError> {
-        // Retain this one write lock through validation, mutation, anchor
-        // refresh, and commit. Returning a guard prevents a caller from
-        // accidentally validating one transaction and writing in another.
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let data_version =
-            transaction.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))?;
-        let needs_integrity_check = self
+        self.ensure_authenticated_for_write_attempt(connection, provider, 0)
+    }
+
+    fn retry_authenticated_preflight<'connection>(
+        &self,
+        connection: &'connection Connection,
+        provider: &dyn KeyProvider,
+        attempt: u32,
+        verification_elapsed: Duration,
+    ) -> Result<Transaction<'connection>, GhostraceError> {
+        if attempt + 1 == AUTH_WRITE_PREFLIGHT_ATTEMPTS {
+            return Err(GhostraceError::AuthenticatedStateRetryExhausted {
+                attempts: AUTH_WRITE_PREFLIGHT_ATTEMPTS,
+            });
+        }
+        let base = verification_elapsed.max(AUTH_WRITE_PREFLIGHT_RETRY_MIN);
+        let delay =
+            base.saturating_mul(attempt.saturating_add(1)).min(AUTH_WRITE_PREFLIGHT_RETRY_MAX);
+        thread::yield_now();
+        thread::sleep(delay);
+        self.ensure_authenticated_for_write_attempt(connection, provider, attempt + 1)
+    }
+
+    fn ensure_authenticated_for_write_attempt<'connection>(
+        &self,
+        connection: &'connection Connection,
+        provider: &dyn KeyProvider,
+        attempt: u32,
+    ) -> Result<Transaction<'connection>, GhostraceError> {
+        // Full integrity/authentication verification runs on a read snapshot
+        // before IMMEDIATE. The transaction returned here retains the write
+        // guard through anchor revalidation, mutation, refresh, and commit;
+        // callers cannot accidentally validate one transaction and write in
+        // another.
+        let initial_owner_data_version =
+            connection.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))?;
+        let cached_data_version = self
             .integrity_data_version
             .lock()
-            .map_err(|_| GhostraceError::Migration("journal mutex poisoned".to_owned()))?
-            .is_none_or(|cached| cached != data_version);
-        if needs_integrity_check {
-            let integrity = IntegrityReport::from_connection(&transaction)?;
+            .map_err(|_| GhostraceError::Migration("journal mutex poisoned".to_owned()))?;
+        let needs_full_verification = self.path.is_some()
+            && (attempt > 0
+                || cached_data_version.is_none_or(|cached| cached != initial_owner_data_version));
+        drop(cached_data_version);
+
+        // Do not leave a pre-transaction cache published while the
+        // caller owns a transaction. A later caller publishes a fresh
+        // version only after commit; every rollback/error therefore
+        // conservatively forces the next write through full preflight.
+        self.invalidate_authenticated_cache()?;
+
+        // A full read-side verification is deliberately outside the writer
+        // lock. Fence it with the owner connection's version sampled both
+        // immediately before and immediately after the read snapshot. A
+        // foreign commit during that interval must restart verification;
+        // accepting the newer version merely because it was sampled after the
+        // snapshot would permit same-anchor row tampering with triggers
+        // disabled.
+        let (preflight_anchor, mut owner_data_version, verification_elapsed) =
+            if needs_full_verification {
+                let verification_start_version =
+                    connection.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))?;
+                let verification_started = Instant::now();
+                let anchor = match self.preverify_for_write(provider) {
+                    Ok(anchor) => anchor,
+                    Err(GhostraceError::AuthenticatedStatePreflightChanged) => {
+                        return self.retry_authenticated_preflight(
+                            connection,
+                            provider,
+                            attempt,
+                            verification_started.elapsed(),
+                        );
+                    }
+                    Err(error) => return Err(error),
+                };
+                let verification_elapsed = verification_started.elapsed();
+                let verification_end_version =
+                    connection.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))?;
+                if verification_end_version != verification_start_version {
+                    return self.retry_authenticated_preflight(
+                        connection,
+                        provider,
+                        attempt,
+                        verification_elapsed,
+                    );
+                }
+                (anchor, verification_end_version, verification_elapsed)
+            } else {
+                (None, initial_owner_data_version, Duration::ZERO)
+            };
+
+        // The hook runs after full verification and immediately before the
+        // final owner-version sample. Besides making the race deterministic
+        // in tests, this models a peer commit in the narrowest real window.
+        #[cfg(test)]
+        run_auth_prewrite_test_hook();
+        let postverification_owner_version =
+            connection.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))?;
+        if self.path.is_some() && postverification_owner_version != owner_data_version {
+            return self.retry_authenticated_preflight(
+                connection,
+                provider,
+                attempt,
+                verification_elapsed,
+            );
+        }
+        owner_data_version = postverification_owner_version;
+
+        // Construct the transaction from a shared connection reference so a
+        // rolled-back attempt can be retried without extending a mutable
+        // borrow across the recursive retry boundary. The connection is
+        // already exclusively owned by this Journal mutex.
+        let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+        let locked_data_version =
+            transaction.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))?;
+        let locked_anchor =
+            if self.path.is_some() { authenticated::anchor_identity(&transaction)? } else { None };
+        let preflight_matches = preflight_anchor
+            .as_ref()
+            .is_none_or(|expected| locked_anchor.as_ref() == Some(expected));
+        let version_matches = self.path.is_none() || locked_data_version == owner_data_version;
+        if !version_matches || !preflight_matches {
+            transaction.rollback()?;
+            return self.retry_authenticated_preflight(
+                connection,
+                provider,
+                attempt,
+                verification_elapsed,
+            );
+        }
+        authenticated::ensure_anchor_in(&transaction, provider)?;
+        authenticated::require_anchor_valid(&transaction, provider)?;
+        *self
+            .authenticated_write_version
+            .lock()
+            .map_err(|_| GhostraceError::Migration("journal mutex poisoned".to_owned()))? =
+            Some(owner_data_version);
+        Ok(transaction)
+    }
+
+    fn preverify_for_write(
+        &self,
+        provider: &dyn KeyProvider,
+    ) -> Result<Option<AuthenticatedAnchorIdentity>, GhostraceError> {
+        self.with_read_snapshot(|connection| {
+            let integrity = IntegrityReport::from_connection(connection)?;
             if !integrity.integrity_ok {
                 return Err(GhostraceError::IntegrityReportInvalid(
                     "normal writer refuses an integrity-failed journal; repair a verified copy"
                         .to_owned(),
                 ));
             }
-            *self
-                .integrity_data_version
+            let before =
+                connection.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))?;
+            let anchor = authenticated::anchor_identity(connection)?;
+            if anchor.is_some() {
+                authenticated::require_valid(connection, provider)?;
+            } else if !authenticated::bootstrap_allowed(connection)? {
+                return Err(GhostraceError::AuthenticatedStateInvalid(
+                    "authenticated anchor is missing".to_owned(),
+                ));
+            }
+            #[cfg(test)]
+            run_auth_preverify_test_hook();
+            let after =
+                connection.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))?;
+            if before != after {
+                return Err(GhostraceError::AuthenticatedStatePreflightChanged);
+            }
+            Ok(anchor)
+        })
+    }
+
+    fn publish_authenticated_version(
+        &self,
+        connection: &Connection,
+        invalidate: bool,
+    ) -> Result<(), GhostraceError> {
+        let version = if invalidate {
+            None
+        } else {
+            let expected = self
+                .authenticated_write_version
                 .lock()
-                .map_err(|_| GhostraceError::Migration("journal mutex poisoned".to_owned()))? =
-                Some(data_version);
+                .map_err(|_| GhostraceError::Migration("journal mutex poisoned".to_owned()))?
+                .take();
+            let current =
+                connection.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))?;
+            expected.filter(|expected| *expected == current).map(|_| current)
+        };
+        if invalidate {
+            self.authenticated_write_version
+                .lock()
+                .map_err(|_| GhostraceError::Migration("journal mutex poisoned".to_owned()))?
+                .take();
         }
-        if self.path.is_none() {
-            // An in-memory connection cannot be modified by another process;
-            // the first transaction bootstraps its anchor after the event,
-            // preserving the single key access at the encryption boundary.
-            return Ok(transaction);
-        }
-        authenticated::ensure_anchor_in(&transaction, self.key_provider.as_ref())?;
-        authenticated::require_valid(&transaction, self.key_provider.as_ref())?;
-        Ok(transaction)
+        *self
+            .integrity_data_version
+            .lock()
+            .map_err(|_| GhostraceError::Migration("journal mutex poisoned".to_owned()))? = version;
+        Ok(())
+    }
+
+    fn invalidate_authenticated_cache(&self) -> Result<(), GhostraceError> {
+        *self
+            .integrity_data_version
+            .lock()
+            .map_err(|_| GhostraceError::Migration("journal mutex poisoned".to_owned()))? = None;
+        self.authenticated_write_version
+            .lock()
+            .map_err(|_| GhostraceError::Migration("journal mutex poisoned".to_owned()))?
+            .take();
+        Ok(())
     }
 }
 
@@ -2660,7 +2950,7 @@ fn parse_kind(value: &str) -> Result<crate::model::EventKind, GhostraceError> {
         .map_err(|_| GhostraceError::InvalidEvent("stored event kind is invalid".to_owned()))
 }
 
-fn migration_specs() -> [MigrationSpec; 6] {
+fn migration_specs() -> [MigrationSpec; 7] {
     [
         MigrationSpec {
             id: "0000_migration_ledger",
@@ -2692,6 +2982,12 @@ fn migration_specs() -> [MigrationSpec; 6] {
             version: 5,
             schema_version: 5,
             sql: MIGRATION_AUTHENTICATED_STATE,
+        },
+        MigrationSpec {
+            id: "0006_incremental_authenticated_state",
+            version: 6,
+            schema_version: 6,
+            sql: MIGRATION_INCREMENTAL_AUTHENTICATED_STATE,
         },
     ]
 }
@@ -2748,7 +3044,7 @@ fn run_migrations(connection: &mut Connection, faults: &FaultPlan) -> Result<(),
 
 fn initialize_migration_ledger(
     connection: &mut Connection,
-    specs: &[MigrationSpec; 6],
+    specs: &[MigrationSpec; 7],
     faults: &FaultPlan,
 ) -> Result<(), GhostraceError> {
     let ledger_exists = table_exists(connection, "migration_records")?;
@@ -2872,7 +3168,7 @@ fn insert_applied_migration(
 
 fn validate_applied_prefix(
     records: &[AppliedMigration],
-    specs: &[MigrationSpec; 6],
+    specs: &[MigrationSpec; 7],
 ) -> Result<usize, GhostraceError> {
     for (index, record) in records.iter().enumerate() {
         let Some(spec) = specs.get(index) else {
@@ -2913,7 +3209,7 @@ fn validate_applied_prefix(
 
 fn validate_final_schema(
     connection: &Connection,
-    specs: &[MigrationSpec; 6],
+    specs: &[MigrationSpec; 7],
 ) -> Result<(), GhostraceError> {
     let records = load_applied_migrations(connection)?;
     if records.len() != specs.len() {
@@ -3130,6 +3426,10 @@ fn maybe_crash_after_migration_sql(migration_id: &str) {
     }
 }
 
+fn shared_memory_uri() -> String {
+    format!("file:ghostrace-memory-{}?mode=memory&cache=shared", Uuid::new_v4().simple())
+}
+
 fn configure_connection(
     connection: &Connection,
     file_backed: bool,
@@ -3154,6 +3454,22 @@ fn configure_reader_connection(
     wal_policy.validate()?;
     connection.pragma_update(None, "foreign_keys", "ON")?;
     connection.busy_timeout(wal_policy.busy_timeout())?;
+    // This is defense in depth for ordinary SQL callbacks. File-backed
+    // readers are opened with SQLITE_OPEN_READ_ONLY, and in-memory readers
+    // use a read-only shared-memory URI; query_only also rejects DML on either
+    // connection before SQLite reaches the transaction boundary.
+    connection.pragma_update(None, "query_only", "ON")?;
+    let authorize_read = |context: rusqlite::hooks::AuthContext<'_>| match context.action {
+        AuthAction::Read { .. }
+        | AuthAction::Select
+        | AuthAction::Function { .. }
+        | AuthAction::Transaction { .. }
+        // A pragma without a value is a read. Value-bearing pragmas can
+        // mutate connection or database state (including query_only=OFF).
+        | AuthAction::Pragma { pragma_value: None, .. } => Authorization::Allow,
+        _ => Authorization::Deny,
+    };
+    connection.authorizer(Some(authorize_read))?;
     Ok(())
 }
 
@@ -3175,7 +3491,11 @@ where
     }
     match result {
         Ok(value) => {
-            connection.execute_batch("COMMIT")?;
+            // A read snapshot must never publish callback-side transaction
+            // state. Roll back even on success; the reader URI and authorizer
+            // already reject writes, and rollback is the final containment
+            // boundary for connection-local changes.
+            connection.execute_batch("ROLLBACK")?;
             Ok(value)
         }
         Err(error) => {
@@ -3208,8 +3528,10 @@ mod authenticated_write_tests {
         )
         .expect("journal");
         journal.initialize_authenticated_state().expect("initial anchor");
-        let mut connection = journal.lock_connection().expect("connection");
-        let guard = journal.ensure_authenticated_for_write(&mut connection).expect("precondition");
+        let connection = journal.lock_connection().expect("connection");
+        let keys = WriteKeyProvider::new(journal.key_provider.as_ref());
+        let guard =
+            journal.ensure_authenticated_for_write(&connection, &keys).expect("precondition");
         let competing_writer = Connection::open(&path).expect("competing connection");
         competing_writer.busy_timeout(Duration::ZERO).expect("no waiting");
         let mutation = "UPDATE authenticated_state SET updated_at = updated_at";
@@ -3227,5 +3549,365 @@ mod authenticated_write_tests {
             competing_writer.execute(mutation, []).expect("lock released after rollback"),
             1
         );
+    }
+
+    #[test]
+    fn authenticated_append_does_not_rescan_historical_events_under_the_write_lock() {
+        let directory = tempfile::tempdir().expect("synthetic journal directory");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))
+                .expect("private synthetic directory");
+        }
+        let path = directory.path().join("journal.sqlite3");
+        let journal = Journal::open_fixture(
+            &path,
+            DeterministicKeyProvider::from_seed("authenticated-incremental-hot-path"),
+        )
+        .expect("journal");
+        journal.initialize_authenticated_state().expect("initial anchor");
+
+        let origin =
+            crate::IngestionOrigin::fixture_instance("fixture-incremental-hot-path-source")
+                .expect("origin");
+        let mut profile = crate::PolicyProfile::deny_by_default("incremental-hot-path");
+        profile.enable_source(crate::EventSource::Filesystem);
+        let make_event = |id| {
+            let timestamp = chrono::Utc::now();
+            crate::EventEnvelope::new(
+                &origin,
+                uuid::Uuid::from_u128(id),
+                timestamp,
+                timestamp,
+                crate::EventSource::Filesystem,
+                crate::EventKind::Gap,
+                crate::EventPayload::Gap(crate::GapPayload {
+                    source: crate::EventSource::Filesystem,
+                    reason_code: crate::ReasonCode::try_from("incremental_test").expect("reason"),
+                    dropped_count: 1,
+                    from_cursor: None,
+                    to_cursor: None,
+                    volume_digest: None,
+                    root_ids: Vec::new(),
+                    remediation: None,
+                }),
+                None,
+                "incremental-hot-path",
+                1,
+                crate::Evidence::Unknown,
+                None,
+            )
+            .expect("event")
+        };
+        journal.ingest(&origin, &make_event(1), &profile).expect("warm append");
+        crate::authenticated::reset_full_snapshot_test_counter();
+        journal.ingest(&origin, &make_event(2), &profile).expect("append");
+
+        assert_eq!(
+            crate::authenticated::full_snapshot_test_counter(),
+            0,
+            "append authentication must advance from durable incremental state"
+        );
+    }
+
+    #[test]
+    fn cached_preflight_retries_after_a_foreign_commit_before_begin_immediate() {
+        let directory = tempfile::tempdir().expect("synthetic journal directory");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))
+                .expect("private synthetic directory");
+        }
+        let path = directory.path().join("journal.sqlite3");
+        let journal = Journal::open_fixture(
+            &path,
+            DeterministicKeyProvider::from_seed("authenticated-preflight-race"),
+        )
+        .expect("journal");
+        journal.initialize_authenticated_state().expect("initial anchor");
+
+        let origin = crate::IngestionOrigin::fixture_instance("fixture-preflight-race-source")
+            .expect("origin");
+        let mut profile = crate::PolicyProfile::deny_by_default("preflight-race");
+        profile.enable_source(crate::EventSource::Filesystem);
+        let make_event = |id| {
+            let timestamp = chrono::Utc::now();
+            crate::EventEnvelope::new(
+                &origin,
+                uuid::Uuid::from_u128(id),
+                timestamp,
+                timestamp,
+                crate::EventSource::Filesystem,
+                crate::EventKind::Gap,
+                crate::EventPayload::Gap(crate::GapPayload {
+                    source: crate::EventSource::Filesystem,
+                    reason_code: crate::ReasonCode::try_from("preflight_race").expect("reason"),
+                    dropped_count: 1,
+                    from_cursor: None,
+                    to_cursor: None,
+                    volume_digest: None,
+                    root_ids: Vec::new(),
+                    remediation: None,
+                }),
+                None,
+                "preflight-race",
+                1,
+                crate::Evidence::Unknown,
+                None,
+            )
+            .expect("event")
+        };
+        journal.ingest(&origin, &make_event(1), &profile).expect("warm append");
+
+        let race_path = path.clone();
+        set_auth_prewrite_test_hook(move || {
+            let connection = Connection::open(race_path).expect("race connection");
+            connection
+                .execute(
+                    "INSERT INTO journal_metadata(metadata_key, metadata_value)
+                     VALUES ('auth-preflight-race', '1')
+                     ON CONFLICT(metadata_key) DO UPDATE SET metadata_value =
+                     CASE metadata_value WHEN '1' THEN '2' ELSE '1' END",
+                    [],
+                )
+                .expect("foreign metadata commit");
+        });
+        journal.ingest(&origin, &make_event(2), &profile).expect("retry after foreign commit");
+        assert_eq!(journal.events().expect("events").len(), 2);
+        assert!(journal.authenticated_state_report().expect("report").valid);
+    }
+
+    #[test]
+    fn full_preflight_retries_when_owner_moves_inside_snapshot() {
+        let directory = tempfile::tempdir().expect("synthetic journal directory");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))
+                .expect("private synthetic directory");
+        }
+        let path = directory.path().join("journal.sqlite3");
+        let journal = Journal::open_fixture(
+            &path,
+            DeterministicKeyProvider::from_seed("authenticated-inner-preflight-race"),
+        )
+        .expect("journal");
+        journal.initialize_authenticated_state().expect("initial anchor");
+
+        let origin = crate::IngestionOrigin::fixture_instance("fixture-inner-preflight-source")
+            .expect("origin");
+        let mut profile = crate::PolicyProfile::deny_by_default("inner-preflight-race");
+        profile.enable_source(crate::EventSource::Filesystem);
+        let make_event = |id| {
+            let timestamp = chrono::Utc::now();
+            crate::EventEnvelope::new(
+                &origin,
+                uuid::Uuid::from_u128(id),
+                timestamp,
+                timestamp,
+                crate::EventSource::Filesystem,
+                crate::EventKind::Gap,
+                crate::EventPayload::Gap(crate::GapPayload {
+                    source: crate::EventSource::Filesystem,
+                    reason_code: crate::ReasonCode::try_from("inner_preflight").expect("reason"),
+                    dropped_count: 1,
+                    from_cursor: None,
+                    to_cursor: None,
+                    volume_digest: None,
+                    root_ids: Vec::new(),
+                    remediation: None,
+                }),
+                None,
+                "inner-preflight-race",
+                1,
+                crate::Evidence::Unknown,
+                None,
+            )
+            .expect("event")
+        };
+        journal.ingest(&origin, &make_event(1), &profile).expect("warm append");
+        journal.invalidate_authenticated_cache().expect("force full preflight");
+
+        let race_path = path.clone();
+        set_auth_preverify_test_hook(move || {
+            let connection = Connection::open(race_path).expect("race connection");
+            connection
+                .execute(
+                    "INSERT INTO journal_metadata(metadata_key, metadata_value)
+                     VALUES ('auth-inner-preflight-race', '1')
+                     ON CONFLICT(metadata_key) DO UPDATE SET metadata_value =
+                     CASE metadata_value WHEN '1' THEN '2' ELSE '1' END",
+                    [],
+                )
+                .expect("foreign commit during full preflight");
+        });
+
+        journal
+            .ingest(&origin, &make_event(2), &profile)
+            .expect("owner movement during full preflight must retry");
+        assert_eq!(journal.events().expect("events").len(), 2);
+        assert!(journal.authenticated_state_report().expect("report").valid);
+    }
+
+    #[test]
+    fn cached_preflight_rejects_foreign_row_tampering_that_bypassed_triggers() {
+        let directory = tempfile::tempdir().expect("synthetic journal directory");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))
+                .expect("private synthetic directory");
+        }
+        let path = directory.path().join("journal.sqlite3");
+        let journal = Journal::open_fixture(
+            &path,
+            DeterministicKeyProvider::from_seed("authenticated-trigger-tamper"),
+        )
+        .expect("journal");
+        journal.initialize_authenticated_state().expect("initial anchor");
+
+        let origin = crate::IngestionOrigin::fixture_instance("fixture-trigger-tamper-source")
+            .expect("origin");
+        let mut profile = crate::PolicyProfile::deny_by_default("trigger-tamper");
+        profile.enable_source(crate::EventSource::Filesystem);
+        let timestamp = chrono::Utc::now();
+        let event = crate::EventEnvelope::new(
+            &origin,
+            uuid::Uuid::from_u128(1),
+            timestamp,
+            timestamp,
+            crate::EventSource::Filesystem,
+            crate::EventKind::Gap,
+            crate::EventPayload::Gap(crate::GapPayload {
+                source: crate::EventSource::Filesystem,
+                reason_code: crate::ReasonCode::try_from("trigger_tamper").expect("reason"),
+                dropped_count: 1,
+                from_cursor: None,
+                to_cursor: None,
+                volume_digest: None,
+                root_ids: Vec::new(),
+                remediation: None,
+            }),
+            None,
+            "trigger-tamper",
+            1,
+            crate::Evidence::Unknown,
+            None,
+        )
+        .expect("event");
+        journal.ingest(&origin, &event, &profile).expect("warm append");
+        let before_head = journal.authenticated_state().expect("anchor").head_mac;
+        let race_path = path.clone();
+        set_auth_prewrite_test_hook(move || {
+            let mut connection = Connection::open(race_path).expect("race connection");
+            let trigger_sql: String = connection
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE name = 'authenticated_events_au'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("original update trigger");
+            let transaction = connection.transaction().expect("tamper transaction");
+            transaction
+                .execute_batch(
+                    "DROP TRIGGER authenticated_events_au;
+                     UPDATE events SET evidence = '\"contextual\"';",
+                )
+                .expect("foreign tamper");
+            transaction.execute_batch(&trigger_sql).expect("restore exact trigger");
+            transaction.commit().expect("same-anchor foreign commit");
+        });
+        let error = journal.ingest(&origin, &event, &profile).expect_err("tamper must fail closed");
+        assert!(matches!(error, GhostraceError::AuthenticatedStateInvalid(_)));
+        assert_eq!(journal.authenticated_state().expect("unchanged anchor").head_mac, before_head);
+        let count: i64 = Connection::open(&path)
+            .expect("count connection")
+            .query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))
+            .expect("unchanged event count");
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn full_preflight_is_fenced_against_tampering_after_snapshot() {
+        let directory = tempfile::tempdir().expect("synthetic journal directory");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))
+                .expect("private synthetic directory");
+        }
+        let path = directory.path().join("journal.sqlite3");
+        let journal = Journal::open_fixture(
+            &path,
+            DeterministicKeyProvider::from_seed("authenticated-full-preflight-fence"),
+        )
+        .expect("journal");
+        journal.initialize_authenticated_state().expect("initial anchor");
+
+        let origin =
+            crate::IngestionOrigin::fixture_instance("fixture-full-preflight-fence-source")
+                .expect("origin");
+        let mut profile = crate::PolicyProfile::deny_by_default("full-preflight-fence");
+        profile.enable_source(crate::EventSource::Filesystem);
+        let timestamp = chrono::Utc::now();
+        let event = crate::EventEnvelope::new(
+            &origin,
+            uuid::Uuid::from_u128(1),
+            timestamp,
+            timestamp,
+            crate::EventSource::Filesystem,
+            crate::EventKind::Gap,
+            crate::EventPayload::Gap(crate::GapPayload {
+                source: crate::EventSource::Filesystem,
+                reason_code: crate::ReasonCode::try_from("full_preflight_fence").expect("reason"),
+                dropped_count: 1,
+                from_cursor: None,
+                to_cursor: None,
+                volume_digest: None,
+                root_ids: Vec::new(),
+                remediation: None,
+            }),
+            None,
+            "full-preflight-fence",
+            1,
+            crate::Evidence::Unknown,
+            None,
+        )
+        .expect("event");
+        journal.ingest(&origin, &event, &profile).expect("warm append");
+        journal.invalidate_authenticated_cache().expect("force full preflight");
+        let before_head = journal.authenticated_state().expect("anchor").head_mac;
+        let race_path = path.clone();
+        set_auth_prewrite_test_hook(move || {
+            let mut connection = Connection::open(race_path).expect("race connection");
+            let trigger_sql: String = connection
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE name = 'authenticated_events_au'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("original update trigger");
+            let transaction = connection.transaction().expect("tamper transaction");
+            transaction
+                .execute_batch(
+                    "DROP TRIGGER authenticated_events_au;
+                     UPDATE events SET evidence = '\"contextual\"';",
+                )
+                .expect("post-verification tamper");
+            transaction.execute_batch(&trigger_sql).expect("restore exact trigger");
+            transaction.commit().expect("same-anchor foreign commit");
+        });
+        let error = journal
+            .ingest(&origin, &event, &profile)
+            .expect_err("tamper after full snapshot must fail closed");
+        assert!(matches!(error, GhostraceError::AuthenticatedStateInvalid(_)));
+        assert_eq!(journal.authenticated_state().expect("unchanged anchor").head_mac, before_head);
+        let count: i64 = Connection::open(&path)
+            .expect("count connection")
+            .query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))
+            .expect("unchanged event count");
+        assert_eq!(count, 1);
     }
 }

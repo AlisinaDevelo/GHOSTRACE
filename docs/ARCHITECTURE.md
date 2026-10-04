@@ -762,7 +762,7 @@ path-free read snapshot. It provides recovery guidance but never repairs the
 database. A failure requires preserving the original and performing any repair
 on a private verified copy with before-and-after receipts.
 
-### Authenticated journal state (task 0088)
+### Authenticated journal state (tasks 0088 and 0175)
 
 Mutable metadata that SQLite does not authenticate has a separate versioned
 keyed anchor. Canonical bytes are length-delimited under the domain separator
@@ -772,13 +772,68 @@ diagnostics. The head MAC also binds the chain epoch, chain-start boundary, key
 generation, and deletion digest. The anchor contains no key material, paths,
 plaintext, or retained event identifiers.
 
-Every event/cursor/policy/diagnostic write holds one immediate transaction from
-integrity and authenticated-state verification through mutation, anchor refresh,
-and commit. The verification helper returns the transaction guard to the writer;
-another connection cannot commit after verification and before the mutation.
-Dropping the guard on a refusal rolls back the whole operation. Component digests
-still require a full snapshot scan; task 0175 tracks the separate incremental-write
-and large-journal performance work.
+The first v2 write on a legacy v1 journal is a distinct migration boundary. It
+verifies the complete v1 canonical snapshot and head MAC, then builds the v2
+commitment maps and operation-ledger root while holding one `IMMEDIATE`
+transaction. That one-time promotion/startup cost is not the 100,000-event hot-
+write bound and must be measured separately.
+
+After promotion, each event/cursor/policy/diagnostic write either reuses a
+post-commit cache or performs its complete read-side integrity and
+authentication preflight before `BEGIN IMMEDIATE`; it then re-reads the
+connection's `data_version` and full anchor identity under the retained guard.
+A changed version or identity rolls back and retries from a new outside-lock
+snapshot, including on the cached fast path. Once admitted, the write consumes
+only pending trigger rows, updates the affected commitment terms, appends one
+operation-ledger entry, and commits; it does not scan historical events under
+the write lock. Dropping the guard on a refusal rolls back the whole operation.
+
+Each write has one short-lived key scope shared by preflight, authentication,
+payload encryption, and anchor advancement, including preflight retries. It pins
+the active generation and resolves each required generation from the backing
+provider at most once, without retaining keys between writes. Ordinary writes
+use one generation and make exactly one provider read, for both file-backed and
+in-memory journals. In-memory writes keep the anchor check under the same guard;
+sharing the key preserves their single-read contract. Rotation or preflight over
+retained ciphertext from older generations needs one read per distinct generation.
+
+`authenticated-check` performs the full v2 recomputation. The explicit
+100,000-event device lane in `tests/authenticated_state.rs` reports seed/setup
+timing independently, reopens and warms a connection, bounds steady-state writes
+using `GHOSTRACE_AUTH_HOT_WRITE_BOUND_MS`, and then exercises two fresh
+connections and two separate processes with the unchanged 250 ms default busy
+timeout. The opt-in legacy
+migration lane measures the separate v1-to-v2 promotion boundary. Component
+maps and operation-ledger verification remain full-check paths and are not
+substituted by the hot-write measurement.
+
+The reference measurement on 2026-10-04 used an Apple M1 MacBook Pro with
+8 GB RAM, macOS 26.6.2 (25G83), arm64, Rust/Cargo 1.88.0, and the unoptimized
+all-features test profile. With 100,000 synthetic events, 64 steady-state
+single-event writes had median 3.696 ms, p95 6.152 ms, and maximum 11.364 ms.
+The predeclared bound is 200 ms. Whole-write wall time conservatively bounds
+the `IMMEDIATE` lock interval; this lane does not directly instrument the lock.
+Each of two connections and two separate processes completed 32 writes with
+no timeout at the default 250 ms. Seeding took 110.320 s, the first write after
+reopening (including full preflight) took 14.486 s, and the final full check took
+9.286 s. Startup and each of the 64 hot writes made exactly one backing-provider
+key read. Startup/external-commit scans, legacy promotion, rotation, retention,
+and multi-event batches are outside the steady-state single-event bound.
+The preceding measurement's 28.682 s startup was close to the default 30 s reader
+limit. That limit and the full-scan algorithm remain unchanged; neither startup
+result bounds other devices or larger operation histories.
+
+Reproduce the device lane under a 600 s process-group watchdog:
+
+```sh
+GHOSTRACE_AUTH_HOT_WRITE_BOUND_MS=200 cargo test --locked --all-features \
+  --test authenticated_state \
+  one_hundred_thousand_events_and_two_default_timeout_writers \
+  -- --ignored --exact --nocapture
+```
+
+Setup, each process result, the full sample vector, and the final authentication
+result are emitted separately.
 
 A confirmed retention delete advances the chain epoch and records only
 the plan/candidate digests, snapshot boundary, and counts. After bootstrap, a

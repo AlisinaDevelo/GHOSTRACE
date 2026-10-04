@@ -68,6 +68,7 @@ pub mod writer;
 pub use authenticated::{
     AuthenticatedAnomaly, AuthenticatedDeletionMarker, AuthenticatedState,
     AuthenticatedStateReport, AUTHENTICATED_STATE_DOMAIN, AUTHENTICATED_STATE_SCHEMA_VERSION,
+    AUTHENTICATED_STATE_V1_SCHEMA_VERSION, AUTHENTICATED_STATE_V2_DOMAIN,
 };
 pub use browser_origin::{
     CanonicalNavigation, NavigationHostClass, NavigationRefusal, PathSegmentClass, UrlShapePolicy,
