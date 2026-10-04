@@ -177,4 +177,4 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0172 | Keep login-keychain access stable across rebuilds without a Developer ID | M4 | backlog | storage | maintainer | — | 0164 |
 | 0173 | Export and archive a live journal | M4 | done | explain-export | maintainer | — | 0165, 0020, 0022 |
 | 0174 | Report why the native filesystem benchmark test fails under load | M4 | done | filesystem | maintainer | — | 0076 |
-| 0175 | Make per-write authenticated-state verification incremental | M4 | in-progress | storage | maintainer | — | 0088 |
+| 0175 | Make per-write authenticated-state verification incremental | M4 | done | storage | maintainer | — | 0088 |
