@@ -47,6 +47,7 @@ pub mod native_host;
 #[cfg(unix)]
 pub mod native_host_manifest;
 pub mod native_messaging;
+pub mod native_transport;
 pub mod ordering;
 #[cfg(feature = "parquet")]
 pub mod parquet_archive;
@@ -240,8 +241,16 @@ pub use native_messaging::{
     encode_frame, parse_message, ExtensionMessage, FrameDecoder, NativeMessagingError,
     NavigationTransition, ProtocolSession, SessionEvent, MAX_NATIVE_DECODER_BUFFER,
     MAX_NATIVE_FRAME_BYTES, MAX_NATIVE_MESSAGES_PER_WINDOW, MAX_NATIVE_MESSAGE_DEPTH,
-    MAX_NATIVE_MESSAGE_VALUES, NATIVE_MESSAGING_PROTOCOL_VERSION, NATIVE_RATE_WINDOW,
-    NATIVE_SESSION_IDLE_TIMEOUT,
+    MAX_NATIVE_MESSAGE_FIELDS, MAX_NATIVE_MESSAGE_STRING_BUDGET_BYTES,
+    MAX_NATIVE_MESSAGE_STRING_BYTES, MAX_NATIVE_MESSAGE_VALUES, NATIVE_MESSAGING_PROTOCOL_VERSION,
+    NATIVE_RATE_WINDOW, NATIVE_SESSION_IDLE_TIMEOUT,
+};
+pub use native_transport::{
+    encode_chromium_stream, encode_safari_envelope, normalize_chromium_stream,
+    normalize_safari_envelope, validate_chromium_caller_origin, validate_safari_identity,
+    NativeTransportError, NormalizedTransportFrame, SafariTransportEnvelope, TransportIdentity,
+    MAX_CHROMIUM_STREAM_BYTES, MAX_CHROMIUM_STREAM_FRAMES, MAX_SAFARI_ID_BYTES,
+    SAFARI_TRANSPORT_SCHEMA_VERSION,
 };
 pub use ordering::{
     analyze_temporal_observations, compare_event_order, StableOrderKey, TemporalAnalysis,
