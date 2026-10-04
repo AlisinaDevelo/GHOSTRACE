@@ -1310,18 +1310,16 @@ pub fn run_stdio_with_timeout<R: Read + AsRawFd, W: Write + AsRawFd, S: NativeBr
             decoder.finish().map_err(|_| NativeBridgeError::Framing)?;
             return Ok(summary);
         }
+        if summary.closed {
+            // After goodbye, only EOF is valid. Refuse even a partial prefix
+            // before decoding so read boundaries cannot change this outcome.
+            return Err(NativeBridgeError::Session(NativeSessionError::Protocol(
+                NativeMessagingError::TrailingData,
+            )));
+        }
         decoder.push(&chunk[..read]).map_err(|_| NativeBridgeError::Framing)?;
         while let Some(body) = decoder.next_frame().map_err(|_| NativeBridgeError::Framing)? {
             summary.frames = summary.frames.saturating_add(1);
-            if summary.closed {
-                // A complete frame was already decoded after `goodbye`. Do
-                // not hand it back to the bridge (which would otherwise run
-                // pairing/MAC logic again); the protocol is closed and the
-                // trailing frame is refused without a second response.
-                return Err(NativeBridgeError::Session(NativeSessionError::Protocol(
-                    NativeMessagingError::TrailingData,
-                )));
-            }
             let result = bridge.receive(&body, started.elapsed(), Utc::now());
             let output = match result {
                 Ok(output) => output,
@@ -1355,13 +1353,15 @@ pub fn run_stdio_with_timeout<R: Read + AsRawFd, W: Write + AsRawFd, S: NativeBr
                 timeout.min(NATIVE_HOST_WRITE_TIMEOUT),
             )?;
             idle_deadline = Instant::now() + timeout;
-        }
-        if summary.closed {
-            if decoder.has_buffered_data() {
-                return Err(NativeBridgeError::Framing);
+            if summary.closed && decoder.has_buffered_data() {
+                return Err(NativeBridgeError::Session(NativeSessionError::Protocol(
+                    NativeMessagingError::TrailingData,
+                )));
             }
-            return Ok(summary);
         }
+        // Goodbye ends message admission, but stream completion requires EOF.
+        // Keep the same idle deadline while waiting; a peer that leaves stdin
+        // open cannot keep the host alive indefinitely.
     }
 }
 

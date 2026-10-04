@@ -1104,8 +1104,9 @@ read, so the pre-hello and partial-frame cases have a real idle deadline rather
 than relying on a blocking `Read`; the protocol's connection-start anchor means
 rejected pre-hello frames cannot extend that deadline. Native stdout writes are
 also nonblocking and deadline-bounded, so a browser that stops reading cannot
-hold the process forever. A clean `goodbye` closes the protocol; any complete or
-partial bytes after it are refused as trailing/framing data. Chrome
+hold the process forever. A clean `goodbye` closes message admission; the runner
+waits for stdin EOF under the idle deadline. Any complete or partial bytes after goodbye are
+refused as `TrailingData`, including bytes delivered in a later read. Chrome
 launches the absolute manifest binary with exactly one `chrome-extension://id/`
 argument. `main` validates that argument before opening the pairing store or
 consuming stdin, and the authenticated `hello.extension_id` must match it. The

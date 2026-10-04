@@ -10,14 +10,16 @@ use ghostrace::{
     RetentionConfirmation, RetentionPolicy, RootId, SnapshotDigest, EVENT_SCHEMA_JSON,
     PARQUET_ARCHIVE_PROFILE_JSON, SHELL_METADATA_SCHEMA_JSON,
 };
+#[cfg(all(unix, target_os = "macos"))]
+use ghostrace::{
+    read_native_service_endpoint, run_native_host_stdio, validate_caller_origin,
+    LocalServiceClient, NativeHostHealth, NativeHostInstaller, UrlShapePolicy,
+    NATIVE_HOST_CHANNELS,
+};
 #[cfg(unix)]
 use ghostrace::{
-    read_native_service_endpoint, run_native_host_stdio, validate_caller_origin, BrowserEventClass,
-    LocalServiceClient, PairingRequest, PairingStore, ProfileClass, UrlShapePolicy,
-    NATIVE_HOST_STORE_DIR,
+    BrowserEventClass, PairingRequest, PairingStore, ProfileClass, NATIVE_HOST_STORE_DIR,
 };
-#[cfg(all(unix, target_os = "macos"))]
-use ghostrace::{NativeHostHealth, NativeHostInstaller, NATIVE_HOST_CHANNELS};
 use uuid::Uuid;
 
 const FIXTURE_CLI_KEY_SEED: &str = "fixture-cli-v1";

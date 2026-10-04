@@ -2,17 +2,13 @@ use std::{
     collections::BTreeSet,
     fs,
     io::{Read, Write},
-    os::unix::{fs::PermissionsExt, net::UnixStream},
+    os::unix::{fs::PermissionsExt, io::AsRawFd, net::UnixStream},
     sync::{mpsc::sync_channel, Arc, Barrier, Mutex},
     time::Duration,
 };
 
 #[cfg(target_os = "macos")]
-use std::{
-    os::fd::{AsRawFd, RawFd},
-    path::PathBuf,
-    time::Instant,
-};
+use std::{os::fd::RawFd, path::PathBuf, time::Instant};
 
 use chrono::{DateTime, Utc};
 #[cfg(target_os = "macos")]
@@ -85,6 +81,25 @@ fn signed(session: &PairedSession, message: ExtensionMessage) -> Vec<u8> {
     let mut value = serde_json::to_value(message).expect("message serializes");
     value["mac"] = serde_json::Value::String(mac);
     serde_json::to_vec(&value).expect("signed message serializes")
+}
+
+/// Cap successful reads independently of the kernel's stream coalescing.
+struct ChunkedInput {
+    reader: UnixStream,
+    max_read: usize,
+}
+
+impl Read for ChunkedInput {
+    fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+        let length = bytes.len().min(self.max_read);
+        self.reader.read(&mut bytes[..length])
+    }
+}
+
+impl AsRawFd for ChunkedInput {
+    fn as_raw_fd(&self) -> std::os::fd::RawFd {
+        self.reader.as_raw_fd()
+    }
 }
 
 fn input_stream(input: Vec<u8>) -> UnixStream {
@@ -698,6 +713,16 @@ fn stdio_host_emits_only_framed_protocol_replies() {
 
 #[test]
 fn stdio_runner_refuses_a_decoded_frame_after_goodbye() {
+    for max_read in [1, 3, ghostrace::MAX_NATIVE_HOST_READ_CHUNK] {
+        for trailing in [encode_frame(b"{}").expect("trailing frame"), vec![0xff]] {
+            for after_closed in [false, true] {
+                assert_stdio_trailing_input(max_read, trailing.clone(), after_closed);
+            }
+        }
+    }
+}
+
+fn assert_stdio_trailing_input(max_read: usize, trailing: Vec<u8>, after_closed: bool) {
     let directory = TempDir::new().expect("temp directory");
     let store = PairingStore::open(directory.path()).expect("store opens");
     let approval = store.approve(request(), Utc::now()).expect("pairing approval");
@@ -707,7 +732,7 @@ fn stdio_runner_refuses_a_decoded_frame_after_goodbye() {
     output_reader.set_read_timeout(Some(Duration::from_secs(5))).expect("output timeout");
     let runner = std::thread::spawn(move || {
         run_native_host_stdio(
-            input_reader,
+            ChunkedInput { reader: input_reader, max_read },
             output_writer,
             store,
             RecordingSink::default(),
@@ -750,9 +775,21 @@ fn stdio_runner_refuses_a_decoded_frame_after_goodbye() {
             .expect("goodbye frame"),
         )
         .expect("send goodbye");
-    input_writer
-        .write_all(&encode_frame(b"{}").expect("trailing frame"))
-        .expect("send trailing frame");
+    let mut trailing_output = Vec::new();
+    if after_closed {
+        // Wait for the closed reply before sending any trailing byte. This
+        // proves the runner checks future input as well as buffered input.
+        output_reader.read_exact(&mut prefix).expect("closed prefix");
+        let mut body = vec![0_u8; u32::from_ne_bytes(prefix) as usize];
+        output_reader.read_exact(&mut body).expect("closed body");
+        assert_eq!(
+            serde_json::from_slice::<HostMessage>(&body).expect("closed JSON"),
+            HostMessage::Closed
+        );
+        trailing_output.extend_from_slice(&prefix);
+        trailing_output.extend_from_slice(&body);
+    }
+    input_writer.write_all(&trailing).expect("send trailing frame");
     input_writer.shutdown(std::net::Shutdown::Write).expect("close input");
 
     assert_eq!(
@@ -761,7 +798,6 @@ fn stdio_runner_refuses_a_decoded_frame_after_goodbye() {
             ghostrace::NativeMessagingError::TrailingData,
         )))
     );
-    let mut trailing_output = Vec::new();
     output_reader.read_to_end(&mut trailing_output).expect("read trailing output");
     let mut decoder = FrameDecoder::new();
     decoder.push(&trailing_output).expect("decode closed output");
