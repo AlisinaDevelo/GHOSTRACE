@@ -7,6 +7,12 @@ rss_megabytes="${FUZZ_RSS_MB:-256}"
 max_len="${FUZZ_MAX_LEN:-65536}"
 target_triple="${FUZZ_TARGET_TRIPLE:-}"
 build_dir="${FUZZ_BUILD_DIR:-fuzz/target}"
+# AddressSanitizer keeps freed memory in a quarantine (256 MB by default), which
+# by itself fills the RSS cap on allocation-heavy targets and reports an
+# out-of-memory that is the sanitizer's, not the target's. A small quarantine
+# keeps use-after-free detection and lets the cap measure the code under test.
+ASAN_OPTIONS="${ASAN_OPTIONS:-quarantine_size_mb=16}"
+export ASAN_OPTIONS
 if [ -z "$target_triple" ]; then
     target_triple="$(rustc -vV | sed -n 's/^host: //p')"
 fi
