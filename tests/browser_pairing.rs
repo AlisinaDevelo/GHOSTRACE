@@ -4,8 +4,10 @@ use std::collections::BTreeSet;
 
 use chrono::{Duration, TimeZone, Utc};
 use ghostrace::{
-    hmac_sha256_for_test, BrowserEventClass, ClientHello, PairedSession, PairingError,
-    PairingRecord, PairingRequest, ProfileClass, PAIRING_LIFETIME_DAYS,
+    browser_relay_proof_mac, delivery_event_id, hmac_sha256_for_test,
+    verify_browser_relay_proof_mac, BrowserEventClass, CanonicalNavigation, ClientHello,
+    PairedSession, PairingError, PairingRecord, PairingRequest, ProfileClass, UrlShapePolicy,
+    PAIRING_LIFETIME_DAYS,
 };
 
 fn hex(bytes: &[u8]) -> String {
@@ -149,4 +151,134 @@ fn each_approval_gets_an_independent_secret() {
     let second = PairingRecord::approve(request(), now).expect("second");
     assert_ne!(first.secret_for_extension(), second.secret_for_extension());
     assert_ne!(first.pairing_id, second.pairing_id);
+}
+
+#[test]
+fn delivery_event_id_is_stable_only_for_the_pairing_nonce_and_sequence_tuple() {
+    let now = Utc::now();
+    let record = PairingRecord::approve(request(), now).expect("approve");
+    let first = delivery_event_id(record.pairing_id, &[7; 32], 11);
+    assert_eq!(first, delivery_event_id(record.pairing_id, &[7; 32], 11));
+    assert_ne!(first, delivery_event_id(record.pairing_id, &[7; 32], 12));
+    assert_ne!(first, delivery_event_id(uuid::Uuid::new_v4(), &[7; 32], 11));
+    assert_ne!(first, delivery_event_id(record.pairing_id, &[8; 32], 11));
+}
+
+#[test]
+fn browser_relay_proof_binds_service_request_and_canonical_admission() {
+    let now = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).single().expect("time");
+    let record = PairingRecord::approve(request(), now).expect("approve");
+    let client_nonce = [7; 32];
+    let service_instance = uuid::Uuid::new_v4();
+    let request_id = uuid::Uuid::new_v4();
+    let event_id = delivery_event_id(record.pairing_id, &client_nonce, 11);
+    let navigation = CanonicalNavigation::from_url(
+        "https://example.com/account?secret=redacted",
+        false,
+        UrlShapePolicy::OriginOnly,
+    )
+    .expect("canonical navigation");
+    let mac = browser_relay_proof_mac(
+        &record.secret_for_extension(),
+        record.pairing_id,
+        &client_nonce,
+        11,
+        service_instance,
+        request_id,
+        event_id,
+        now,
+        "chrome",
+        &navigation,
+        2,
+    )
+    .expect("relay MAC");
+    verify_browser_relay_proof_mac(
+        &record.secret_for_extension(),
+        &mac,
+        record.pairing_id,
+        &client_nonce,
+        11,
+        service_instance,
+        request_id,
+        event_id,
+        now,
+        "chrome",
+        &navigation,
+        2,
+    )
+    .expect("relay MAC verifies");
+
+    let mut changed_mac = mac;
+    changed_mac[0] ^= 1;
+    assert_eq!(
+        verify_browser_relay_proof_mac(
+            &record.secret_for_extension(),
+            &changed_mac,
+            record.pairing_id,
+            &client_nonce,
+            11,
+            service_instance,
+            request_id,
+            event_id,
+            now,
+            "chrome",
+            &navigation,
+            2,
+        ),
+        Err(PairingError::BadMac)
+    );
+    assert_eq!(
+        verify_browser_relay_proof_mac(
+            &record.secret_for_extension(),
+            &mac,
+            record.pairing_id,
+            &client_nonce,
+            11,
+            uuid::Uuid::new_v4(),
+            request_id,
+            event_id,
+            now,
+            "chrome",
+            &navigation,
+            2,
+        ),
+        Err(PairingError::BadMac)
+    );
+    assert_eq!(
+        verify_browser_relay_proof_mac(
+            &record.secret_for_extension(),
+            &mac,
+            record.pairing_id,
+            &client_nonce,
+            11,
+            service_instance,
+            request_id,
+            event_id,
+            now,
+            "chrome",
+            &navigation,
+            3,
+        ),
+        Err(PairingError::BadMac)
+    );
+    let changed_navigation =
+        CanonicalNavigation::from_url("https://other.example/", false, UrlShapePolicy::OriginOnly)
+            .expect("changed canonical navigation");
+    assert_eq!(
+        verify_browser_relay_proof_mac(
+            &record.secret_for_extension(),
+            &mac,
+            record.pairing_id,
+            &client_nonce,
+            11,
+            service_instance,
+            request_id,
+            event_id,
+            now,
+            "chrome",
+            &changed_navigation,
+            2,
+        ),
+        Err(PairingError::BadMac)
+    );
 }

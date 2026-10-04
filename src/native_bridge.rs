@@ -14,23 +14,29 @@ use std::{
     os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
     os::unix::io::{AsRawFd, RawFd},
     path::{Path, PathBuf},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
 use chrono::{DateTime, Utc};
 use rand_core::RngCore;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    browser_origin::{NavigationRefusal, UrlShapePolicy},
-    browser_pairing::{BrowserEventClass, PairingError, PairingRecord, PairingRequest},
+    browser_origin::{NavigationHostClass, NavigationRefusal, UrlShapePolicy},
+    browser_pairing::{
+        browser_relay_proof_mac, delivery_event_id, verify_browser_relay_proof_mac,
+        BrowserEventClass, PairingError, PairingRecord, PairingRequest,
+    },
     crypto::CiphertextEnvelope,
     local_service::{
         browser_navigation_from_request, ingest_browser_navigation, BrowserNavigationAck,
-        BrowserNavigationAdmission, ServiceCapability, ServiceError, ServiceHandler,
-        ServiceRequest, BROWSER_NAVIGATION_INGEST_METHOD, MAX_BROWSER_INGEST_SEQUENCES,
+        BrowserNavigationAdmission, BrowserNavigationRelay, BrowserRelayProof, ServiceCapability,
+        ServiceError, ServiceHandler, ServiceRequest, ServiceRequestContext,
+        BROWSER_NAVIGATION_INGEST_METHOD, MAX_BROWSER_INGEST_SEQUENCES,
     },
     model::{
         BrowserName, BrowserNavigationPayload, EventEnvelope, EventKind, EventPayload, EventSource,
@@ -42,7 +48,7 @@ use crate::{
         NATIVE_SESSION_IDLE_TIMEOUT,
     },
     policy::PolicyProfile,
-    writer::{Writer, WriterConfig, WriterOutcome},
+    writer::{Writer, WriterConfig, WriterOutcome, WriterSubmission},
 };
 
 /// Directory name beneath a user-selected GHOSTRACE home.
@@ -90,6 +96,8 @@ pub enum NativeBridgeError {
     EventClassNotApproved,
     #[error("native bridge journal admission refused")]
     Journal,
+    #[error("native bridge journal acknowledgement is uncertain")]
+    JournalUncertain,
     #[error("native host input/output failed")]
     Io,
     #[error("native host framing failed")]
@@ -109,6 +117,7 @@ impl NativeBridgeError {
             Self::PairingRequestInvalid | Self::EventClassNotApproved => "not_authorized",
             Self::Session(error) => error.code(),
             Self::Journal => "journal_error",
+            Self::JournalUncertain => "journal_uncertain",
             Self::Io | Self::Framing | Self::Serialization => "protocol_error",
         }
     }
@@ -589,15 +598,26 @@ pub enum BridgeOutput {
 }
 
 /// The narrow native-host-to-service handoff. A native host has no journal
-/// writer capability; it can only submit the typed, canonical admission.
+/// writer capability; it can only submit the typed, canonical admission and a
+/// proof bound to the exact request that the sink will send.
 pub trait NativeBridgeSink {
+    /// The service instance included in the relay proof transcript and the
+    /// LocalService request. A sink must not substitute a different instance
+    /// after the bridge signs the admission.
+    fn service_instance(&self) -> Uuid;
+
     fn ingest_browser_navigation(
         &self,
-        admission: BrowserNavigationAdmission,
+        request_id: Uuid,
+        relay: BrowserNavigationRelay,
     ) -> Result<BrowserNavigationAck, NativeBridgeError>;
 }
 
-/// A client for the authenticated LocalService browser-ingestion method.
+/// A client for the typed LocalService browser-ingestion method.
+///
+/// The socket's same-UID and service-instance checks authenticate the local
+/// transport. The service independently verifies the pairing proof against its
+/// own active PairingStore before the writer is called.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalServiceClient {
     socket_path: PathBuf,
@@ -629,28 +649,46 @@ impl LocalServiceClient {
 }
 
 impl NativeBridgeSink for LocalServiceClient {
+    fn service_instance(&self) -> Uuid {
+        self.service_instance
+    }
+
     fn ingest_browser_navigation(
         &self,
-        admission: BrowserNavigationAdmission,
+        request_id: Uuid,
+        relay: BrowserNavigationRelay,
     ) -> Result<BrowserNavigationAck, NativeBridgeError> {
         ingest_browser_navigation(
             &self.socket_path,
             self.service_instance,
-            Uuid::new_v4(),
+            request_id,
             self.deadline_ms,
-            admission,
+            relay,
         )
-        .map_err(|_| NativeBridgeError::Journal)
+        .map_err(|error| match error {
+            ServiceError::DeadlineExceeded | ServiceError::Io => {
+                NativeBridgeError::JournalUncertain
+            }
+            _ => NativeBridgeError::Journal,
+        })
     }
 }
 
 /// The LocalService handler that projects canonical browser admissions into
 /// the single existing journal writer. It is deliberately separate from the
 /// native host process and is the only bridge component with journal access.
+///
+/// Same-UID transport admission alone is not a pairing proof. The service
+/// keeps its own authenticated pairing store, takes a shared admission lease,
+/// verifies the relay MAC, and holds that lease through the complete writer
+/// receipt. The host never receives the journal key and the service never
+/// trusts a same-UID caller without this proof.
 pub struct BrowserIngestService {
+    journal: crate::journal::Journal,
     writer: Writer,
     policy: PolicyProfile,
     origin: IngestionOrigin,
+    pairing_store: Option<Arc<PairingStore>>,
 }
 
 impl std::fmt::Debug for BrowserIngestService {
@@ -666,13 +704,74 @@ impl BrowserIngestService {
     ) -> Result<Self, ServiceError> {
         let origin = IngestionOrigin::live("live-browser-native")
             .map_err(|_| ServiceError::BrowserIngestRefused)?;
-        let writer = Writer::new(journal, WriterConfig::default())
+        let writer = Writer::new(journal.clone(), WriterConfig::default())
             .map_err(|_| ServiceError::BrowserIngestRefused)?;
-        Ok(Self { writer, policy, origin })
+        Ok(Self { journal, writer, policy, origin, pairing_store: None })
+    }
+
+    /// Construct a production browser-ingestion handler with the service's
+    /// private pairing store. The store is independent from the journal key;
+    /// the returned handler holds a shared pairing admission lease through
+    /// proof verification and the writer receipt for each accepted relay.
+    pub fn new_with_pairing_store(
+        journal: crate::journal::Journal,
+        policy: PolicyProfile,
+        pairing_store: PairingStore,
+    ) -> Result<Self, ServiceError> {
+        let mut handler = Self::new(journal, policy)?;
+        handler.pairing_store = Some(Arc::new(pairing_store));
+        Ok(handler)
+    }
+
+    fn admit_relay(
+        &self,
+        request: &ServiceRequest,
+        relay: &BrowserNavigationRelay,
+    ) -> Result<PairingAdmissionLease, ServiceError> {
+        let Some(store) = &self.pairing_store else {
+            // The compatibility constructor is intentionally fail-closed. It
+            // remains useful for malformed-request tests, but cannot turn a
+            // proof-shaped value into a paired-browser event.
+            return Err(ServiceError::BrowserIngestRefused);
+        };
+        let lease = store.admission().map_err(|_| ServiceError::BrowserIngestRefused)?;
+        let Some(record) = lease.get(relay.proof.pairing_id) else {
+            return Err(ServiceError::BrowserIngestRefused);
+        };
+        let now = Utc::now();
+        if record.revoked
+            || now >= record.expires_at
+            || !record.request.event_classes.contains(&BrowserEventClass::TopLevelNavigation)
+            || record.request.browser_channel.as_str() != relay.admission.browser.as_str()
+            || delivery_event_id(
+                relay.proof.pairing_id,
+                &relay.proof.client_nonce,
+                relay.proof.sequence,
+            ) != relay.admission.event_id
+        {
+            return Err(ServiceError::BrowserIngestRefused);
+        }
+        verify_browser_relay_proof_mac(
+            &record.secret_for_extension(),
+            &relay.proof.mac,
+            relay.proof.pairing_id,
+            &relay.proof.client_nonce,
+            relay.proof.sequence,
+            request.service_instance,
+            request.request_id,
+            relay.admission.event_id,
+            relay.admission.observed_at,
+            relay.admission.browser.as_str(),
+            &relay.admission.navigation,
+            relay.admission.missing,
+        )
+        .map_err(|_| ServiceError::BrowserIngestRefused)?;
+        Ok(lease)
     }
 
     fn gap_event(
         &self,
+        event_id: Uuid,
         missing: u64,
         wall_clock: DateTime<Utc>,
     ) -> Result<EventEnvelope, ServiceError> {
@@ -680,7 +779,7 @@ impl BrowserIngestService {
             .map_err(|_| ServiceError::BrowserIngestRefused)?;
         EventEnvelope::new(
             &self.origin,
-            Uuid::new_v4(),
+            event_id,
             wall_clock,
             wall_clock,
             EventSource::Browser,
@@ -703,17 +802,164 @@ impl BrowserIngestService {
         )
         .map_err(|_| ServiceError::BrowserIngestRefused)
     }
-}
 
-impl ServiceHandler for BrowserIngestService {
-    fn handle(&self, request: &ServiceRequest) -> Result<serde_json::Value, ServiceError> {
+    /// Load a previously committed event by its stable delivery ID and rebuild
+    /// it with this writer's current origin capability. The durable journal
+    /// intentionally does not expose its internal `Stored` binding to a new
+    /// writer request, so retries preserve the original timestamps/payload
+    /// while still passing the current writer admission checks.
+    fn retry_event(&self, expected: &EventEnvelope) -> Result<Option<EventEnvelope>, ServiceError> {
+        let existing = match self.journal.event(expected.event_id) {
+            Ok(event) => event,
+            Err(crate::error::GhostraceError::EventNotFound(_)) => return Ok(None),
+            Err(_) => return Err(ServiceError::BrowserIngestRefused),
+        };
+        let same_contract = existing.schema_version == expected.schema_version
+            && existing.event_id == expected.event_id
+            && existing.source == expected.source
+            && existing.kind == expected.kind
+            && existing.collector_instance() == expected.collector_instance()
+            && existing.source_cursor == expected.source_cursor
+            && existing.provenance_version() == expected.provenance_version()
+            && existing.policy_profile_id.as_str() == expected.policy_profile_id.as_str()
+            && existing.policy_profile_version == expected.policy_profile_version
+            && existing.evidence == expected.evidence
+            && existing.parent_event_id == expected.parent_event_id
+            && existing.payload == expected.payload;
+        if !same_contract {
+            // A stable ID with a different canonical payload or policy is a
+            // conflicting replay, never a second event or a receipt alias.
+            return Err(ServiceError::BrowserIngestRefused);
+        }
+        EventEnvelope::new(
+            &self.origin,
+            existing.event_id,
+            existing.observed_at,
+            existing.ingested_at,
+            existing.source,
+            existing.kind,
+            existing.payload,
+            existing.source_cursor,
+            existing.policy_profile_id.as_str().to_owned(),
+            existing.policy_profile_version,
+            existing.evidence,
+            existing.parent_event_id,
+        )
+        .map(Some)
+        .map_err(|_| ServiceError::BrowserIngestRefused)
+    }
+
+    fn recover_events(
+        &self,
+        expected: &[EventEnvelope],
+    ) -> Result<Vec<EventEnvelope>, ServiceError> {
+        expected
+            .iter()
+            .map(|event| self.retry_event(event)?.ok_or(ServiceError::BrowserIngestRefused))
+            .collect()
+    }
+
+    fn submit_events_once(
+        &self,
+        events: Vec<EventEnvelope>,
+        deadline: Option<Instant>,
+        lease: Arc<PairingAdmissionLease>,
+    ) -> Result<WriterOutcome, ServiceError> {
+        let submission = self
+            .writer
+            .enqueue_with_commit_guard(
+                self.origin.clone(),
+                events,
+                self.policy.clone(),
+                Vec::new(),
+                lease,
+            )
+            .map_err(|_| ServiceError::BrowserIngestRefused)?;
+        match submission {
+            WriterSubmission::Gap(gap) => Ok(WriterOutcome::Gap(gap)),
+            WriterSubmission::Queued(ticket) => match deadline {
+                None => ticket.wait().map(WriterOutcome::Committed).map_err(Self::writer_error),
+                Some(deadline) => {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    if remaining.is_zero() {
+                        // If the worker has not started, cancellation fences
+                        // the event before commit. If it has started, the
+                        // caller receives a fixed refusal and must retry by
+                        // stable event ID; commit status is intentionally
+                        // reported as uncertain rather than invented.
+                        let _ = ticket.cancel();
+                        return Err(ServiceError::DeadlineExceeded);
+                    }
+                    ticket
+                        .wait_timeout(remaining)
+                        .map(WriterOutcome::Committed)
+                        .map_err(Self::writer_error)
+                }
+            },
+        }
+    }
+
+    fn submit_events(
+        &self,
+        events: Vec<EventEnvelope>,
+        deadline: Option<Instant>,
+        lease: Arc<PairingAdmissionLease>,
+    ) -> Result<WriterOutcome, ServiceError> {
+        let retry_candidates = events.clone();
+        match self.submit_events_once(events, deadline, Arc::clone(&lease)) {
+            Ok(outcome) => Ok(outcome),
+            Err(ServiceError::BrowserIngestRefused) => {
+                if deadline.is_some_and(|deadline| {
+                    deadline.saturating_duration_since(Instant::now()).is_zero()
+                }) {
+                    return Err(ServiceError::DeadlineExceeded);
+                }
+                // A concurrent first delivery may commit between the
+                // preflight lookup and this writer attempt. Re-read only the
+                // bounded batch (at most one gap and one navigation), rebuild
+                // the current origin capability, and let the writer return
+                // the original durable sequences transactionally.
+                let recovered = self.recover_events(&retry_candidates)?;
+                self.submit_events_once(recovered, deadline, lease)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn writer_error(error: crate::error::GhostraceError) -> ServiceError {
+        match error {
+            crate::error::GhostraceError::WriterAckTimeout { .. } => ServiceError::DeadlineExceeded,
+            crate::error::GhostraceError::WriterStopped => ServiceError::Io,
+            _ => ServiceError::BrowserIngestRefused,
+        }
+    }
+
+    fn handle_with_deadline_inner(
+        &self,
+        request: &ServiceRequest,
+        deadline: Option<Instant>,
+    ) -> Result<serde_json::Value, ServiceError> {
+        if deadline
+            .is_some_and(|deadline| deadline.saturating_duration_since(Instant::now()).is_zero())
+        {
+            return Err(ServiceError::DeadlineExceeded);
+        }
         if request.capability != ServiceCapability::Ingest
             || request.method != BROWSER_NAVIGATION_INGEST_METHOD
         {
             return Err(ServiceError::BrowserIngestMalformed);
         }
-        let admission = browser_navigation_from_request(request)?;
+        let relay = browser_navigation_from_request(request)?;
+        let pairing_lease = Arc::new(self.admit_relay(request, &relay)?);
+        let admission = &relay.admission;
         if !SUPPORTED_BROWSER_CHANNELS.contains(&admission.browser.as_str()) {
+            return Err(ServiceError::BrowserIngestRefused);
+        }
+        // The legacy browser payload has no representation for a withheld
+        // private-network host. Refuse at the service projection boundary;
+        // never turn the sentinel into a public-looking `private-network`
+        // origin.
+        if admission.navigation.host_class == NavigationHostClass::PrivateNetwork {
             return Err(ServiceError::BrowserIngestRefused);
         }
         let payload = BrowserNavigationPayload::new(
@@ -723,32 +969,48 @@ impl ServiceHandler for BrowserIngestService {
         )
         .map_err(|_| ServiceError::BrowserIngestRefused)?;
         let navigation_id = admission.event_id;
-        let mut events = Vec::with_capacity(if admission.missing > 0 { 2 } else { 1 });
-        if admission.missing > 0 {
-            events.push(self.gap_event(admission.missing, admission.observed_at)?);
+        let gap_id = stable_gap_event_id(navigation_id);
+        let (gap_event, gap_already_durable) = if admission.missing > 0 {
+            let expected_gap = self.gap_event(gap_id, admission.missing, admission.observed_at)?;
+            let existing = self.retry_event(&expected_gap)?;
+            (Some(existing.clone().unwrap_or(expected_gap)), existing.is_some())
+        } else {
+            match self.journal.event(gap_id) {
+                Ok(_) => return Err(ServiceError::BrowserIngestRefused),
+                Err(crate::error::GhostraceError::EventNotFound(_)) => (None, false),
+                Err(_) => return Err(ServiceError::BrowserIngestRefused),
+            }
+        };
+        let expected_navigation = EventEnvelope::new(
+            &self.origin,
+            navigation_id,
+            admission.observed_at,
+            admission.observed_at,
+            EventSource::Browser,
+            EventKind::BrowserNavigation,
+            EventPayload::BrowserNavigation(payload),
+            None,
+            self.policy.id.clone(),
+            self.policy.version,
+            Evidence::Direct,
+            None,
+        )
+        .map_err(|_| ServiceError::BrowserIngestRefused)?;
+        let existing_navigation = self.retry_event(&expected_navigation)?;
+        if admission.missing > 0 && existing_navigation.is_some() && !gap_already_durable {
+            // A durable navigation without its matching stable gap is a
+            // conflicting replay, not permission to append a new gap after
+            // the original navigation.
+            return Err(ServiceError::BrowserIngestRefused);
         }
-        events.push(
-            EventEnvelope::new(
-                &self.origin,
-                navigation_id,
-                admission.observed_at,
-                admission.observed_at,
-                EventSource::Browser,
-                EventKind::BrowserNavigation,
-                EventPayload::BrowserNavigation(payload),
-                None,
-                self.policy.id.clone(),
-                self.policy.version,
-                Evidence::Direct,
-                None,
-            )
-            .map_err(|_| ServiceError::BrowserIngestRefused)?,
-        );
-        match self
-            .writer
-            .submit(self.origin.clone(), events, self.policy.clone(), Vec::new())
-            .map_err(|_| ServiceError::BrowserIngestRefused)?
-        {
+        let navigation_event = existing_navigation.unwrap_or(expected_navigation);
+        let mut events = Vec::with_capacity(if admission.missing > 0 { 2 } else { 1 });
+        if let Some(gap_event) = gap_event {
+            events.push(gap_event);
+        }
+        events.push(navigation_event);
+        let outcome = self.submit_events(events, deadline, pairing_lease)?;
+        match outcome {
             WriterOutcome::Committed(ack)
                 if ack.event_ids.last().copied() == Some(navigation_id) =>
             {
@@ -764,6 +1026,20 @@ impl ServiceHandler for BrowserIngestService {
                 Err(ServiceError::BrowserIngestRefused)
             }
         }
+    }
+}
+
+impl ServiceHandler for BrowserIngestService {
+    fn handle(&self, request: &ServiceRequest) -> Result<serde_json::Value, ServiceError> {
+        self.handle_with_deadline_inner(request, None)
+    }
+
+    fn handle_with_deadline(
+        &self,
+        request: &ServiceRequest,
+        context: ServiceRequestContext,
+    ) -> Result<serde_json::Value, ServiceError> {
+        self.handle_with_deadline_inner(request, Some(context.deadline()))
     }
 }
 
@@ -852,7 +1128,7 @@ impl<S: NativeBridgeSink> NativeBridge<S> {
         let output = self
             .session
             .receive(body, now, wall_clock, |pairing_id| admission.get(pairing_id))
-            .map_err(|error| NativeBridgeError::Session(error))?;
+            .map_err(NativeBridgeError::Session)?;
         match output {
             crate::native_host::HostOutput::Reply(reply) => {
                 // The session has already authenticated the hello. Decode it
@@ -878,17 +1154,57 @@ impl<S: NativeBridgeSink> NativeBridge<S> {
                 }
                 let browser = BrowserName::try_from(record.request.browser_channel.clone())
                     .map_err(|_| NativeBridgeError::State)?;
-                let navigation_id = Uuid::new_v4();
+                let client_nonce = self.session.client_nonce().ok_or(NativeBridgeError::State)?;
+                let navigation_id = delivery_event_id(
+                    active.pairing_id,
+                    &client_nonce,
+                    self.session.last_sequence(),
+                );
+                let request_id = Uuid::new_v4();
+                let service_instance = self.sink.service_instance();
+                if service_instance.is_nil() {
+                    return Err(NativeBridgeError::State);
+                }
+                let mac = browser_relay_proof_mac(
+                    &record.secret_for_extension(),
+                    active.pairing_id,
+                    &client_nonce,
+                    self.session.last_sequence(),
+                    service_instance,
+                    request_id,
+                    navigation_id,
+                    wall_clock,
+                    browser.as_str(),
+                    &navigation,
+                    missing,
+                )
+                .map_err(|_| NativeBridgeError::State)?;
                 let acknowledgement = self
                     .sink
-                    .ingest_browser_navigation(BrowserNavigationAdmission {
-                        event_id: navigation_id,
-                        browser,
-                        navigation,
-                        observed_at: wall_clock,
-                        missing,
-                    })
-                    .map_err(|_| NativeBridgeError::Journal)?;
+                    .ingest_browser_navigation(
+                        request_id,
+                        BrowserNavigationRelay::new(
+                            BrowserNavigationAdmission {
+                                event_id: navigation_id,
+                                browser,
+                                navigation,
+                                observed_at: wall_clock,
+                                missing,
+                            },
+                            BrowserRelayProof {
+                                pairing_id: active.pairing_id,
+                                client_nonce,
+                                sequence: self.session.last_sequence(),
+                                mac,
+                            },
+                        ),
+                    )
+                    // Preserve an explicit uncertain-delivery result from
+                    // the service client. A deadline or transport failure
+                    // may occur after the writer committed, so collapsing it
+                    // into an ordinary journal refusal would lose the retry
+                    // contract keyed by this stable event ID.
+                    ?;
                 if acknowledgement.event_id != navigation_id
                     || acknowledgement.missing != missing
                     || acknowledgement.ingest_sequences.is_empty()
@@ -899,14 +1215,33 @@ impl<S: NativeBridgeSink> NativeBridge<S> {
                 Ok(BridgeOutput::Recorded { event_id: navigation_id, missing })
             }
             crate::native_host::HostOutput::NavigationRefused { refusal, missing } => {
+                if missing > 0 {
+                    // No browser-navigation payload exists for a refused
+                    // navigation's missing interval. Do not claim a durable
+                    // gap; return fixed sink uncertainty so the extension can
+                    // retry through a future gap-capable service method.
+                    return Err(NativeBridgeError::Journal);
+                }
                 Ok(BridgeOutput::NavigationRefused { refusal, missing })
             }
             crate::native_host::HostOutput::Heartbeat { missing } => {
+                if missing > 0 {
+                    // A heartbeat has no representable journal payload. An
+                    // explicit refusal is safer than silently dropping its
+                    // authenticated sequence gap.
+                    return Err(NativeBridgeError::Journal);
+                }
                 Ok(BridgeOutput::Heartbeat { missing })
             }
             crate::native_host::HostOutput::Closed => {
                 self.active_pairing = None;
                 Ok(BridgeOutput::Closed)
+            }
+            crate::native_host::HostOutput::ClosedAfterGap { .. } => {
+                // Goodbye gaps likewise have no legacy browser payload. The
+                // host refuses with explicit uncertain delivery rather than
+                // inventing a committed gap event.
+                Err(NativeBridgeError::Journal)
             }
         }
     }
@@ -1144,6 +1479,19 @@ fn navigation_refusal_code(refusal: NavigationRefusal) -> &'static str {
     }
 }
 
+fn stable_gap_event_id(navigation_id: Uuid) -> Uuid {
+    const DOMAIN: &[u8] = b"ghostrace-browser-gap-v1\0";
+    let mut input = Vec::with_capacity(DOMAIN.len() + 16);
+    input.extend_from_slice(DOMAIN);
+    input.extend_from_slice(navigation_id.as_bytes());
+    let digest = Sha256::digest(input);
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Uuid::from_bytes(bytes)
+}
+
 fn sync_directory(path: &Path) -> Result<(), NativeBridgeError> {
     let directory = OpenOptions::new()
         .read(true)
@@ -1355,6 +1703,106 @@ mod tests {
             validate_pairing_request(&request),
             Err(NativeBridgeError::PairingRequestInvalid)
         );
+    }
+
+    #[test]
+    fn timed_out_service_write_retains_pairing_lease_until_worker_finishes() {
+        use crate::{
+            browser_origin::CanonicalNavigation, writer::TestGate, DeterministicKeyProvider,
+        };
+        let directory = tempfile::tempdir().expect("directory");
+        let store = PairingStore::open(directory.path()).expect("store");
+        let now = Utc::now();
+        let request = PairingRequest {
+            browser_channel: "chrome".to_owned(),
+            profile_class: crate::ProfileClass::Default,
+            extension_id: "a".repeat(32),
+            extension_key_digest: "a".repeat(64),
+            permissions_digest: "b".repeat(64),
+            event_classes: BTreeSet::from([BrowserEventClass::TopLevelNavigation]),
+            retained_fields: vec!["origin".to_owned()],
+            private_context_policy: PRIVATE_CONTEXT_REFUSAL.to_owned(),
+        };
+        let approval = store.approve(request, now).expect("approval");
+        let record = store.get(approval.view.pairing_id).expect("lookup").expect("record");
+        let journal =
+            crate::Journal::in_memory(DeterministicKeyProvider::from_seed("lease-timeout"))
+                .expect("journal");
+        let mut policy = PolicyProfile::deny_by_default("browser-lease-test");
+        policy.enable_source(EventSource::Browser);
+        let mut handler = BrowserIngestService::new_with_pairing_store(
+            journal.clone(),
+            policy,
+            PairingStore::open(directory.path()).expect("service store"),
+        )
+        .expect("handler");
+        let gate = TestGate::new();
+        handler.writer =
+            Writer::new_with_gate(journal.clone(), WriterConfig::default(), gate.clone())
+                .expect("gated writer");
+        let instance = Uuid::new_v4();
+        let request_id = Uuid::new_v4();
+        let nonce = [7; 32];
+        let event_id = delivery_event_id(record.pairing_id, &nonce, 2);
+        let navigation = CanonicalNavigation::from_url(
+            "https://example.com/private?q=secret",
+            false,
+            UrlShapePolicy::OriginOnly,
+        )
+        .expect("origin");
+        let mac = browser_relay_proof_mac(
+            &record.secret_for_extension(),
+            record.pairing_id,
+            &nonce,
+            2,
+            instance,
+            request_id,
+            event_id,
+            now,
+            "chrome",
+            &navigation,
+            0,
+        )
+        .expect("mac");
+        let request = crate::browser_navigation_request(
+            instance,
+            request_id,
+            5000,
+            BrowserNavigationRelay::new(
+                BrowserNavigationAdmission {
+                    event_id,
+                    browser: "chrome".try_into().expect("browser"),
+                    navigation,
+                    observed_at: now,
+                    missing: 0,
+                },
+                BrowserRelayProof {
+                    pairing_id: record.pairing_id,
+                    client_nonce: nonce,
+                    sequence: 2,
+                    mac,
+                },
+            ),
+        )
+        .expect("request");
+        let handler = Arc::new(handler);
+        let client_handler = Arc::clone(&handler);
+        let client = std::thread::spawn(move || {
+            client_handler.handle_with_deadline_inner(
+                &request,
+                Some(Instant::now() + Duration::from_millis(100)),
+            )
+        });
+        gate.wait_until_entered();
+        assert_eq!(client.join().expect("client"), Err(ServiceError::DeadlineExceeded));
+        let revoker = PairingFileLock::open(&store.lock_path()).expect("revoker");
+        let attempt = revoker.exclusive_with_timeout(Duration::from_millis(20));
+        // Release before assertions so a failing regression cannot deadlock writer Drop.
+        gate.release();
+        assert_eq!(attempt, Err(NativeBridgeError::PairingBusy));
+        drop(revoker);
+        assert!(store.revoke(record.pairing_id).expect("revoke after worker completion"));
+        assert_eq!(journal.events().expect("events").len(), 1);
     }
 
     #[test]

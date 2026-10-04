@@ -988,7 +988,9 @@ frames with no panic and no echoed content.
 the service. Its `browser_navigation_v1` method is the sole browser-ingestion
 entry point in this slice: the request contains an event ID, approved browser
 label, `CanonicalNavigation`, observation time, and a bounded missing count. It
-has no raw URL, query, fragment, userinfo, or path. The service rejects a
+has no raw URL, query, fragment, userinfo, or path. A mandatory relay proof
+wraps the admission; the service checks the active pairing and its MAC before
+using the writer. The service rejects a
 path-bearing `CanonicalNavigation` rather than silently dropping the field. It
 binds `ghostrace.sock` in a
 directory that must be a real directory owned by the current user with no group
@@ -1089,8 +1091,10 @@ authenticated, and atomically persisted in `pairings.enc` beside an independent
 0600 `pairing.key`. The one-time extension secret is printed only by the approval
 receipt and is absent from list output; the host retains its copy inside the
 authenticated ciphertext so a restart can authenticate the paired extension.
-Each admitted frame holds a shared pairing-store lease through the service's
-durable acknowledgement. Revocation needs an exclusive lease, so a successful
+The host and service each hold a shared pairing-store lease during admission.
+The service hands an owned lease to the writer queue; the worker retains it
+through transaction completion and receipt delivery, including after a host or
+service acknowledgement timeout. Revocation needs an exclusive lease, so a successful
 revocation receipt cannot race an in-flight admission; lock contention returns
 the fixed `pairing_busy` refusal after at most five seconds. Atomic publications
 sync the file and parent directory before acknowledgement.
@@ -1116,3 +1120,30 @@ deliberate visible policy boundary, not silent field loss. Synthetic tests cover
 restart, revocation, key/permission drift, replayed transcripts, private-context
 refusal, framed stdio, service capability denial, and the journal projection;
 they do not claim a browser installation or release integration.
+
+Same-UID socket transport is not browser authentication. The service verifies a
+separate domain-separated HMAC with the approved pairing secret, binding the
+service instance, request ID, pairing ID, client nonce, sequence, stable event
+ID, observation timestamp, browser label, canonical navigation, and gap count.
+A copied proof under a new request or service instance is refused. Browser
+channel, profile, and extension key/permission digests are declared credential
+scope; they are not OS-attested browser identity. The host requires at least one
+intact installed manifest matching its binary and exact caller extension ID,
+and refuses any detected manifest drift before consuming browser input.
+
+The delivery ID derives from the pairing, client nonce, and sequence. A retry
+with the same delivery contract returns the original durable sequences and
+timestamps; a changed canonical payload, gap count, or policy is refused. The
+extension must retain its delivery nonce and sequence for retries and use a new
+nonce for a new delivery stream. Timeout/transport failures return the fixed
+`journal_uncertain` code because a transaction may already have committed.
+Heartbeat, refused-navigation, and goodbye gaps have no origin payload; they
+return `journal_error` rather than claim a persisted gap. Private-network
+navigation is refused by the journal projection because the legacy payload
+cannot represent a withheld host without inventing an origin.
+
+This slice provides the host CLI and service handler API. A long-running service
+owner must construct `BrowserIngestService::new_with_pairing_store`, explicitly
+grant `Ingest`, and publish its endpoint. Extension packaging, a real browser
+launch, user consent UI, service lifecycle wiring, and release integration are
+separate tasks.

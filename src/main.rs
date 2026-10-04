@@ -16,6 +16,8 @@ use ghostrace::{
     LocalServiceClient, PairingRequest, PairingStore, ProfileClass, UrlShapePolicy,
     NATIVE_HOST_STORE_DIR,
 };
+#[cfg(all(unix, target_os = "macos"))]
+use ghostrace::{NativeHostHealth, NativeHostInstaller, NATIVE_HOST_CHANNELS};
 use uuid::Uuid;
 
 const FIXTURE_CLI_KEY_SEED: &str = "fixture-cli-v1";
@@ -556,10 +558,37 @@ fn native_host_entry(caller_origin: String) -> Result<(), GhostraceError> {
     // with exactly one argument (the caller origin), never a subcommand or
     // service flags. The LocalService owner publishes the current endpoint
     // receipt beside pairing state before installing/using the manifest.
-    validate_caller_origin(&caller_origin).map_err(native_failure)?;
+    let extension_id = validate_caller_origin(&caller_origin).map_err(native_failure)?;
     let home = native_home(None)?;
+    verify_native_host_manifest(&home, &extension_id)?;
     let endpoint = read_native_service_endpoint(&home).map_err(native_failure)?;
     native_host_run(Some(home), endpoint.socket_path, endpoint.service_instance, caller_origin)
+}
+
+#[cfg(all(unix, target_os = "macos"))]
+fn verify_native_host_manifest(
+    home: &std::path::Path,
+    extension_id: &str,
+) -> Result<(), GhostraceError> {
+    let support_root =
+        home.parent().ok_or_else(|| native_failure("native host support root is unavailable"))?;
+    let host_binary = std::env::current_exe().map_err(native_failure)?;
+    let installer = NativeHostInstaller::new(support_root, host_binary, extension_id)
+        .map_err(native_failure)?;
+    let mut installed = false;
+    for (channel, _) in NATIVE_HOST_CHANNELS {
+        match installer.verify(channel).map_err(native_failure)? {
+            NativeHostHealth::Intact => installed = true,
+            NativeHostHealth::NotInstalled => {}
+            NativeHostHealth::Missing | NativeHostHealth::Drifted => {
+                return Err(native_failure("native host manifest verification failed"));
+            }
+        }
+    }
+    if !installed {
+        return Err(native_failure("native host manifest is not installed"));
+    }
+    Ok(())
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]

@@ -15,17 +15,20 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
+#[cfg(target_os = "macos")]
+use ghostrace::{
+    browser_navigation_request, browser_relay_proof_mac, delivery_event_id,
+    ingest_browser_navigation, BrowserIngestService, BrowserNavigationRelay, BrowserRelayProof,
+    CanonicalNavigation, DeterministicKeyProvider, EventKind, EventPayload, EventSource, Journal,
+    LocalService, NativeHostInstaller, PolicyProfile, ServiceCapability, ServiceHandler,
+    MAX_NATIVE_FRAME_BYTES, NATIVE_HOST_STORE_DIR,
+};
 use ghostrace::{
     encode_frame, encode_hex, read_native_service_endpoint, run_native_host_stdio,
     validate_pairing_request, write_native_service_endpoint, BridgeOutput, BrowserEventClass,
     BrowserNavigationAck, BrowserNavigationAdmission, ExtensionMessage, FrameDecoder, HostMessage,
     NativeBridge, NativeBridgeError, NativeBridgeSink, NativeHostSession, NativeServiceEndpoint,
     PairedSession, PairingRecord, PairingRequest, PairingStore, ProfileClass, UrlShapePolicy,
-};
-#[cfg(target_os = "macos")]
-use ghostrace::{
-    BrowserIngestService, DeterministicKeyProvider, EventKind, EventPayload, EventSource, Journal,
-    LocalService, PolicyProfile, ServiceCapability, MAX_NATIVE_FRAME_BYTES, NATIVE_HOST_STORE_DIR,
 };
 #[cfg(target_os = "macos")]
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -97,10 +100,16 @@ struct RecordingSink {
 }
 
 impl NativeBridgeSink for RecordingSink {
+    fn service_instance(&self) -> uuid::Uuid {
+        uuid::Uuid::from_u128(1)
+    }
+
     fn ingest_browser_navigation(
         &self,
-        admission: BrowserNavigationAdmission,
+        _request_id: uuid::Uuid,
+        relay: ghostrace::BrowserNavigationRelay,
     ) -> Result<BrowserNavigationAck, NativeBridgeError> {
+        let admission = relay.admission;
         let response = BrowserNavigationAck {
             event_id: admission.event_id,
             ingest_sequences: vec![1, 2],
@@ -119,10 +128,16 @@ struct BlockingSink {
 }
 
 impl NativeBridgeSink for BlockingSink {
+    fn service_instance(&self) -> uuid::Uuid {
+        uuid::Uuid::from_u128(1)
+    }
+
     fn ingest_browser_navigation(
         &self,
-        admission: BrowserNavigationAdmission,
+        _request_id: uuid::Uuid,
+        relay: ghostrace::BrowserNavigationRelay,
     ) -> Result<BrowserNavigationAck, NativeBridgeError> {
+        let admission = relay.admission;
         self.entered.wait();
         self.release.wait();
         let response = BrowserNavigationAck {
@@ -135,12 +150,29 @@ impl NativeBridgeSink for BlockingSink {
     }
 }
 
-fn open_bridge(
+#[derive(Clone, Copy)]
+struct UncertainSink;
+
+impl NativeBridgeSink for UncertainSink {
+    fn service_instance(&self) -> uuid::Uuid {
+        uuid::Uuid::from_u128(1)
+    }
+
+    fn ingest_browser_navigation(
+        &self,
+        _request_id: uuid::Uuid,
+        _relay: ghostrace::BrowserNavigationRelay,
+    ) -> Result<BrowserNavigationAck, NativeBridgeError> {
+        Err(NativeBridgeError::JournalUncertain)
+    }
+}
+
+fn open_bridge<S: NativeBridgeSink>(
     store: PairingStore,
-    sink: RecordingSink,
+    sink: S,
     record: &PairingRecord,
     wall_clock: DateTime<Utc>,
-) -> (NativeBridge<RecordingSink>, PairedSession) {
+) -> (NativeBridge<S>, PairedSession) {
     let mut bridge = NativeBridge::new(store, sink, UrlShapePolicy::OriginOnly, CALLER_ORIGIN)
         .expect("bridge opens");
     let welcome = bridge
@@ -398,7 +430,7 @@ fn expiring_an_active_pairing_stops_the_next_authenticated_frame() {
     let result = bridge.receive(
         &signed(&extension, navigation(2, "https://example.com/")),
         Duration::from_secs(1),
-        record.expires_at.clone(),
+        record.expires_at,
     );
     assert_eq!(
         result,
@@ -444,6 +476,24 @@ fn accepted_navigation_is_projected_through_the_journal_boundary() {
 }
 
 #[test]
+fn sink_uncertainty_is_preserved_for_stable_delivery_retry() {
+    let directory = TempDir::new().expect("temp directory");
+    let store = PairingStore::open(directory.path()).expect("store opens");
+    let approval = store.approve(request(), Utc::now()).expect("pairing approval");
+    let record = store.get(approval.view.pairing_id).expect("lookup").expect("record");
+    let now = Utc::now();
+    let (mut bridge, extension) = open_bridge(store, UncertainSink, &record, now);
+    assert_eq!(
+        bridge.receive(
+            &signed(&extension, navigation(2, "https://example.com/")),
+            Duration::from_secs(1),
+            now,
+        ),
+        Err(NativeBridgeError::JournalUncertain)
+    );
+}
+
+#[test]
 fn private_context_is_refused_before_local_service_admission() {
     let directory = TempDir::new().expect("temp directory");
     let store = PairingStore::open(directory.path()).expect("store opens");
@@ -471,6 +521,36 @@ fn private_context_is_refused_before_local_service_admission() {
         }
     );
     assert!(admissions.lock().expect("sink lock").is_empty());
+}
+
+#[test]
+fn non_navigation_sequence_gaps_are_refused_as_uncertain_until_a_gap_method_exists() {
+    let directory = TempDir::new().expect("temp directory");
+    let store = PairingStore::open(directory.path()).expect("store opens");
+    let approval = store.approve(request(), Utc::now()).expect("pairing approval");
+    let record = store.get(approval.view.pairing_id).expect("lookup").expect("record");
+    let now = Utc::now();
+    let sink = RecordingSink::default();
+    let admissions = sink.admissions.clone();
+    let (mut bridge, extension) = open_bridge(store, sink, &record, now);
+
+    let heartbeat = signed(&extension, ExtensionMessage::Heartbeat { seq: 4, mac: String::new() });
+    assert_eq!(
+        bridge.receive(&heartbeat, Duration::from_secs(1), now),
+        Err(NativeBridgeError::Journal)
+    );
+    assert!(admissions.lock().expect("sink lock").is_empty());
+
+    let directory = TempDir::new().expect("second temp directory");
+    let store = PairingStore::open(directory.path()).expect("second store");
+    let approval = store.approve(request(), Utc::now()).expect("second approval");
+    let record = store.get(approval.view.pairing_id).expect("lookup").expect("record");
+    let (mut bridge, extension) = open_bridge(store, RecordingSink::default(), &record, now);
+    let goodbye = signed(&extension, ExtensionMessage::Goodbye { seq: 4, mac: String::new() });
+    assert_eq!(
+        bridge.receive(&goodbye, Duration::from_secs(1), now),
+        Err(NativeBridgeError::Journal)
+    );
 }
 
 #[test]
@@ -537,7 +617,10 @@ fn goodbye_closes_the_session_and_trailing_authenticated_data_is_refused() {
 fn caller_origin_must_match_the_hello_extension_before_pairing() {
     let directory = TempDir::new().expect("temp directory");
     let store = PairingStore::open(directory.path()).expect("store opens");
-    let approval = store.approve(request(), Utc::now()).expect("pairing approval");
+    let other = "p".repeat(32);
+    let mut other_request = request();
+    other_request.extension_id = other.clone();
+    let approval = store.approve(other_request, Utc::now()).expect("pairing approval");
     let record = store.get(approval.view.pairing_id).expect("lookup").expect("record");
     let mut bridge = NativeBridge::new(
         store,
@@ -546,12 +629,10 @@ fn caller_origin_must_match_the_hello_extension_before_pairing() {
         CALLER_ORIGIN,
     )
     .expect("bridge opens");
-    let other = "ponmlkjihgfedcbaponmlkjihgfedcba";
-    let hello = String::from_utf8(hello(&record, KEY_DIGEST))
-        .expect("hello UTF-8")
-        .replace(EXTENSION, other);
+    // A valid approval for B still cannot authenticate a process launched by A.
+    let hello = hello_for(&record, &other, KEY_DIGEST);
     assert_eq!(
-        bridge.receive(hello.as_bytes(), Duration::ZERO, Utc::now()),
+        bridge.receive(&hello, Duration::ZERO, Utc::now()),
         Err(NativeBridgeError::Session(ghostrace::NativeSessionError::Pairing(
             ghostrace::PairingError::NotPaired,
         )))
@@ -694,6 +775,200 @@ fn browser_service_policy() -> PolicyProfile {
     let mut policy = PolicyProfile::deny_by_default("browser-pairing-v1");
     policy.enable_source(EventSource::Browser);
     policy
+}
+
+#[cfg(target_os = "macos")]
+fn signed_browser_relay(
+    record: &PairingRecord,
+    service_instance: uuid::Uuid,
+    request_id: uuid::Uuid,
+    mut admission: BrowserNavigationAdmission,
+) -> BrowserNavigationRelay {
+    let sequence = 2;
+    admission.event_id = delivery_event_id(record.pairing_id, &CLIENT_NONCE, sequence);
+    let mac = browser_relay_proof_mac(
+        &record.secret_for_extension(),
+        record.pairing_id,
+        &CLIENT_NONCE,
+        sequence,
+        service_instance,
+        request_id,
+        admission.event_id,
+        admission.observed_at,
+        admission.browser.as_str(),
+        &admission.navigation,
+        admission.missing,
+    )
+    .expect("relay MAC");
+    BrowserNavigationRelay::new(
+        admission,
+        BrowserRelayProof {
+            pairing_id: record.pairing_id,
+            client_nonce: CLIENT_NONCE,
+            sequence,
+            mac,
+        },
+    )
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn service_retries_return_the_durable_receipt_without_duplicate_gap_or_navigation() {
+    let directory = TempDir::new().expect("temp directory");
+    let pairing_directory = directory.path().join("pairings");
+    let pairing_store = PairingStore::open(&pairing_directory).expect("pairing store");
+    let approval = pairing_store.approve(request(), Utc::now()).expect("pairing approval");
+    let record = pairing_store.get(approval.view.pairing_id).expect("lookup").expect("record");
+    let mut service =
+        LocalService::bind(&directory.path().join("service"), [ServiceCapability::Ingest])
+            .expect("service bind");
+    let journal =
+        Journal::in_memory(DeterministicKeyProvider::from_seed("browser-retry")).expect("journal");
+    let handler = BrowserIngestService::new_with_pairing_store(
+        journal.clone(),
+        browser_service_policy(),
+        PairingStore::open(&pairing_directory).expect("service pairing store"),
+    )
+    .expect("handler");
+    let admission = BrowserNavigationAdmission {
+        event_id: uuid::Uuid::nil(),
+        browser: "chrome".try_into().expect("browser"),
+        navigation: CanonicalNavigation::from_url(
+            "https://example.com/account?secret=value",
+            false,
+            UrlShapePolicy::OriginOnly,
+        )
+        .expect("canonical navigation"),
+        observed_at: Utc::now(),
+        missing: 1,
+    };
+
+    let submit = |service: &mut LocalService,
+                  admission: BrowserNavigationAdmission|
+     -> Result<BrowserNavigationAck, ghostrace::ServiceError> {
+        let socket = service.socket_path().to_path_buf();
+        let instance = service.instance();
+        let request_id = uuid::Uuid::new_v4();
+        let relay = signed_browser_relay(&record, instance, request_id, admission);
+        let client = std::thread::spawn(move || {
+            ingest_browser_navigation(&socket, instance, request_id, 5_000, relay)
+        });
+        service.serve_one(&handler).expect("serve admission");
+        client.join().expect("client join")
+    };
+
+    let first = submit(&mut service, admission.clone()).expect("first admission");
+    let event_id = delivery_event_id(record.pairing_id, &CLIENT_NONCE, 2);
+    let retry_admission = BrowserNavigationAdmission {
+        observed_at: admission.observed_at + chrono::Duration::seconds(1),
+        ..admission.clone()
+    };
+    let retry = submit(&mut service, retry_admission).expect("retry admission");
+    assert_eq!(retry, first, "a committed retry returns its original receipt");
+    assert_eq!(first.ingest_sequences.len(), 2, "gap and navigation are both acknowledged");
+
+    let conflict = BrowserNavigationAdmission {
+        navigation: CanonicalNavigation::from_url(
+            "https://other.example/",
+            false,
+            UrlShapePolicy::OriginOnly,
+        )
+        .expect("conflicting canonical navigation"),
+        ..admission
+    };
+    assert_eq!(submit(&mut service, conflict), Err(ghostrace::ServiceError::BrowserIngestRefused));
+    let events = journal.events().expect("events");
+    assert_eq!(events.len(), 2, "conflicting retry did not append anything");
+    assert_eq!(events[1].event.event_id, event_id);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn service_refuses_private_network_projection_without_synthesizing_an_origin() {
+    let directory = TempDir::new().expect("temp directory");
+    let pairing_directory = directory.path().join("pairings");
+    let pairing_store = PairingStore::open(&pairing_directory).expect("pairing store");
+    let approval = pairing_store.approve(request(), Utc::now()).expect("pairing approval");
+    let record = pairing_store.get(approval.view.pairing_id).expect("lookup").expect("record");
+    let service =
+        LocalService::bind(&directory.path().join("service"), [ServiceCapability::Ingest])
+            .expect("service bind");
+    let instance = service.instance();
+    let journal = Journal::in_memory(DeterministicKeyProvider::from_seed("private-network"))
+        .expect("journal");
+    let handler = BrowserIngestService::new_with_pairing_store(
+        journal.clone(),
+        browser_service_policy(),
+        PairingStore::open(&pairing_directory).expect("service pairing store"),
+    )
+    .expect("handler");
+    let admission = BrowserNavigationAdmission {
+        event_id: uuid::Uuid::nil(),
+        browser: "chrome".try_into().expect("browser"),
+        navigation: CanonicalNavigation::from_url(
+            "https://localhost:8443/private",
+            false,
+            UrlShapePolicy::OriginOnly,
+        )
+        .expect("private navigation canonicalizes with host withheld"),
+        observed_at: Utc::now(),
+        missing: 0,
+    };
+    let request_id = uuid::Uuid::new_v4();
+    let request = browser_navigation_request(
+        instance,
+        request_id,
+        5_000,
+        signed_browser_relay(&record, instance, request_id, admission),
+    )
+    .expect("typed request");
+    assert_eq!(
+        ServiceHandler::handle(&handler, &request),
+        Err(ghostrace::ServiceError::BrowserIngestRefused)
+    );
+    assert!(journal.events().expect("events").is_empty());
+    drop(directory);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn service_refuses_a_relay_proof_replayed_under_another_request_id() {
+    let directory = TempDir::new().expect("temp directory");
+    let pairing_directory = directory.path().join("pairings");
+    let pairing_store = PairingStore::open(&pairing_directory).expect("pairing store");
+    let approval = pairing_store.approve(request(), Utc::now()).expect("pairing approval");
+    let record = pairing_store.get(approval.view.pairing_id).expect("lookup").expect("record");
+    let journal =
+        Journal::in_memory(DeterministicKeyProvider::from_seed("proof-replay")).expect("journal");
+    let handler = BrowserIngestService::new_with_pairing_store(
+        journal.clone(),
+        browser_service_policy(),
+        PairingStore::open(&pairing_directory).expect("service pairing store"),
+    )
+    .expect("handler");
+    let service_instance = uuid::Uuid::new_v4();
+    let signed_request_id = uuid::Uuid::new_v4();
+    let admission = BrowserNavigationAdmission {
+        event_id: uuid::Uuid::nil(),
+        browser: "chrome".try_into().expect("browser"),
+        navigation: CanonicalNavigation::from_url(
+            "https://example.com/",
+            false,
+            UrlShapePolicy::OriginOnly,
+        )
+        .expect("canonical navigation"),
+        observed_at: Utc::now(),
+        missing: 0,
+    };
+    let relay = signed_browser_relay(&record, service_instance, signed_request_id, admission);
+    let replay_request =
+        browser_navigation_request(service_instance, uuid::Uuid::new_v4(), 5_000, relay)
+            .expect("typed replay request");
+    assert_eq!(
+        ServiceHandler::handle(&handler, &replay_request),
+        Err(ghostrace::ServiceError::BrowserIngestRefused)
+    );
+    assert!(journal.events().expect("events").is_empty());
 }
 
 #[cfg(target_os = "macos")]
@@ -881,6 +1156,8 @@ fn read_host_message_until<R: Read + AsRawFd>(reader: &mut R, deadline: Instant)
 #[test]
 fn production_binary_runs_the_full_chromium_bridge_to_a_durable_service_journal() {
     let directory = TempDir::new().expect("temp directory");
+    fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700))
+        .expect("private parent");
     let home = directory.path().join("home");
     let ghostrace_home = home.join("Library/Application Support/GHOSTRACE");
     fs::create_dir_all(&ghostrace_home).expect("GHOSTRACE home");
@@ -900,10 +1177,22 @@ fn production_binary_runs_the_full_chromium_bridge_to_a_durable_service_journal(
             .expect("service bind");
     let service_socket = service.socket_path().to_path_buf();
     let service_instance = service.instance();
-    let handler = BrowserIngestService::new(journal.clone(), browser_service_policy())
-        .expect("service handler");
+    let handler = BrowserIngestService::new_with_pairing_store(
+        journal.clone(),
+        browser_service_policy(),
+        PairingStore::open(ghostrace_home.join(NATIVE_HOST_STORE_DIR)).expect("service store"),
+    )
+    .expect("service handler");
     write_native_service_endpoint(&ghostrace_home, service_socket.clone(), service_instance)
         .expect("endpoint");
+    NativeHostInstaller::new(
+        ghostrace_home.parent().expect("Application Support"),
+        env!("CARGO_BIN_EXE_ghostrace"),
+        EXTENSION,
+    )
+    .expect("native host installer")
+    .install("chrome")
+    .expect("native host manifest");
 
     let deadline = Instant::now() + NATIVE_E2E_TIMEOUT;
     let (service_done_sender, service_done_receiver) = sync_channel(1);
@@ -1079,6 +1368,14 @@ fn production_binary_refuses_a_mismatched_hello_without_echoing_input() {
     let service_socket = directory.path().join("service/unused.sock");
     write_native_service_endpoint(&ghostrace_home, service_socket.clone(), uuid::Uuid::new_v4())
         .expect("endpoint");
+    NativeHostInstaller::new(
+        ghostrace_home.parent().expect("Application Support"),
+        env!("CARGO_BIN_EXE_ghostrace"),
+        EXTENSION,
+    )
+    .expect("native host installer")
+    .install("chrome")
+    .expect("native host manifest");
     let deadline = Instant::now() + NATIVE_E2E_TIMEOUT;
     let child = Command::new(env!("CARGO_BIN_EXE_ghostrace"))
         .arg(CALLER_ORIGIN)
@@ -1177,4 +1474,75 @@ fn stdio_host_times_out_without_a_hello_or_with_a_partial_frame() {
             ghostrace::NativeMessagingError::Timeout,
         )))
     );
+}
+
+#[test]
+fn unpaired_hello_and_unauthenticated_navigation_never_reach_the_sink() {
+    let directory = TempDir::new().expect("directory");
+    let store = PairingStore::open(directory.path()).expect("store");
+    let record = PairingRecord::approve(request(), Utc::now()).expect("unapproved record");
+    let sink = RecordingSink::default();
+    let admissions = sink.admissions.clone();
+    let mut bridge =
+        NativeBridge::new(store, sink, UrlShapePolicy::OriginOnly, CALLER_ORIGIN).expect("bridge");
+    let error = bridge
+        .receive(&hello(&record, KEY_DIGEST), Duration::ZERO, Utc::now())
+        .expect_err("unpaired hello refused");
+    assert_eq!(error.code(), "not_paired");
+    assert!(admissions.lock().expect("sink").is_empty());
+
+    let store = PairingStore::open(directory.path()).expect("store");
+    let approval = store.approve(request(), Utc::now()).expect("approval");
+    let record = store.get(approval.view.pairing_id).expect("lookup").expect("record");
+    let sink = RecordingSink::default();
+    let admissions = sink.admissions.clone();
+    let (mut bridge, _) = open_bridge(store, sink, &record, Utc::now());
+    let mut message =
+        serde_json::to_value(navigation(2, "https://SENTINEL.example/secret?q=SENTINEL"))
+            .expect("unauthed navigation");
+    message["mac"] = serde_json::json!("00".repeat(32));
+    let body = serde_json::to_vec(&message).expect("body");
+    let error = bridge
+        .receive(&body, Duration::from_secs(1), Utc::now())
+        .expect_err("unauthed navigation refused");
+    assert_eq!(error.code(), "unauthenticated");
+    assert!(!error.to_string().contains("SENTINEL"));
+    assert!(admissions.lock().expect("sink").is_empty());
+}
+
+#[test]
+fn malformed_commands_paths_and_oversized_messages_have_no_sink_or_file_effect() {
+    let directory = TempDir::new().expect("directory");
+    let marker = directory.path().join("outside-journal-marker");
+    for variant in ["command", "journal_path", "oversized", "unknown_type"] {
+        let store = PairingStore::open(directory.path()).expect("store");
+        let approval = store.approve(request(), Utc::now()).expect("approval");
+        let record = store.get(approval.view.pairing_id).expect("lookup").expect("record");
+        let sink = RecordingSink::default();
+        let admissions = sink.admissions.clone();
+        let (mut bridge, extension) = open_bridge(store, sink, &record, Utc::now());
+        let valid = signed(&extension, navigation(2, "https://example.com/"));
+        let mut body: serde_json::Value = serde_json::from_slice(&valid).expect("body");
+        match variant {
+            "command" => body["command"] = serde_json::json!(["touch", marker]),
+            "journal_path" => {
+                body["journal_path"] = serde_json::json!("../../outside-journal-marker")
+            }
+            "oversized" => body["url"] = serde_json::json!("SENTINEL".repeat(10_000)),
+            "unknown_type" => body["type"] = serde_json::json!("execute"),
+            _ => unreachable!(),
+        }
+        let error = bridge
+            .receive(
+                &serde_json::to_vec(&body).expect("encode"),
+                Duration::from_secs(1),
+                Utc::now(),
+            )
+            .expect_err("malformed frame refused");
+        assert_eq!(error.code(), "protocol_error", "{variant}");
+        assert!(!error.to_string().contains("SENTINEL"));
+        assert!(!error.to_string().contains("outside-journal"));
+        assert!(admissions.lock().expect("sink").is_empty(), "{variant}");
+        assert!(!marker.exists(), "{variant}");
+    }
 }

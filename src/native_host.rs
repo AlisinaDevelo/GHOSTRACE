@@ -38,6 +38,10 @@ pub enum HostMessage {
     Refused { reason: String },
     /// The extension ended the session cleanly.
     Closed,
+    /// Goodbye was authenticated, but one or more sequence numbers were
+    /// missing. The bridge must not acknowledge this as a clean close unless
+    /// the gap is durably admitted or it returns explicit uncertainty.
+    ClosedAfterGap { missing: u64 },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Error)]
@@ -79,11 +83,16 @@ pub enum HostOutput {
     Heartbeat { missing: u64 },
     /// The extension ended the session.
     Closed,
+    /// Goodbye was authenticated, but one or more sequence numbers were
+    /// missing. The bridge must not acknowledge this as a clean close unless
+    /// the gap is durably admitted or it returns explicit uncertainty.
+    ClosedAfterGap { missing: u64 },
 }
 
 pub struct NativeHostSession {
     protocol: ProtocolSession,
     paired: Option<PairedSession>,
+    client_nonce: Option<[u8; 32]>,
     policy: UrlShapePolicy,
     expected_extension_id: Option<String>,
 }
@@ -116,7 +125,7 @@ impl NativeHostSession {
             Some(started_at) => ProtocolSession::new_at(started_at),
             None => ProtocolSession::new(),
         };
-        Self { protocol, paired: None, policy, expected_extension_id }
+        Self { protocol, paired: None, client_nonce: None, policy, expected_extension_id }
     }
 
     /// Handle one frame body. `pairing` looks up an approval by its ID.
@@ -153,16 +162,18 @@ impl NativeHostSession {
             }
             if self.paired.is_none() {
                 let record = pairing(*pairing_id).ok_or(PairingError::NotPaired)?;
+                let client_nonce = decode_hex32(client_nonce)?;
                 let hello = ClientHello {
                     pairing_id: *pairing_id,
                     extension_id: extension_id.clone(),
                     extension_key_digest: extension_key_digest.clone(),
                     permissions_digest: permissions_digest.clone(),
-                    client_nonce: decode_hex32(client_nonce)?,
+                    client_nonce,
                 };
                 let session = PairedSession::open(&record, &hello, wall_clock)?;
                 self.protocol.receive_after_admission(body, now)?;
                 let host_nonce = encode_hex(&session.host_nonce);
+                self.client_nonce = Some(hello.client_nonce);
                 self.paired = Some(session);
                 return Ok(HostOutput::Reply(HostMessage::Welcome {
                     protocol_version: NATIVE_MESSAGING_PROTOCOL_VERSION,
@@ -183,10 +194,18 @@ impl NativeHostSession {
             .verify(message.seq(), &input, &mac)
             .map_err(|_| NativeSessionError::Unauthenticated)?;
 
+        let previous_sequence = self.protocol.last_sequence();
         let (accepted, missing) = match self.protocol.receive_after_admission(body, now)? {
             SessionEvent::Accepted(message) => (message, 0),
             SessionEvent::AcceptedAfterGap { message, missing } => (message, missing),
-            SessionEvent::Closed => return Ok(HostOutput::Closed),
+            SessionEvent::Closed => {
+                let missing = message.seq().saturating_sub(previous_sequence.saturating_add(1));
+                return Ok(if missing == 0 {
+                    HostOutput::Closed
+                } else {
+                    HostOutput::ClosedAfterGap { missing }
+                });
+            }
         };
         Ok(match accepted {
             ExtensionMessage::Navigation { url, private_context, transition, .. } => {
@@ -201,6 +220,18 @@ impl NativeHostSession {
                 return Err(NativeSessionError::Protocol(NativeMessagingError::DuplicateHello))
             }
         })
+    }
+
+    /// The reconnect-stable nonce from the admitted hello. It is exposed only
+    /// to the native bridge for deterministic delivery deduplication; it is
+    /// never serialized into a journal event or service error.
+    pub fn client_nonce(&self) -> Option<[u8; 32]> {
+        self.client_nonce
+    }
+
+    /// Last sequence accepted by this connection.
+    pub fn last_sequence(&self) -> u64 {
+        self.protocol.last_sequence()
     }
 }
 

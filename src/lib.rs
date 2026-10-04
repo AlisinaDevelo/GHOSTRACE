@@ -77,8 +77,10 @@ pub use browser_origin::{
     MAX_RETAINED_PATH_SEGMENT,
 };
 pub use browser_pairing::{
-    hmac_sha256_for_test, BrowserEventClass, ClientHello, PairedSession, PairingError,
-    PairingRecord, PairingRequest, ProfileClass, PAIRING_LIFETIME_DAYS,
+    browser_relay_proof_mac, delivery_event_id, hmac_sha256_for_test,
+    verify_browser_relay_proof_mac, BrowserEventClass, ClientHello, PairedSession, PairingError,
+    PairingRecord, PairingRequest, ProfileClass, BROWSER_RELAY_PROOF_DOMAIN,
+    MAX_BROWSER_RELAY_TRANSCRIPT_BYTES, PAIRING_LIFETIME_DAYS,
 };
 pub use claims::{
     render_claim, ClaimLocale, ClaimTemplateDescriptor, ClaimTemplateId, EvidenceRequirement,
@@ -214,8 +216,9 @@ pub use keychain::{
 #[cfg(unix)]
 pub use local_service::{
     browser_navigation_from_request, browser_navigation_request, ingest_browser_navigation,
-    request as service_request, BrowserNavigationAck, BrowserNavigationAdmission, LocalService,
-    ServiceCapability, ServiceError, ServiceHandler, ServiceRequest, ServiceResponse,
+    request as service_request, BrowserNavigationAck, BrowserNavigationAdmission,
+    BrowserNavigationRelay, BrowserRelayProof, LocalService, ServiceCapability, ServiceError,
+    ServiceHandler, ServiceRequest, ServiceRequestContext, ServiceResponse,
     BROWSER_NAVIGATION_INGEST_METHOD, LOCAL_SERVICE_PROTOCOL_VERSION, MAX_BROWSER_INGEST_MISSING,
     MAX_BROWSER_INGEST_SEQUENCES, MAX_SERVICE_DEADLINE, MAX_SERVICE_MESSAGE_BYTES,
     SERVICE_SOCKET_NAME,
