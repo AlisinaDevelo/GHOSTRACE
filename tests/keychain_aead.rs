@@ -23,8 +23,8 @@ impl KeyProvider for MissingKeyProvider {
 }
 
 #[derive(Clone)]
-struct CountingKeyProvider {
-    inner: DeterministicKeyProvider,
+struct CountingKeyProvider<K = DeterministicKeyProvider> {
+    inner: K,
     accesses: Arc<AtomicUsize>,
 }
 
@@ -34,7 +34,7 @@ impl CountingKeyProvider {
     }
 }
 
-impl KeyProvider for CountingKeyProvider {
+impl<K: KeyProvider> KeyProvider for CountingKeyProvider<K> {
     fn key(&self) -> Result<[u8; 32], CryptoError> {
         self.accesses.fetch_add(1, Ordering::SeqCst);
         self.inner.key()
@@ -42,6 +42,11 @@ impl KeyProvider for CountingKeyProvider {
 
     fn key_generation(&self) -> u32 {
         self.inner.key_generation()
+    }
+
+    fn key_for_generation(&self, generation: u32) -> Result<[u8; 32], CryptoError> {
+        self.accesses.fetch_add(1, Ordering::SeqCst);
+        self.inner.key_for_generation(generation)
     }
 }
 
@@ -75,9 +80,7 @@ fn encryption_runs_before_the_event_insert_boundary_and_payload_is_ciphertext() 
     assert!(
         matches!(error, GhostraceError::InjectedFault { point } if point == "event_before_insert")
     );
-    // Authentication also reads the key before the payload is encrypted.
-    // The boundary contract requires key access, not a fixed read count.
-    assert!(accesses.load(Ordering::SeqCst) > 0, "key access precedes insert boundary");
+    assert_eq!(accesses.load(Ordering::SeqCst), 1, "key access precedes insert boundary");
     assert_eq!(plan.fired().len(), 1);
     assert!(journal.events().expect("events after rollback").is_empty());
 
@@ -94,6 +97,116 @@ fn encryption_runs_before_the_event_insert_boundary_and_payload_is_ciphertext() 
     let restored = journal.event(event.event_id).expect("round trip");
     assert_eq!(restored.event_id, event.event_id);
     assert_eq!(restored.payload, event.payload);
+}
+
+#[test]
+fn in_memory_writes_share_one_key_read_and_do_not_cache_between_transactions() {
+    let events = read_fixture(fixture_path()).expect("fixture");
+    let accesses = Arc::new(AtomicUsize::new(0));
+    let journal =
+        Journal::in_memory(CountingKeyProvider::new(Arc::clone(&accesses))).expect("journal");
+    let policy = PolicyProfile::fixture_default();
+    for event in &events[..2] {
+        accesses.store(0, Ordering::SeqCst);
+        journal.ingest(&IngestionOrigin::fixture(), event, &policy).expect("insert");
+        assert_eq!(
+            accesses.load(Ordering::SeqCst),
+            1,
+            "one read for authentication, encryption and refresh"
+        );
+    }
+    accesses.store(0, Ordering::SeqCst);
+    journal.ingest_batch(&IngestionOrigin::fixture(), &events[2..], &policy).expect("batch");
+    assert_eq!(accesses.load(Ordering::SeqCst), 1, "batch encryption shares the transaction key");
+    assert!(journal.verify_authenticated_state().expect("full verification").valid);
+    println!("AUTH_WRITE_KEY_READS storage=memory insert=1 next_transaction=1 batch=1 PASS");
+}
+
+#[test]
+fn file_backed_writes_share_one_key_read_after_full_preflight() {
+    let events = read_fixture(fixture_path()).expect("fixture");
+    let accesses = Arc::new(AtomicUsize::new(0));
+    let directory = tempfile::tempdir().expect("directory");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))
+            .expect("private directory");
+    }
+    let path = directory.path().join("single-key-read.sqlite3");
+    let provider = CountingKeyProvider::new(Arc::clone(&accesses));
+    let journal = Journal::open_fixture(&path, provider.clone()).expect("journal");
+    let policy = PolicyProfile::fixture_default();
+    journal.ingest(&IngestionOrigin::fixture(), &events[0], &policy).expect("first write");
+    assert_eq!(accesses.load(Ordering::SeqCst), 1, "bootstrap and encryption share one read");
+    accesses.store(0, Ordering::SeqCst);
+    journal.ingest(&IngestionOrigin::fixture(), &events[1], &policy).expect("steady-state write");
+    assert_eq!(accesses.load(Ordering::SeqCst), 1, "exactly one read on the file-backed hot path");
+    drop(journal);
+    let journal = Journal::open_fixture(&path, provider).expect("reopen");
+    accesses.store(0, Ordering::SeqCst);
+    journal.ingest(&IngestionOrigin::fixture(), &events[2], &policy).expect("reopened writer");
+    assert_eq!(accesses.load(Ordering::SeqCst), 1, "full preflight shares the write key");
+    accesses.store(0, Ordering::SeqCst);
+    journal.ingest_batch(&IngestionOrigin::fixture(), &events[3..], &policy).expect("batch");
+    assert_eq!(accesses.load(Ordering::SeqCst), 1, "file-backed batch shares one read");
+    assert!(journal.verify_authenticated_state().expect("full verification").valid);
+    println!("AUTH_WRITE_KEY_READS storage=file bootstrap=1 steady_insert=1 reopened_preflight=1 batch=1 PASS");
+}
+
+#[test]
+fn rotation_resolves_old_and_new_generations_once_each() {
+    let events = read_fixture(fixture_path()).expect("fixture");
+    let accesses = Arc::new(AtomicUsize::new(0));
+    let directory = tempfile::tempdir().expect("directory");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))
+            .expect("private directory");
+    }
+    let path = directory.path().join("key-generation-scope.sqlite3");
+    let mut ring = ghostrace::KeyRing::new(1, [0x31; 32]).expect("key ring");
+    let journal = Journal::open_fixture(
+        &path,
+        CountingKeyProvider { inner: ring.clone(), accesses: Arc::clone(&accesses) },
+    )
+    .expect("journal");
+    journal
+        .ingest(&IngestionOrigin::fixture(), &events[0], &PolicyProfile::fixture_default())
+        .expect("first write");
+    drop(journal);
+    ring.stage_generation(2, [0x32; 32]).expect("stage generation");
+    ring.activate_generation(2).expect("activate generation");
+    let journal = Journal::open_fixture(
+        &path,
+        CountingKeyProvider { inner: ring, accesses: Arc::clone(&accesses) },
+    )
+    .expect("rotated journal");
+    accesses.store(0, Ordering::SeqCst);
+    journal
+        .ingest(&IngestionOrigin::fixture(), &events[1], &PolicyProfile::fixture_default())
+        .expect("rotation write");
+    assert_eq!(
+        accesses.load(Ordering::SeqCst),
+        2,
+        "resolve old authentication and new encryption keys once each"
+    );
+    let envelope = CiphertextEnvelope::decode(
+        &journal.raw_payload_ciphertext(events[1].event_id).expect("ciphertext"),
+    )
+    .expect("envelope");
+    assert_eq!(envelope.key_generation, 2);
+    assert!(journal.verify_authenticated_state().expect("rotated anchor").valid);
+    assert_eq!(
+        journal.event(events[0].event_id).expect("old ciphertext").payload,
+        events[0].payload
+    );
+    assert_eq!(
+        journal.event(events[1].event_id).expect("new ciphertext").payload,
+        events[1].payload
+    );
+    println!("AUTH_WRITE_KEY_READS rotation_generations=2 backing_reads=2 old_ciphertext=PASS new_ciphertext=PASS");
 }
 
 #[test]

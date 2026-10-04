@@ -2,7 +2,10 @@ use std::{
     fs,
     path::Path,
     process::Command,
-    sync::mpsc,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc, Arc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -366,6 +369,23 @@ fn two_connections_writing_one_journal_never_see_each_other_as_tampering() {
     assert!(journal.authenticated_state_report().expect("report").valid);
 }
 
+struct AcceptanceKeyProvider {
+    reads: Arc<AtomicUsize>,
+    inner: DeterministicKeyProvider,
+}
+
+impl ghostrace::KeyProvider for AcceptanceKeyProvider {
+    fn key(&self) -> Result<[u8; 32], ghostrace::CryptoError> {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        self.inner.key()
+    }
+
+    fn key_for_generation(&self, generation: u32) -> Result<[u8; 32], ghostrace::CryptoError> {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        self.inner.key_for_generation(generation)
+    }
+}
+
 /// Device acceptance lane for issue #403.  It is intentionally ignored in the
 /// ordinary suite: the seed is large enough to characterize the reference
 /// device rather than to act as a CI smoke test.  Seed/setup timing is emitted
@@ -397,7 +417,15 @@ fn one_hundred_thousand_events_and_two_default_timeout_writers() {
     assert_eq!(journal.authenticated_state().expect("seed anchor").event_count, SEED_EVENTS as u64);
 
     drop(journal);
-    let journal = open(&path);
+    let key_reads = Arc::new(AtomicUsize::new(0));
+    let journal = Journal::open_fixture(
+        &path,
+        AcceptanceKeyProvider {
+            reads: Arc::clone(&key_reads),
+            inner: DeterministicKeyProvider::from_seed("authenticated-state"),
+        },
+    )
+    .expect("counting measurement writer");
     // This is deliberately one separately timed write: a newly opened connection must
     // perform the full external-commit/startup preflight outside BEGIN
     // IMMEDIATE.  It must not be included in the steady-state bound below.
@@ -408,9 +436,15 @@ fn one_hundred_thousand_events_and_two_default_timeout_writers() {
         .ingest(&hot_origin, &event_from(&hot_origin, 200_001, "seq-0-1"), &seed_policy)
         .expect("hot-path warm write");
     let startup_write_ms = startup_started.elapsed().as_millis();
+    assert_eq!(
+        key_reads.load(Ordering::SeqCst),
+        1,
+        "startup preflight and write share one key read"
+    );
     println!("AUTH_100K_SETUP seed_events={SEED_EVENTS} seed_ms={seed_elapsed_ms} startup_write_ms={startup_write_ms}");
     let mut hot_write_us = Vec::with_capacity(HOT_WRITES as usize);
     for index in 0..HOT_WRITES {
+        let reads_before = key_reads.load(Ordering::SeqCst);
         let started = Instant::now();
         journal
             .ingest(
@@ -420,8 +454,15 @@ fn one_hundred_thousand_events_and_two_default_timeout_writers() {
             )
             .expect("hot-path write");
         hot_write_us.push(started.elapsed().as_micros());
+        assert_eq!(
+            key_reads.load(Ordering::SeqCst) - reads_before,
+            1,
+            "exactly one backing-provider read per steady-state write"
+        );
     }
     let max_hot_write_us = hot_write_us.iter().copied().max().unwrap_or(0);
+    let hot_key_reads = key_reads.load(Ordering::SeqCst) - 1;
+    assert_eq!(hot_key_reads, HOT_WRITES as usize);
     println!("AUTH_100K_HOT whole_write_us={hot_write_us:?} max_hot_write_us={max_hot_write_us}");
     let hot_bound_ms = std::env::var("GHOSTRACE_AUTH_HOT_WRITE_BOUND_MS")
         .expect("set GHOSTRACE_AUTH_HOT_WRITE_BOUND_MS to the measured reference-device bound")
@@ -593,7 +634,7 @@ fn one_hundred_thousand_events_and_two_default_timeout_writers() {
     assert!(final_journal.authenticated_state_report().expect("final report").valid);
     let full_check_ms = full_check_started.elapsed().as_millis();
     println!(
-        "AUTH_100K_ACCEPTANCE seed_events={SEED_EVENTS} seed_ms={seed_elapsed_ms} startup_write_ms={startup_write_ms} full_check_ms={full_check_ms} hot_writes={HOT_WRITES} max_hot_write_us={max_hot_write_us} hot_bound_ms={hot_bound_ms} concurrent_connections=2 concurrent_processes=2 concurrent_writes_per_writer={CONCURRENT_WRITES} process_writers_ms={process_elapsed_ms} busy_timeout_ms=250 PASS"
+        "AUTH_100K_ACCEPTANCE seed_events={SEED_EVENTS} seed_ms={seed_elapsed_ms} startup_write_ms={startup_write_ms} full_check_ms={full_check_ms} hot_writes={HOT_WRITES} startup_key_reads=1 key_reads_per_hot_write=1 hot_key_reads={hot_key_reads} max_hot_write_us={max_hot_write_us} hot_bound_ms={hot_bound_ms} concurrent_connections=2 concurrent_processes=2 concurrent_writes_per_writer={CONCURRENT_WRITES} process_writers_ms={process_elapsed_ms} busy_timeout_ms=250 PASS"
     );
 }
 

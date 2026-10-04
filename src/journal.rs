@@ -31,6 +31,7 @@ use crate::{
     },
     crypto::{
         decrypt_payload, encrypt_payload, CiphertextEnvelope, KeyProvider, SharedKeyProvider,
+        WriteKeyProvider,
     },
     cursor::{CursorIdentity, CursorKind, CursorState, CursorStatus, CursorToken, ReplayBoundary},
     error::GhostraceError,
@@ -614,7 +615,8 @@ impl Journal {
         }
 
         let connection = self.lock_connection()?;
-        let transaction = self.ensure_authenticated_for_write(&connection)?;
+        let keys = WriteKeyProvider::new(self.key_provider.as_ref());
+        let transaction = self.ensure_authenticated_for_write(&connection, &keys)?;
         let live_boundary = transaction
             .query_row("SELECT COALESCE(MAX(ingest_seq), 0) FROM events", [], |row| {
                 row.get::<_, i64>(0)
@@ -635,8 +637,7 @@ impl Journal {
             return Err(GhostraceError::RetentionConfirmationMismatch);
         }
 
-        let current_plan =
-            plan_from_connection(&transaction, self.key_provider.as_ref(), &plan.policy)?;
+        let current_plan = plan_from_connection(&transaction, &keys, &plan.policy)?;
         if current_plan.plan_digest != plan.plan_digest
             || current_plan.candidate_set_digest != plan.candidate_set_digest
             || current_plan.snapshot_boundary != plan.snapshot_boundary
@@ -644,8 +645,7 @@ impl Journal {
             return Err(GhostraceError::RetentionConfirmationMismatch);
         }
 
-        let mut candidates =
-            candidate_events_from_plan(&transaction, self.key_provider.as_ref(), plan)?;
+        let mut candidates = candidate_events_from_plan(&transaction, &keys, plan)?;
         ensure_retention_references(&transaction, &candidates)?;
         candidates.sort_by_key(|candidate| Reverse(candidate.ingest_seq));
         for candidate in &candidates {
@@ -668,11 +668,7 @@ impl Journal {
                 requested_event_count: plan.affected_event_count,
                 deleted_event_count,
             };
-            authenticated::refresh_transaction(
-                &transaction,
-                self.key_provider.as_ref(),
-                Some(&marker),
-            )?;
+            authenticated::refresh_transaction(&transaction, &keys, Some(&marker))?;
         }
         transaction.commit()?;
         self.publish_authenticated_version(&connection, deleted_event_count > 0)?;
@@ -962,7 +958,8 @@ impl Journal {
     /// initialized receipt may invoke this command-level operation.
     pub fn initialize_authenticated_state(&self) -> Result<(), GhostraceError> {
         let mut connection = self.lock_connection()?;
-        authenticated::ensure_anchor(&mut connection, self.key_provider.as_ref())
+        let keys = WriteKeyProvider::new(self.key_provider.as_ref());
+        authenticated::ensure_anchor(&mut connection, &keys)
     }
 
     /// Verify ordering, cursor state, policy history, diagnostics, and
@@ -1108,24 +1105,19 @@ impl Journal {
         }
         self.faults.hit(FaultPoint::IngestBeforeTransaction)?;
         let connection = self.lock_connection()?;
-        let transaction = self.ensure_authenticated_for_write(&connection)?;
+        let keys = WriteKeyProvider::new(self.key_provider.as_ref());
+        let transaction = self.ensure_authenticated_for_write(&connection, &keys)?;
         let previous_key_generation =
             authenticated::anchor_identity(&transaction)?.map(|anchor| anchor.key_generation);
         self.faults.hit(FaultPoint::IngestAfterTransaction)?;
         record_policy_profile(&transaction, policy)?;
-        let sequences = insert_events(
-            &transaction,
-            events,
-            self.key_provider.as_ref(),
-            &self.faults,
-            boundary,
-        )?;
+        let sequences = insert_events(&transaction, events, &keys, &self.faults, boundary)?;
         insert_diagnostics(&transaction, diagnostics, &self.faults)?;
-        authenticated::refresh_transaction(&transaction, self.key_provider.as_ref(), None)?;
+        authenticated::refresh_transaction(&transaction, &keys, None)?;
         self.faults.hit(FaultPoint::IngestBeforeCommit)?;
         transaction.commit()?;
-        let rotated = previous_key_generation
-            .is_some_and(|generation| generation != self.key_provider.key_generation());
+        let rotated =
+            previous_key_generation.is_some_and(|generation| generation != keys.key_generation());
         self.publish_authenticated_version(&connection, rotated)?;
         self.faults.hit(FaultPoint::IngestAfterCommit)?;
         if let Some(path) = self.path.as_deref() {
@@ -1153,7 +1145,8 @@ impl Journal {
             policy.enable_source(interval.source);
         }
         let connection = self.lock_connection()?;
-        let transaction = self.ensure_authenticated_for_write(&connection)?;
+        let keys = WriteKeyProvider::new(self.key_provider.as_ref());
+        let transaction = self.ensure_authenticated_for_write(&connection, &keys)?;
         let previous_key_generation =
             authenticated::anchor_identity(&transaction)?.map(|anchor| anchor.key_generation);
         let mut selected = HashSet::new();
@@ -1275,18 +1268,12 @@ impl Journal {
                 Evidence::Direct,
                 None,
             )?;
-            insert_events(
-                &transaction,
-                std::slice::from_ref(&event),
-                self.key_provider.as_ref(),
-                &self.faults,
-                None,
-            )?;
+            insert_events(&transaction, std::slice::from_ref(&event), &keys, &self.faults, None)?;
         }
-        authenticated::refresh_transaction(&transaction, self.key_provider.as_ref(), None)?;
+        authenticated::refresh_transaction(&transaction, &keys, None)?;
         transaction.commit()?;
-        let rotated = previous_key_generation
-            .is_some_and(|generation| generation != self.key_provider.key_generation());
+        let rotated =
+            previous_key_generation.is_some_and(|generation| generation != keys.key_generation());
         self.publish_authenticated_version(&connection, rotated)?;
         if let Some(path) = self.path.as_deref() {
             storage::verify_database_artifacts(path)?;
@@ -1375,7 +1362,8 @@ impl Journal {
     pub fn invalidate_cursor(&self, identity: &CursorIdentity) -> Result<(), GhostraceError> {
         self.faults.hit(FaultPoint::ControlBeforeTransaction)?;
         let connection = self.lock_connection()?;
-        let transaction = self.ensure_authenticated_for_write(&connection)?;
+        let keys = WriteKeyProvider::new(self.key_provider.as_ref());
+        let transaction = self.ensure_authenticated_for_write(&connection, &keys)?;
         let previous_key_generation =
             authenticated::anchor_identity(&transaction)?.map(|anchor| anchor.key_generation);
         self.faults.hit(FaultPoint::ControlAfterTransaction)?;
@@ -1386,11 +1374,11 @@ impl Journal {
         if changed == 0 {
             return Err(GhostraceError::CursorStateMissing { event_source: identity.source });
         }
-        authenticated::refresh_transaction(&transaction, self.key_provider.as_ref(), None)?;
+        authenticated::refresh_transaction(&transaction, &keys, None)?;
         self.faults.hit(FaultPoint::ControlBeforeCommit)?;
         transaction.commit()?;
-        let rotated = previous_key_generation
-            .is_some_and(|generation| generation != self.key_provider.key_generation());
+        let rotated =
+            previous_key_generation.is_some_and(|generation| generation != keys.key_generation());
         self.publish_authenticated_version(&connection, rotated)?;
         self.faults.hit(FaultPoint::ControlAfterCommit)?;
         Ok(())
@@ -1414,7 +1402,8 @@ impl Journal {
         }
         self.faults.hit(FaultPoint::ControlBeforeTransaction)?;
         let connection = self.lock_connection()?;
-        let transaction = self.ensure_authenticated_for_write(&connection)?;
+        let keys = WriteKeyProvider::new(self.key_provider.as_ref());
+        let transaction = self.ensure_authenticated_for_write(&connection, &keys)?;
         let previous_key_generation =
             authenticated::anchor_identity(&transaction)?.map(|anchor| anchor.key_generation);
         self.faults.hit(FaultPoint::ControlAfterTransaction)?;
@@ -1463,11 +1452,11 @@ impl Journal {
                 boundary.map(serde_json::to_string).transpose()?,
             ],
         )?;
-        authenticated::refresh_transaction(&transaction, self.key_provider.as_ref(), None)?;
+        authenticated::refresh_transaction(&transaction, &keys, None)?;
         self.faults.hit(FaultPoint::ControlBeforeCommit)?;
         transaction.commit()?;
-        let rotated = previous_key_generation
-            .is_some_and(|generation| generation != self.key_provider.key_generation());
+        let rotated =
+            previous_key_generation.is_some_and(|generation| generation != keys.key_generation());
         self.publish_authenticated_version(&connection, rotated)?;
         self.faults.hit(FaultPoint::ControlAfterCommit)?;
         Ok(())
@@ -1598,13 +1587,15 @@ impl Journal {
     fn ensure_authenticated_for_write<'connection>(
         &self,
         connection: &'connection Connection,
+        provider: &dyn KeyProvider,
     ) -> Result<Transaction<'connection>, GhostraceError> {
-        self.ensure_authenticated_for_write_attempt(connection, 0)
+        self.ensure_authenticated_for_write_attempt(connection, provider, 0)
     }
 
     fn retry_authenticated_preflight<'connection>(
         &self,
         connection: &'connection Connection,
+        provider: &dyn KeyProvider,
         attempt: u32,
         verification_elapsed: Duration,
     ) -> Result<Transaction<'connection>, GhostraceError> {
@@ -1618,12 +1609,13 @@ impl Journal {
             base.saturating_mul(attempt.saturating_add(1)).min(AUTH_WRITE_PREFLIGHT_RETRY_MAX);
         thread::yield_now();
         thread::sleep(delay);
-        self.ensure_authenticated_for_write_attempt(connection, attempt + 1)
+        self.ensure_authenticated_for_write_attempt(connection, provider, attempt + 1)
     }
 
     fn ensure_authenticated_for_write_attempt<'connection>(
         &self,
         connection: &'connection Connection,
+        provider: &dyn KeyProvider,
         attempt: u32,
     ) -> Result<Transaction<'connection>, GhostraceError> {
         // Full integrity/authentication verification runs on a read snapshot
@@ -1660,11 +1652,12 @@ impl Journal {
                 let verification_start_version =
                     connection.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))?;
                 let verification_started = Instant::now();
-                let anchor = match self.preverify_for_write() {
+                let anchor = match self.preverify_for_write(provider) {
                     Ok(anchor) => anchor,
                     Err(GhostraceError::AuthenticatedStatePreflightChanged) => {
                         return self.retry_authenticated_preflight(
                             connection,
+                            provider,
                             attempt,
                             verification_started.elapsed(),
                         );
@@ -1677,6 +1670,7 @@ impl Journal {
                 if verification_end_version != verification_start_version {
                     return self.retry_authenticated_preflight(
                         connection,
+                        provider,
                         attempt,
                         verification_elapsed,
                     );
@@ -1694,7 +1688,12 @@ impl Journal {
         let postverification_owner_version =
             connection.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))?;
         if self.path.is_some() && postverification_owner_version != owner_data_version {
-            return self.retry_authenticated_preflight(connection, attempt, verification_elapsed);
+            return self.retry_authenticated_preflight(
+                connection,
+                provider,
+                attempt,
+                verification_elapsed,
+            );
         }
         owner_data_version = postverification_owner_version;
 
@@ -1713,10 +1712,15 @@ impl Journal {
         let version_matches = self.path.is_none() || locked_data_version == owner_data_version;
         if !version_matches || !preflight_matches {
             transaction.rollback()?;
-            return self.retry_authenticated_preflight(connection, attempt, verification_elapsed);
+            return self.retry_authenticated_preflight(
+                connection,
+                provider,
+                attempt,
+                verification_elapsed,
+            );
         }
-        authenticated::ensure_anchor_in(&transaction, self.key_provider.as_ref())?;
-        authenticated::require_anchor_valid(&transaction, self.key_provider.as_ref())?;
+        authenticated::ensure_anchor_in(&transaction, provider)?;
+        authenticated::require_anchor_valid(&transaction, provider)?;
         *self
             .authenticated_write_version
             .lock()
@@ -1725,7 +1729,10 @@ impl Journal {
         Ok(transaction)
     }
 
-    fn preverify_for_write(&self) -> Result<Option<AuthenticatedAnchorIdentity>, GhostraceError> {
+    fn preverify_for_write(
+        &self,
+        provider: &dyn KeyProvider,
+    ) -> Result<Option<AuthenticatedAnchorIdentity>, GhostraceError> {
         self.with_read_snapshot(|connection| {
             let integrity = IntegrityReport::from_connection(connection)?;
             if !integrity.integrity_ok {
@@ -1738,7 +1745,7 @@ impl Journal {
                 connection.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))?;
             let anchor = authenticated::anchor_identity(connection)?;
             if anchor.is_some() {
-                authenticated::require_valid(connection, self.key_provider.as_ref())?;
+                authenticated::require_valid(connection, provider)?;
             } else if !authenticated::bootstrap_allowed(connection)? {
                 return Err(GhostraceError::AuthenticatedStateInvalid(
                     "authenticated anchor is missing".to_owned(),
@@ -3522,7 +3529,9 @@ mod authenticated_write_tests {
         .expect("journal");
         journal.initialize_authenticated_state().expect("initial anchor");
         let connection = journal.lock_connection().expect("connection");
-        let guard = journal.ensure_authenticated_for_write(&connection).expect("precondition");
+        let keys = WriteKeyProvider::new(journal.key_provider.as_ref());
+        let guard =
+            journal.ensure_authenticated_for_write(&connection, &keys).expect("precondition");
         let competing_writer = Connection::open(&path).expect("competing connection");
         competing_writer.busy_timeout(Duration::ZERO).expect("no waiting");
         let mutation = "UPDATE authenticated_state SET updated_at = updated_at";

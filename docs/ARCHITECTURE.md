@@ -788,6 +788,15 @@ only pending trigger rows, updates the affected commitment terms, appends one
 operation-ledger entry, and commits; it does not scan historical events under
 the write lock. Dropping the guard on a refusal rolls back the whole operation.
 
+Each write has one short-lived key scope shared by preflight, authentication,
+payload encryption, and anchor advancement, including preflight retries. It pins
+the active generation and resolves each required generation from the backing
+provider at most once, without retaining keys between writes. Ordinary writes
+use one generation and make exactly one provider read, for both file-backed and
+in-memory journals. In-memory writes keep the anchor check under the same guard;
+sharing the key preserves their single-read contract. Rotation or preflight over
+retained ciphertext from older generations needs one read per distinct generation.
+
 `authenticated-check` performs the full v2 recomputation. The explicit
 100,000-event device lane in `tests/authenticated_state.rs` reports seed/setup
 timing independently, reopens and warms a connection, bounds steady-state writes
@@ -801,16 +810,18 @@ substituted by the hot-write measurement.
 The reference measurement on 2026-10-04 used an Apple M1 MacBook Pro with
 8 GB RAM, macOS 26.6.2 (25G83), arm64, Rust/Cargo 1.88.0, and the unoptimized
 all-features test profile. With 100,000 synthetic events, 64 steady-state
-single-event writes had median 4.369 ms, p95 7.329 ms, and maximum 11.939 ms.
+single-event writes had median 3.696 ms, p95 6.152 ms, and maximum 11.364 ms.
 The predeclared bound is 200 ms. Whole-write wall time conservatively bounds
 the `IMMEDIATE` lock interval; this lane does not directly instrument the lock.
 Each of two connections and two separate processes completed 32 writes with
-no timeout at the default 250 ms. Seeding took 165.914 s, the first write after
-reopening (including full preflight) took 28.682 s, and the final full check took
-14.823 s. Startup/external-commit scans, legacy promotion, rotation, retention,
+no timeout at the default 250 ms. Seeding took 110.320 s, the first write after
+reopening (including full preflight) took 14.486 s, and the final full check took
+9.286 s. Startup and each of the 64 hot writes made exactly one backing-provider
+key read. Startup/external-commit scans, legacy promotion, rotation, retention,
 and multi-event batches are outside the steady-state single-event bound.
-The startup measurement is close to the default 30 s reader limit; it is not
-a bound on other devices or larger operation histories.
+The preceding measurement's 28.682 s startup was close to the default 30 s reader
+limit. That limit and the full-scan algorithm remain unchanged; neither startup
+result bounds other devices or larger operation histories.
 
 Reproduce the device lane under a 600 s process-group watchdog:
 
