@@ -712,6 +712,12 @@ impl Journal {
 
     /// Create a signed, path-free receipt for the currently verified journal.
     pub fn create_checkpoint(&self) -> Result<VerificationCheckpoint, GhostraceError> {
+        self.create_checkpoint_with_copy_identity().map(|(checkpoint, _)| checkpoint)
+    }
+
+    fn create_checkpoint_with_copy_identity(
+        &self,
+    ) -> Result<(VerificationCheckpoint, crate::model::SnapshotDigest), GhostraceError> {
         if self.path.is_some() {
             self.checkpoint(CheckpointMode::Truncate)?;
         }
@@ -732,8 +738,8 @@ impl Journal {
                 "integrity and journal schema versions differ".to_owned(),
             ));
         }
-        let database_identity =
-            recovery::database_identity(self.path.as_deref(), &integrity, &state)?;
+        let (database_identity, copy_identity) =
+            recovery::database_identities(self.path.as_deref(), &integrity, &state)?;
         let integrity_digest = recovery::digest_json(&integrity)?;
         let mut checkpoint = VerificationCheckpoint::unsigned(
             database_identity,
@@ -744,7 +750,7 @@ impl Journal {
         );
         let key = self.key_provider.key_for_generation(state.key_generation)?;
         checkpoint.sign(&key)?;
-        Ok(checkpoint)
+        Ok((checkpoint, copy_identity))
     }
 
     /// Verify a previously created checkpoint against the current journal.
@@ -837,7 +843,8 @@ impl Journal {
         validate_repair_interval_set(intervals)?;
         self.validate_repair_source_scope(intervals)?;
 
-        let before_checkpoint = self.create_checkpoint()?;
+        let (before_checkpoint, source_copy_identity) =
+            self.create_checkpoint_with_copy_identity()?;
         self.verify_checkpoint(&before_checkpoint)?;
         self.backup_snapshot(destination.as_ref())?;
 
@@ -847,10 +854,17 @@ impl Journal {
             self.wal_policy,
             FaultPlan::none(),
         )?;
-        copy.verify_checkpoint(&before_checkpoint)?;
+        let (copy_checkpoint, copy_identity) = copy.create_checkpoint_with_copy_identity()?;
+        copy.verify_checkpoint(&copy_checkpoint)?;
+        recovery::require_checkpoint_copy_equivalence(
+            &before_checkpoint,
+            &copy_checkpoint,
+            &source_copy_identity,
+            &copy_identity,
+        )?;
         let before_gap_count = copy.gap_event_count()?;
         let before_manifest =
-            RepairStateManifest::from_checkpoint(&before_checkpoint, before_gap_count);
+            RepairStateManifest::from_checkpoint(&copy_checkpoint, before_gap_count);
         let application = copy.apply_repair_intervals(intervals)?;
         let after_checkpoint = copy.create_checkpoint()?;
         copy.verify_checkpoint(&after_checkpoint)?;
@@ -990,8 +1004,8 @@ impl Journal {
         ResidueReport::for_journal(self, external_backups)
     }
 
-    /// Checkpoint the active WAL, then copy only the database file. A sidecar
-    /// path is rejected because it is not a valid independent SQLite backup.
+    /// Checkpoint the active WAL, then use SQLite to create a consistent,
+    /// database-only snapshot. A sidecar path is not an independent backup.
     pub fn backup_snapshot<P: AsRef<Path>>(
         &self,
         destination: P,
@@ -1018,7 +1032,7 @@ impl Journal {
             });
         }
         let destination = destination.as_ref();
-        let bytes = storage::copy_database_snapshot(path, destination)?;
+        let bytes = storage::copy_database_snapshot(&connection, path, destination)?;
         self.faults.hit(FaultPoint::BackupAfterCopy)?;
         Ok(BackupReceipt { bytes, wal_bytes, frames_in_wal, frames_checkpointed })
     }

@@ -120,6 +120,35 @@ fn repair_is_copy_only_emits_reconciled_manifest_and_keeps_source() {
 }
 
 #[test]
+fn v1_checkpoints_keep_raw_identity_when_sqlite_backup_rewrites_bookkeeping() {
+    use sha2::{Digest, Sha256};
+
+    let (directory, source) = private_path("source-v1.sqlite3");
+    let destination = directory.path().join("snapshot-v1.sqlite3");
+    let journal = open(&source);
+    journal.ingest(&IngestionOrigin::fixture(), &event(1), &policy()).expect("fixture event");
+    let checkpoint = journal.create_checkpoint().expect("source checkpoint");
+    assert_eq!(checkpoint.schema_version, 1);
+    journal.backup_snapshot(&destination).expect("consistent snapshot");
+    journal.verify_checkpoint(&checkpoint).expect("source v1 checkpoint unchanged");
+    let copy = open(&destination);
+    copy.verify_authenticated_state().expect("copy authentication");
+    assert!(copy.integrity_check().expect("copy integrity").integrity_ok);
+    assert!(matches!(
+        copy.verify_checkpoint(&checkpoint),
+        Err(GhostraceError::CheckpointMismatch(_))
+    ));
+    let copy_checkpoint = copy.create_checkpoint().expect("copy's own checkpoint");
+    copy.verify_checkpoint(&copy_checkpoint).expect("copy checkpoint verifies");
+    assert_eq!(checkpoint.head_mac, copy_checkpoint.head_mac);
+    drop(copy);
+    drop(journal);
+    let raw = fs::read(&source).expect("closed source fixture bytes");
+    let raw_digest: String = Sha256::digest(raw).iter().map(|byte| format!("{byte:02x}")).collect();
+    assert_eq!(checkpoint.database_identity.as_str(), format!("sha256:{raw_digest}"));
+}
+
+#[test]
 fn integrity_failure_stops_normal_writer() {
     let (_directory, path) = private_path("integrity.sqlite3");
     let journal = open(&path);

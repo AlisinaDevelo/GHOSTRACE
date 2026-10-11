@@ -89,7 +89,7 @@ verification time. It is a local-integrity receipt, not remote attestation or a
 legal chain-of-custody claim.
 
 The repair command never rewrites its source. It requires a clean checkpoint,
-copies only the checkpointed database file, re-verifies the copy, and then
+creates a database-only SQLite backup, re-verifies the copy, and then
 removes only bounded ingest-sequence intervals that have no child or cursor-tail
 references. Each removed interval is replaced by a repair-origin gap event in
 one transaction. A path-free manifest records before/after identities and
@@ -718,7 +718,12 @@ the threat model. The file-backed implementation applies the explicit policy in
 [ADR 0003](adr/0003-sqlite-wal-active-journal.md): bounded busy waits and reader
 snapshots, observable passive/truncate checkpoints, and refusal when remaining
 frames or sidecar bytes exceed the configured limit. A database snapshot is made
-only after a truncate checkpoint and never by copying a `-wal` or `-shm` file.
+only after a truncate checkpoint, through SQLite's single-step backup API so peer
+checkpoints cannot mix pages. Busy/locked copies refuse without retries; `-wal`
+and `-shm` files are never copied as independent snapshots. The mechanism and
+checkpoint compatibility proposal is recorded in
+[ADR 0008](adr/0008-consistent-sqlite-backups.md); ADR 0003 remains the historical
+accepted decision.
 
 Explicit live payloads use authenticated encryption with a login-Keychain backing
 key. The data-protection provider remains the default library custody choice,
@@ -880,8 +885,24 @@ write to a different location. Exports use the same regular-file, ownership, lin
 and `0600` contract; a forced export can repair the mode of a single-link regular
 file but never replaces a symlink or hard link. WAL and SHM sidecars are checked
 after every file-backed write; they are not independent backups. The backup helper
-first runs a truncate checkpoint and copies only the database file, refusing a
-sidecar destination.
+first runs a truncate checkpoint, then uses the existing SQLite connection to
+create and sync a fresh mode `0600` database-only destination. Existing main or
+sidecar artifacts refuse. On supported Unix targets, SQLite's live destination
+file must pass `SQLITE_FCNTL_HAS_MOVED` before pragmas or backup writes; an
+unsupported or failed check refuses the copy. Copy failures remove only
+the helper's own destination after checking file and parent identities. Platforms
+without those identities retain failed output rather than delete an unproven path.
+
+Signed v1 checkpoints still hash the exact database bytes. SQLite backups rewrite
+bookkeeping header fields, so verified-copy repair compares all bound chain,
+schema, key, policy, and integrity fields plus every database byte except offsets
+24–27 (file change counter), 40–43 (schema cookie), and 92–99 (version-valid-for
+counter and writer SQLite version). The comparison derives both digests from the
+checkpoint's existing read, without another source descriptor. Page count,
+application/user versions, schema, and page contents remain covered. Both source
+and copy checkpoints verify fully; the repair manifest records the copy's own
+checkpoint identity, and the original source checkpoint verifies again afterward.
+These fields are defined in SQLite's [database header format](https://www.sqlite.org/fileformat.html#the_database_header).
 
 ## Explanation boundary
 

@@ -139,6 +139,8 @@ fn database_snapshot_rejects_sidecars_and_reopens_after_truncate_checkpoint() {
     )
     .expect("reopen database-only snapshot");
     assert_eq!(reopened.events().expect("snapshot events").len(), 8);
+    assert!(reopened.integrity_check().expect("snapshot integrity").integrity_ok);
+    reopened.verify_authenticated_state().expect("snapshot authentication");
 
     let sidecar = directory.path().join("invalid.sqlite3-wal");
     let error = journal.backup_snapshot(&sidecar).expect_err("sidecar backup");
@@ -146,6 +148,36 @@ fn database_snapshot_rejects_sidecars_and_reopens_after_truncate_checkpoint() {
     let shutdown = journal.shutdown().expect("bounded shutdown checkpoint");
     println!("WAL_POLICY_SHUTDOWN {shutdown:?}");
     assert!(shutdown.within_policy());
+}
+
+#[test]
+fn backup_refuses_a_pinned_reader_then_retries_after_it_ends() {
+    let directory = private_directory();
+    let source = directory.path().join("journal.sqlite3");
+    let destination = directory.path().join("snapshot.sqlite3");
+    let provider = DeterministicKeyProvider::from_seed("wal-policy-backup-reader");
+    let journal =
+        Journal::open_fixture_with_policy(&source, provider.clone(), policy(64 * 1024, 500))
+            .expect("fixture journal");
+    let reader = rusqlite::Connection::open(&source).expect("fixture reader");
+    reader.execute_batch("BEGIN DEFERRED").expect("reader transaction");
+    let count: i64 = reader
+        .query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))
+        .expect("pinned reader snapshot");
+    assert_eq!(count, 0);
+    ingest_fixture(fixture_path(), &journal, &PolicyProfile::fixture_default())
+        .expect("fixture commits");
+    let result = journal.backup_snapshot(&destination);
+    reader.execute_batch("ROLLBACK").expect("reader finished");
+    assert!(matches!(result, Err(GhostraceError::WalCheckpointRefused { .. })));
+    assert!(!destination.exists(), "checkpoint refusal must not create a backup");
+    assert_eq!(journal.events().expect("source events").len(), 8);
+    journal.verify_authenticated_state().expect("source authentication");
+    journal.backup_snapshot(&destination).expect("retry after reader ends");
+    let snapshot = Journal::open_fixture(destination, provider).expect("snapshot reopen");
+    assert_eq!(snapshot.events().expect("snapshot events").len(), 8);
+    assert!(snapshot.integrity_check().expect("snapshot integrity").integrity_ok);
+    snapshot.verify_authenticated_state().expect("snapshot authentication");
 }
 
 #[test]
