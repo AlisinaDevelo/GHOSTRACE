@@ -188,6 +188,13 @@ the Xcode, SDK, linker, and compiler versions. Each slice's manifest entry carri
 its SHA-256, Mach-O UUID, minimum OS, and a count of absolute local paths found in
 the binary, which must be 0.
 
+Both modes require a fresh output directory and refuse existing directories,
+files, or symlinks before invoking the compiler. Choose a new output path for
+each run; the script never removes an existing destination. Relative output
+paths are resolved before the build changes its working directory. Failed builds
+keep their output logs, while temporary source clones are removed on exit or
+termination.
+
 `scripts/build-universal.sh --twice` builds the same commit from two clones at
 different absolute paths and writes `comparison.json`, listing every manifest
 field that differs. On the reference M1 (Xcode with SDK 26.5, Rust 1.88.0) both
