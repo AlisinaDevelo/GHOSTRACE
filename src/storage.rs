@@ -26,6 +26,152 @@ pub(crate) struct FileIdentity {
     inode: u64,
 }
 
+/// Retain verified source identities throughout export, including after their
+/// names disappear or change. Reused identities conservatively refuse export
+/// after an artifact is unlinked; they cannot permit overwriting the source.
+pub(crate) struct DatabaseArtifactIdentities {
+    identities: Vec<FileIdentity>,
+}
+
+impl DatabaseArtifactIdentities {
+    pub(crate) fn capture(database: &Path) -> Result<Self, GhostraceError> {
+        verify_existing_private_directory(parent_directory(database)?)?;
+        let mut artifacts = Vec::with_capacity(DATABASE_ARTIFACT_SUFFIXES.len() + 1);
+        artifacts.push(database.to_path_buf());
+        for suffix in DATABASE_ARTIFACT_SUFFIXES {
+            artifacts.push(sidecar_path(database, suffix)?);
+        }
+        let mut identities = Vec::with_capacity(artifacts.len());
+        for artifact in artifacts {
+            // Opening and closing an independent source descriptor could
+            // release SQLite's process-associated POSIX locks on that inode.
+            let metadata = match fs::symlink_metadata(&artifact) {
+                Ok(metadata) => metadata,
+                Err(error) if artifact != database && error.kind() == ErrorKind::NotFound => {
+                    continue;
+                }
+                Err(error) => return Err(io_error(&artifact, error)),
+            };
+            verify_file_metadata(&artifact, &metadata)?;
+            identities.push(file_identity(&metadata));
+        }
+        Ok(Self { identities })
+    }
+
+    pub(crate) fn refuse_destination(&self, destination: &Path) -> Result<(), GhostraceError> {
+        #[cfg(unix)]
+        {
+            let destination_metadata = match fs::metadata(destination) {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+                Err(error) => return Err(io_error(destination, error)),
+            };
+            let destination_identity = file_identity(&destination_metadata);
+            if self.identities.contains(&destination_identity) {
+                return Err(GhostraceError::ExportSourceConflict);
+            }
+        }
+        #[cfg(not(unix))]
+        let _ = (&self.identities, destination);
+        Ok(())
+    }
+}
+
+/// Reserve the database and its sidecar names before publishing an export.
+/// Compare resolved parent directories so relative names and trusted system
+/// aliases cannot evade the check. Sidecar names remain reserved while absent:
+/// SQLite may create them after the export starts. Inode checks also recognize
+/// existing aliases and sidecars whose base names resolve to the journal on
+/// Unix, including case and Unicode aliases on macOS filesystems.
+pub(crate) fn refuse_database_artifact_destination(
+    database: &Path,
+    destination: &Path,
+) -> Result<(), GhostraceError> {
+    if database == destination {
+        return Err(GhostraceError::ExportSourceConflict);
+    }
+    let database_parent = parent_directory(database)?;
+    let database_parent =
+        fs::canonicalize(database_parent).map_err(|error| io_error(database_parent, error))?;
+    let destination_parent = destination
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let destination_parent = match fs::canonicalize(destination_parent) {
+        Ok(parent) => parent,
+        // The normal artifact-parent preparation may create a new folder.
+        // An absent parent cannot currently alias the existing database home.
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(io_error(destination_parent, error)),
+    };
+    let mut artifacts = Vec::with_capacity(DATABASE_ARTIFACT_SUFFIXES.len() + 1);
+    artifacts.push(database.to_path_buf());
+    for suffix in DATABASE_ARTIFACT_SUFFIXES {
+        artifacts.push(sidecar_path(database, suffix)?);
+    }
+    if database_parent == destination_parent
+        && artifacts.iter().any(|artifact| artifact.file_name() == destination.file_name())
+    {
+        return Err(GhostraceError::ExportSourceConflict);
+    }
+    #[cfg(unix)]
+    {
+        use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+
+        // Resolve an absent sidecar's base through the filesystem rather than
+        // inventing a case/Unicode normalization rule for the journal name.
+        // Reserve ASCII suffix case variants on macOS, where ordinary APFS
+        // volumes treat those names as aliases too.
+        if let Some(name) = destination.file_name().map(OsStrExt::as_bytes) {
+            for suffix in DATABASE_ARTIFACT_SUFFIXES {
+                let suffix = suffix.as_bytes();
+                if name.len() <= suffix.len() {
+                    continue;
+                }
+                let (base, ending) = name.split_at(name.len() - suffix.len());
+                let suffix_matches = if cfg!(target_os = "macos") {
+                    ending.eq_ignore_ascii_case(suffix)
+                } else {
+                    ending == suffix
+                };
+                if !suffix_matches {
+                    continue;
+                }
+                let database_alias = destination.with_file_name(OsStr::from_bytes(base));
+                match fs::metadata(&database_alias) {
+                    Ok(metadata) => {
+                        let database_metadata =
+                            fs::metadata(database).map_err(|error| io_error(database, error))?;
+                        if file_identity(&metadata) == file_identity(&database_metadata) {
+                            return Err(GhostraceError::ExportSourceConflict);
+                        }
+                    }
+                    Err(error) if error.kind() == ErrorKind::NotFound => {}
+                    Err(error) => return Err(io_error(&database_alias, error)),
+                }
+            }
+        }
+        let destination_metadata = match fs::metadata(destination) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(io_error(destination, error)),
+        };
+        for artifact in artifacts {
+            match fs::metadata(&artifact) {
+                Ok(metadata)
+                    if file_identity(&metadata) == file_identity(&destination_metadata) =>
+                {
+                    return Err(GhostraceError::ExportSourceConflict);
+                }
+                Ok(_) => {}
+                Err(error) if error.kind() == ErrorKind::NotFound => {}
+                Err(error) => return Err(io_error(&artifact, error)),
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Open a database only after its containing path and existing sidecars pass
 /// the ownership, mode, type, link-count, and no-follow checks.
 pub(crate) fn open_database(path: &Path) -> Result<Connection, GhostraceError> {
@@ -157,6 +303,301 @@ pub(crate) fn ensure_artifact_parent(path: &Path) -> Result<(), GhostraceError> 
     Ok(())
 }
 
+/// Own the directory authority used throughout one atomic artifact export.
+pub(crate) struct ArtifactDirectory {
+    path: PathBuf,
+    #[cfg(unix)]
+    file: File,
+    #[cfg(unix)]
+    identity: FileIdentity,
+}
+
+pub(crate) struct ArtifactTemporary<'directory> {
+    directory: &'directory ArtifactDirectory,
+    file: File,
+    #[cfg(unix)]
+    name: Option<std::ffi::CString>,
+    #[cfg(not(unix))]
+    path: Option<tempfile::TempPath>,
+}
+
+impl ArtifactDirectory {
+    pub(crate) fn open(path: &Path) -> Result<Self, GhostraceError> {
+        ensure_artifact_parent(path)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            let file = OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+                .open(path)
+                .map_err(|error| secure_open_error(path, error))?;
+            let metadata = file.metadata().map_err(|error| io_error(path, error))?;
+            verify_directory_metadata(path, &metadata, false)?;
+            let directory =
+                Self { path: path.to_path_buf(), identity: file_identity(&metadata), file };
+            directory.revalidate()?;
+            Ok(directory)
+        }
+        #[cfg(not(unix))]
+        Ok(Self { path: path.to_path_buf() })
+    }
+
+    pub(crate) fn revalidate(&self) -> Result<(), GhostraceError> {
+        check_directory_components(&self.path, false).map_err(|_| GhostraceError::PathRace)?;
+        let metadata = fs::symlink_metadata(&self.path).map_err(|_| GhostraceError::PathRace)?;
+        verify_directory_metadata(&self.path, &metadata, false)
+            .map_err(|_| GhostraceError::PathRace)?;
+        #[cfg(unix)]
+        if file_identity(&metadata) != self.identity {
+            return Err(GhostraceError::PathRace);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn temporary(
+        &self,
+        prefix: &str,
+        anonymous: bool,
+    ) -> Result<ArtifactTemporary<'_>, GhostraceError> {
+        self.revalidate()?;
+        #[cfg(unix)]
+        {
+            use std::{
+                ffi::CString,
+                os::fd::{AsRawFd, FromRawFd},
+            };
+            for _ in 0..16 {
+                let name = CString::new(format!("{prefix}{}", uuid::Uuid::new_v4().simple()))
+                    .map_err(|_| GhostraceError::UnsafePath)?;
+                // SAFETY: the directory descriptor is owned here, the name
+                // is NUL-terminated, and O_EXCL/O_NOFOLLOW prohibit aliasing an
+                // existing entry. Ownership of the returned descriptor follows.
+                let fd = unsafe {
+                    libc::openat(
+                        self.file.as_raw_fd(),
+                        name.as_ptr(),
+                        libc::O_RDWR
+                            | libc::O_CREAT
+                            | libc::O_EXCL
+                            | libc::O_NOFOLLOW
+                            | libc::O_CLOEXEC,
+                        PRIVATE_FILE_MODE as libc::c_uint,
+                    )
+                };
+                if fd < 0 {
+                    let error = std::io::Error::last_os_error();
+                    if error.kind() == ErrorKind::AlreadyExists {
+                        continue;
+                    }
+                    return Err(io_error(&self.path, error));
+                }
+                // SAFETY: openat returned a new owned descriptor exactly once.
+                let file = unsafe { File::from_raw_fd(fd) };
+                let mut temporary = ArtifactTemporary { directory: self, file, name: Some(name) };
+                set_file_mode_handle(&self.path, &temporary.file)?;
+                if anonymous {
+                    temporary.unlink_name()?;
+                }
+                return Ok(temporary);
+            }
+            Err(io_error(
+                &self.path,
+                std::io::Error::new(ErrorKind::AlreadyExists, "temporary artifact collision limit"),
+            ))
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = anonymous;
+            let temporary = tempfile::Builder::new()
+                .prefix(prefix)
+                .tempfile_in(&self.path)
+                .map_err(|error| io_error(&self.path, error))?;
+            let (file, path) = temporary.into_parts();
+            Ok(ArtifactTemporary { directory: self, file, path: Some(path) })
+        }
+    }
+}
+
+impl ArtifactTemporary<'_> {
+    pub(crate) fn as_file(&self) -> &File {
+        &self.file
+    }
+    pub(crate) fn as_file_mut(&mut self) -> &mut File {
+        &mut self.file
+    }
+
+    #[cfg(unix)]
+    fn unlink_name(&mut self) -> Result<(), GhostraceError> {
+        use std::os::fd::AsRawFd;
+        let name = self.name.as_ref().ok_or(GhostraceError::UnsafePath)?;
+        // SAFETY: directory and name are owned, live values; flags select a file.
+        if unsafe { libc::unlinkat(self.directory.file.as_raw_fd(), name.as_ptr(), 0) } != 0 {
+            return Err(io_error(&self.directory.path, std::io::Error::last_os_error()));
+        }
+        self.name = None;
+        Ok(())
+    }
+
+    /// Publish within the pinned directory, so a namespace change after the
+    /// recheck cannot redirect either the rename/link or directory fsync.
+    pub(crate) fn publish(
+        &mut self,
+        destination: &Path,
+        force: bool,
+    ) -> Result<(), GhostraceError> {
+        self.directory.revalidate()?;
+        #[cfg(unix)]
+        {
+            use std::{
+                ffi::CString,
+                os::{fd::AsRawFd, unix::ffi::OsStrExt},
+            };
+            let destination_name =
+                CString::new(destination.file_name().ok_or(GhostraceError::UnsafePath)?.as_bytes())
+                    .map_err(|_| GhostraceError::UnsafePath)?;
+            let directory_fd = self.directory.file.as_raw_fd();
+            let name = self.name.as_ref().ok_or(GhostraceError::UnsafePath)?;
+            let metadata = self.file.metadata().map_err(|error| io_error(destination, error))?;
+            verify_file_metadata(destination, &metadata)?;
+            let named =
+                stat_at(directory_fd, name, destination)?.ok_or(GhostraceError::PathRace)?;
+            if stat_identity(&named) != file_identity(&metadata) {
+                return Err(GhostraceError::PathRace);
+            }
+            if let Some(existing) = stat_at(directory_fd, &destination_name, destination)? {
+                if existing.st_mode & libc::S_IFMT != libc::S_IFREG {
+                    return Err(GhostraceError::UnsafePath);
+                }
+                // SAFETY: geteuid has no preconditions.
+                if existing.st_uid != unsafe { libc::geteuid() } {
+                    return Err(GhostraceError::UnexpectedOwner);
+                }
+                if existing.st_nlink != 1 {
+                    return Err(GhostraceError::UnexpectedHardLinks);
+                }
+                if !force {
+                    return Err(GhostraceError::ExportExists(destination.to_path_buf()));
+                }
+            }
+            // SAFETY: both operations use owned NUL-terminated basenames and
+            // the pinned directory descriptor. linkat refuses an existing name
+            // atomically; renameat supplies the requested atomic replacement.
+            run_test_publish_hook(destination);
+            let result = unsafe {
+                if force {
+                    libc::renameat(
+                        directory_fd,
+                        name.as_ptr(),
+                        directory_fd,
+                        destination_name.as_ptr(),
+                    )
+                } else {
+                    libc::linkat(
+                        directory_fd,
+                        name.as_ptr(),
+                        directory_fd,
+                        destination_name.as_ptr(),
+                        0,
+                    )
+                }
+            };
+            if result != 0 {
+                let error = std::io::Error::last_os_error();
+                if error.kind() == ErrorKind::AlreadyExists {
+                    return Err(GhostraceError::ExportExists(destination.to_path_buf()));
+                }
+                return Err(io_error(destination, error));
+            }
+            if force {
+                self.name = None;
+            } else {
+                self.unlink_name()?;
+            }
+            // The temporary basename may have been replaced after its stat.
+            // Verify the actual published entry against the retained, validated
+            // inode without reopening the mutable destination pathname. Leave a
+            // different inode intact: it belongs to the actor that replaced it.
+            let published = stat_at(directory_fd, &destination_name, destination)?
+                .ok_or(GhostraceError::PathRace)?;
+            if stat_identity(&published) != file_identity(&metadata) {
+                return Err(GhostraceError::PathRace);
+            }
+            verify_file_metadata(
+                destination,
+                &self.file.metadata().map_err(|error| io_error(destination, error))?,
+            )?;
+            self.directory
+                .file
+                .sync_all()
+                .map_err(|error| io_error(&self.directory.path, error))?;
+        }
+        #[cfg(not(unix))]
+        {
+            let path = self.path.take().ok_or(GhostraceError::UnsafePath)?;
+            let result =
+                if force { path.persist(destination) } else { path.persist_noclobber(destination) };
+            if let Err(error) = result {
+                self.path = Some(error.path);
+                if error.error.kind() == ErrorKind::AlreadyExists {
+                    return Err(GhostraceError::ExportExists(destination.to_path_buf()));
+                }
+                return Err(io_error(destination, error.error));
+            }
+            set_file_mode_handle(destination, &self.file)?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+fn stat_at(
+    directory_fd: std::os::fd::RawFd,
+    name: &std::ffi::CStr,
+    path: &Path,
+) -> Result<Option<libc::stat>, GhostraceError> {
+    // SAFETY: the stat buffer is fully initialized by successful fstatat;
+    // name is NUL-terminated and the descriptor remains owned by the caller.
+    let mut stat = unsafe { std::mem::zeroed::<libc::stat>() };
+    if unsafe { libc::fstatat(directory_fd, name.as_ptr(), &mut stat, libc::AT_SYMLINK_NOFOLLOW) }
+        == 0
+    {
+        return Ok(Some(stat));
+    }
+    let error = std::io::Error::last_os_error();
+    if error.kind() == ErrorKind::NotFound {
+        return Ok(None);
+    }
+    Err(io_error(path, error))
+}
+
+#[cfg(unix)]
+#[allow(clippy::unnecessary_cast)] // libc's stat integer widths vary across Unix targets.
+fn stat_identity(stat: &libc::stat) -> FileIdentity {
+    FileIdentity { device: stat.st_dev as u64, inode: stat.st_ino as u64 }
+}
+
+impl Drop for ArtifactTemporary<'_> {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        if let Some(name) = self.name.as_ref() {
+            use std::os::fd::AsRawFd;
+            // Do not remove a replacement entry another actor supplied.
+            if let (Ok(Some(named)), Ok(metadata)) = (
+                stat_at(self.directory.file.as_raw_fd(), name, &self.directory.path),
+                self.file.metadata(),
+            ) {
+                if stat_identity(&named) == file_identity(&metadata) {
+                    // SAFETY: name and the pinned directory descriptor are live.
+                    unsafe {
+                        libc::unlinkat(self.directory.file.as_raw_fd(), name.as_ptr(), 0);
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Return whether an existing artifact is safe, refusing symlinks, non-regular
 /// files, unexpected owners, hard links, and non-private modes.
 pub(crate) fn validate_existing_artifact(path: &Path) -> Result<bool, GhostraceError> {
@@ -184,29 +625,6 @@ pub(crate) fn validate_existing_artifact_for_overwrite(
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
         Err(error) => Err(io_error(path, error)),
     }
-}
-
-/// Force an artifact to mode 0600 and verify its complete metadata contract.
-pub(crate) fn set_private_file_permissions(path: &Path) -> Result<(), GhostraceError> {
-    set_file_mode(path)?;
-    verify_private_file(path).map(|_| ())
-}
-
-/// Flush directory metadata after an atomic artifact rename.  A successful
-/// rename makes the new name visible; syncing the containing directory also
-/// makes that name durable across a power loss on filesystems that support
-/// directory fsync (including macOS and other Unix targets).
-pub(crate) fn sync_directory(path: &Path) -> Result<(), GhostraceError> {
-    #[cfg(unix)]
-    {
-        File::open(path)
-            .map_err(|source| io_error(path, source))?
-            .sync_all()
-            .map_err(|source| io_error(path, source))?;
-    }
-    #[cfg(not(unix))]
-    let _ = path;
-    Ok(())
 }
 
 /// Verify the database and all known SQLite sidecars after migration or a
@@ -499,6 +917,7 @@ fn set_directory_mode(path: &Path) -> Result<(), GhostraceError> {
     Ok(())
 }
 
+#[cfg(test)]
 fn set_file_mode(path: &Path) -> Result<(), GhostraceError> {
     #[cfg(unix)]
     {
@@ -599,6 +1018,7 @@ mod test_hooks {
 
     thread_local! {
         static OPEN_HOOK: RefCell<Option<Hook>> = const { RefCell::new(None) };
+        static PUBLISH_HOOK: RefCell<Option<Hook>> = const { RefCell::new(None) };
     }
 
     pub(super) fn install(hook: Hook) {
@@ -610,11 +1030,31 @@ mod test_hooks {
     pub(super) fn take() -> Option<Hook> {
         OPEN_HOOK.with(|slot| slot.borrow_mut().take())
     }
+
+    pub(super) fn install_publish(hook: Hook) {
+        PUBLISH_HOOK.with(|slot| {
+            assert!(slot.borrow_mut().replace(hook).is_none(), "test hook already installed");
+        });
+    }
+
+    pub(super) fn take_publish() -> Option<Hook> {
+        PUBLISH_HOOK.with(|slot| slot.borrow_mut().take())
+    }
 }
 
 fn run_test_open_hook(path: &Path) {
     #[cfg(test)]
     if let Some(hook) = test_hooks::take() {
+        hook(path);
+    }
+    #[cfg(not(test))]
+    let _ = path;
+}
+
+#[cfg(unix)]
+fn run_test_publish_hook(path: &Path) {
+    #[cfg(test)]
+    if let Some(hook) = test_hooks::take_publish() {
         hook(path);
     }
     #[cfg(not(test))]
@@ -635,6 +1075,27 @@ mod tests {
     fn private(path: &Path) {
         fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_DIRECTORY_MODE))
             .expect("private mode");
+    }
+
+    #[test]
+    fn export_reserves_wal_and_shm_names_before_they_exist() {
+        let directory = tempdir().expect("directory");
+        private(directory.path());
+        let source = directory.path().join("journal.sqlite3");
+        let connection = open_database(&source).expect("database");
+        connection.execute_batch("CREATE TABLE original(value TEXT)").expect("schema");
+        drop(connection);
+        let before = fs::read(&source).expect("source bytes");
+        for name in ["journal.sqlite3-wal", "journal.sqlite3-shm"] {
+            let output = directory.path().join(name);
+            assert!(!output.exists());
+            assert!(matches!(
+                refuse_database_artifact_destination(&source, &output),
+                Err(GhostraceError::ExportSourceConflict)
+            ));
+            assert!(!output.exists());
+        }
+        assert_eq!(fs::read(&source).expect("source bytes"), before);
     }
 
     #[test]
@@ -752,15 +1213,188 @@ mod tests {
 
     #[test]
     fn private_artifact_modes_are_exact() {
+        use std::io::Write;
+
         let root = tempdir().expect("root");
         private(root.path());
         let artifact = root.path().join("artifact");
-        fs::write(&artifact, b"secret").expect("artifact");
-        set_private_file_permissions(&artifact).expect("set private artifact");
+        let directory = ArtifactDirectory::open(root.path()).expect("artifact directory");
+        let mut temporary = directory
+            .temporary(".ghostrace-export-incomplete-", false)
+            .expect("temporary artifact");
+        temporary.as_file_mut().write_all(b"secret").expect("artifact bytes");
+        assert_eq!(
+            file_mode(&temporary.as_file().metadata().expect("temporary metadata")),
+            PRIVATE_FILE_MODE
+        );
+        temporary.publish(&artifact, false).expect("publish artifact");
         assert_eq!(
             file_mode(&fs::symlink_metadata(&artifact).expect("metadata")),
             PRIVATE_FILE_MODE
         );
+    }
+
+    #[test]
+    fn artifact_publication_stays_in_pinned_directory_after_the_final_recheck() {
+        use std::io::Write;
+
+        for force in [false, true] {
+            let root = tempdir().expect("root");
+            let root_path = fs::canonicalize(root.path()).expect("canonical root");
+            let original = root_path.join("exports");
+            let moved = root_path.join("moved-exports");
+            let outside = root_path.join("journal");
+            fs::create_dir(&original).expect("export directory");
+            fs::create_dir(&outside).expect("journal directory");
+            let source = outside.join("journal.sqlite3");
+            fs::write(&source, b"original journal bytes").expect("source");
+            set_file_mode(&source).expect("source mode");
+            let destination = original.join("journal.sqlite3");
+            if force {
+                fs::write(&destination, b"previous export").expect("old destination");
+                set_file_mode(&destination).expect("old destination mode");
+            }
+            let directory = ArtifactDirectory::open(&original).expect("artifact directory");
+            let mut temporary = directory
+                .temporary(".ghostrace-export-incomplete-", false)
+                .expect("temporary artifact");
+            temporary.as_file_mut().write_all(b"complete export").expect("export bytes");
+            temporary.as_file().sync_all().expect("flush export");
+            let moved_for_hook = moved.clone();
+            let original_for_hook = original.clone();
+            let outside_for_hook = outside.clone();
+            // Replace the namespace after every prepublication check. A final
+            // path-based rename would overwrite the journal in this window.
+            test_hooks::install_publish(Box::new(move |_| {
+                fs::rename(&original_for_hook, &moved_for_hook).expect("move original parent");
+                symlink(&outside_for_hook, &original_for_hook).expect("redirect parent");
+            }));
+            temporary.publish(&destination, force).expect("publish in pinned directory");
+            drop(temporary);
+            assert_eq!(fs::read(&source).expect("source bytes"), b"original journal bytes");
+            let published = moved.join("journal.sqlite3");
+            assert_eq!(fs::read(&published).expect("published bytes"), b"complete export");
+            assert_eq!(
+                file_mode(&fs::metadata(published).expect("published metadata")),
+                PRIVATE_FILE_MODE
+            );
+            assert_eq!(fs::read_dir(&moved).expect("original parent entries").count(), 1);
+            fs::remove_file(&original).expect("remove replacement symlink");
+        }
+    }
+
+    #[test]
+    fn artifact_refusal_cleans_named_spool_in_the_moved_original_directory() {
+        use std::io::Write;
+
+        let root = tempdir().expect("root");
+        let root_path = fs::canonicalize(root.path()).expect("canonical root");
+        let original = root_path.join("exports");
+        let moved = root_path.join("moved-exports");
+        let outside = root_path.join("other");
+        fs::create_dir(&original).expect("export directory");
+        fs::create_dir(&outside).expect("outside directory");
+        let directory = ArtifactDirectory::open(&original).expect("artifact directory");
+        let mut temporary = directory
+            .temporary(".ghostrace-export-incomplete-", false)
+            .expect("temporary artifact");
+        temporary.as_file_mut().write_all(b"private export").expect("export bytes");
+        fs::rename(&original, &moved).expect("move original parent");
+        symlink(&outside, &original).expect("redirect parent");
+        assert!(matches!(
+            temporary.publish(&original.join("export.jsonl"), true),
+            Err(GhostraceError::PathRace)
+        ));
+        drop(temporary);
+        assert_eq!(fs::read_dir(&moved).expect("original parent entries").count(), 0);
+        assert_eq!(fs::read_dir(&outside).expect("outside entries").count(), 0);
+        fs::remove_file(&original).expect("remove replacement symlink");
+    }
+
+    #[test]
+    fn artifact_noclobber_preserves_destination_created_after_the_final_check() {
+        use std::io::Write;
+
+        let root = tempdir().expect("root");
+        let directory = ArtifactDirectory::open(root.path()).expect("artifact directory");
+        let mut temporary = directory
+            .temporary(".ghostrace-export-incomplete-", false)
+            .expect("temporary artifact");
+        temporary.as_file_mut().write_all(b"complete export").expect("export bytes");
+        let destination = root.path().join("export.jsonl");
+        test_hooks::install_publish(Box::new(|path| {
+            fs::write(path, b"another actor's file").expect("late destination");
+            set_file_mode(path).expect("late destination mode");
+        }));
+        assert!(matches!(
+            temporary.publish(&destination, false),
+            Err(GhostraceError::ExportExists(_))
+        ));
+        drop(temporary);
+        assert_eq!(fs::read(destination).expect("destination bytes"), b"another actor's file");
+        assert_eq!(fs::read_dir(root.path()).expect("directory entries").count(), 1);
+    }
+
+    #[test]
+    fn artifact_publication_rejects_a_swapped_validated_spool() {
+        use std::{io::Write, os::unix::ffi::OsStrExt};
+
+        for force in [false, true] {
+            let root = tempdir().expect("root");
+            let directory = ArtifactDirectory::open(root.path()).expect("artifact directory");
+            let mut temporary = directory
+                .temporary(".ghostrace-export-incomplete-final-", false)
+                .expect("temporary artifact");
+            temporary.as_file_mut().write_all(b"validated export").expect("export bytes");
+            let temporary_path = root.path().join(std::ffi::OsStr::from_bytes(
+                temporary.name.as_ref().expect("temporary name").to_bytes(),
+            ));
+            let saved = root.path().join("saved-validated-spool");
+            let destination = root.path().join("export.jsonl");
+            if force {
+                fs::write(&destination, b"old export").expect("old destination");
+                set_file_mode(&destination).expect("old destination mode");
+            }
+            let saved_for_hook = saved.clone();
+            test_hooks::install_publish(Box::new(move |_| {
+                fs::rename(&temporary_path, &saved_for_hook).expect("move validated spool");
+                fs::write(&temporary_path, b"unvalidated replacement").expect("replace spool name");
+                set_file_mode(&temporary_path).expect("replacement mode");
+            }));
+            let result = temporary.publish(&destination, force);
+            assert!(
+                matches!(result, Err(GhostraceError::PathRace)),
+                "publishing another inode must never report success, got {result:?}"
+            );
+            drop(temporary);
+            assert_eq!(fs::read(saved).expect("retained inode bytes"), b"validated export");
+            assert_eq!(
+                fs::read(destination).expect("replacement bytes"),
+                b"unvalidated replacement"
+            );
+            assert!(fs::read_dir(root.path()).expect("directory entries").all(|entry| !entry
+                .expect("entry")
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".ghostrace-export-incomplete-")));
+        }
+    }
+
+    #[test]
+    fn anonymous_artifact_spool_has_no_directory_entry() {
+        use std::io::{Read, Seek, Write};
+
+        let root = tempdir().expect("root");
+        let directory = ArtifactDirectory::open(root.path()).expect("artifact directory");
+        let mut body = directory
+            .temporary(".ghostrace-export-incomplete-body-", true)
+            .expect("anonymous body spool");
+        body.as_file_mut().write_all(b"private body").expect("body bytes");
+        assert_eq!(fs::read_dir(root.path()).expect("spool directory").count(), 0);
+        body.as_file_mut().rewind().expect("rewind body");
+        let mut bytes = Vec::new();
+        body.as_file_mut().read_to_end(&mut bytes).expect("retained body handle");
+        assert_eq!(bytes, b"private body");
     }
 
     #[test]

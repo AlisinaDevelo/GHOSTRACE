@@ -3,7 +3,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::File,
-    io::{BufRead, BufReader, BufWriter, ErrorKind, Read, Write},
+    io::{BufReader, BufWriter, ErrorKind, Read, Seek, Write},
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -14,7 +14,6 @@ use std::{
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tempfile::Builder as TempFileBuilder;
 use uuid::Uuid;
 
 use crate::{
@@ -443,8 +442,8 @@ pub fn preview_export(
     output_path: impl AsRef<Path>,
 ) -> Result<ExportPreview, GhostraceError> {
     let output_path = output_path.as_ref();
-    if journal.path().is_some_and(|journal_path| journal_path == output_path) {
-        return Err(GhostraceError::ExportSourceConflict);
+    if let Some(journal_path) = journal.path() {
+        storage::refuse_database_artifact_destination(journal_path, output_path)?;
     }
     let destination_class = destination_class(output_path, request.force)?;
     let plan = ExportPlan::build(policy, request, destination_class)?;
@@ -483,8 +482,8 @@ pub fn export_journal_with_confirmation(
     policy: &PolicyProfile,
 ) -> Result<ExportResult, GhostraceError> {
     let output_path = output_path.as_ref();
-    if journal.path().is_some_and(|journal_path| journal_path == output_path) {
-        return Err(GhostraceError::ExportSourceConflict);
+    if let Some(journal_path) = journal.path() {
+        storage::refuse_database_artifact_destination(journal_path, output_path)?;
     }
     let request = ExportRequest {
         query: confirmation.preview.plan.query.clone(),
@@ -513,7 +512,7 @@ pub fn export_journal_with_confirmation(
         schema_version: EXPORT_PREVIEW_SCHEMA_VERSION,
         plan_digest: confirmation.preview.plan_digest,
         snapshot_digest: confirmation.preview.snapshot_digest,
-        manifest_digest: manifest_digest(output_path)?,
+        manifest_digest: manifest_digest(&manifest)?,
         destination_class: current_plan.destination_class,
         policy_profile_id: current_plan.policy_profile_id,
         policy_profile_version: current_plan.policy_profile_version,
@@ -567,9 +566,11 @@ fn export_journal_inner(
     query: Option<&ExportQuery>,
     expected_snapshot_digest: Option<&SnapshotDigest>,
 ) -> Result<ExportManifest, GhostraceError> {
-    if journal.path().is_some_and(|journal_path| journal_path == output_path) {
-        return Err(GhostraceError::ExportSourceConflict);
+    if let Some(journal_path) = journal.path() {
+        storage::refuse_database_artifact_destination(journal_path, output_path)?;
     }
+    let source_artifacts =
+        journal.path().map(storage::DatabaseArtifactIdentities::capture).transpose()?;
     let mut run = ExportRun {
         output_path,
         cancellation,
@@ -591,15 +592,14 @@ fn export_journal_inner(
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    storage::ensure_artifact_parent(parent)?;
+    let directory = storage::ArtifactDirectory::open(parent)?;
+    if let Some(journal_path) = journal.path() {
+        storage::refuse_database_artifact_destination(journal_path, output_path)?;
+    }
 
     // Pass one decrypts and serializes one event at a time. Only the private
     // spool and bounded per-record buffer survive this pass.
-    let mut body_temporary = TempFileBuilder::new()
-        .prefix(".ghostrace-export-incomplete-body-")
-        .tempfile_in(parent)
-        .map_err(|source| GhostraceError::Io { path: parent.to_path_buf(), source })?;
-    storage::set_private_file_permissions(body_temporary.path())?;
+    let mut body_temporary = directory.temporary(".ghostrace-export-incomplete-body-", true)?;
     let mut stats = ExportStats::default();
     let mut snapshot = SnapshotAccumulator::default();
     {
@@ -642,15 +642,15 @@ fn export_journal_inner(
     // Pass two places the now-known manifest before copying the private body
     // spool in bounded chunks. The destination remains absent or unchanged
     // until this temporary file is flushed and atomically renamed.
-    let mut temporary = TempFileBuilder::new()
-        .prefix(".ghostrace-export-incomplete-final-")
-        .tempfile_in(parent)
-        .map_err(|source| GhostraceError::Io { path: parent.to_path_buf(), source })?;
-    storage::set_private_file_permissions(temporary.path())?;
+    let mut temporary = directory.temporary(".ghostrace-export-incomplete-final-", false)?;
+    body_temporary
+        .as_file_mut()
+        .rewind()
+        .map_err(|source| GhostraceError::Io { path: output_path.to_path_buf(), source })?;
     {
         let mut writer = BufWriter::with_capacity(EXPORT_BUFFER_BYTES, temporary.as_file_mut());
         write_jsonl(&mut run, &mut writer, &manifest)?;
-        copy_body(&mut run, body_temporary.path(), &mut writer)?;
+        copy_body(&mut run, body_temporary.as_file_mut(), &mut writer)?;
         writer
             .flush()
             .map_err(|source| GhostraceError::Io { path: output_path.to_path_buf(), source })?;
@@ -662,31 +662,20 @@ fn export_journal_inner(
     // Validate the complete temporary artifact before the rename. This keeps
     // an internal serializer or digest regression from ever publishing a
     // destination that merely looks complete because it has a manifest line.
-    crate::export_schema::validate_export(temporary.path())?;
+    temporary
+        .as_file_mut()
+        .rewind()
+        .map_err(|source| GhostraceError::Io { path: output_path.to_path_buf(), source })?;
+    crate::export_schema::validate_export_reader(temporary.as_file_mut(), output_path)?;
     run.check_cancelled()?;
-
-    if force {
-        temporary.persist(output_path).map_err(|error| GhostraceError::Io {
-            path: output_path.to_path_buf(),
-            source: error.error,
-        })?;
-    } else {
-        match temporary.persist_noclobber(output_path) {
-            Ok(_) => {}
-            Err(error) if error.error.kind() == ErrorKind::AlreadyExists => {
-                return Err(GhostraceError::ExportExists(output_path.to_path_buf()));
-            }
-            Err(error) => {
-                return Err(GhostraceError::Io {
-                    path: output_path.to_path_buf(),
-                    source: error.error,
-                });
-            }
-        }
+    directory.revalidate()?;
+    if let Some(source_artifacts) = &source_artifacts {
+        source_artifacts.refuse_destination(output_path)?;
     }
-    storage::set_private_file_permissions(output_path)?;
-    storage::sync_directory(parent)?;
-    crate::export_schema::validate_export(output_path)?;
+    if let Some(journal_path) = journal.path() {
+        storage::refuse_database_artifact_destination(journal_path, output_path)?;
+    }
+    temporary.publish(output_path, force)?;
     Ok(manifest)
 }
 
@@ -707,18 +696,16 @@ fn write_jsonl<T: Serialize>(
 
 fn copy_body(
     run: &mut ExportRun<'_>,
-    body_path: &Path,
+    body: &mut File,
     writer: &mut impl Write,
 ) -> Result<(), GhostraceError> {
-    let file = File::open(body_path)
-        .map_err(|source| GhostraceError::Io { path: body_path.to_path_buf(), source })?;
-    let mut reader = BufReader::with_capacity(EXPORT_BUFFER_BYTES, file);
+    let mut reader = BufReader::with_capacity(EXPORT_BUFFER_BYTES, body);
     let mut buffer = [0_u8; EXPORT_BUFFER_BYTES];
     loop {
         run.check_cancelled()?;
         let bytes = reader
             .read(&mut buffer)
-            .map_err(|source| GhostraceError::Io { path: body_path.to_path_buf(), source })?;
+            .map_err(|source| GhostraceError::Io { path: run.output_path.to_path_buf(), source })?;
         if bytes == 0 {
             break;
         }
@@ -974,19 +961,11 @@ fn snapshot_digest_from_hash(bytes: &[u8]) -> Result<SnapshotDigest, GhostraceEr
     SnapshotDigest::try_from(format!("sha256:{}", hex_digest(bytes)))
 }
 
-fn manifest_digest(path: &Path) -> Result<SnapshotDigest, GhostraceError> {
-    let file = File::open(path)
-        .map_err(|source| GhostraceError::Io { path: path.to_path_buf(), source })?;
-    let mut reader = BufReader::with_capacity(EXPORT_BUFFER_BYTES, file);
-    let mut line = Vec::new();
-    let bytes = reader
-        .read_until(b'\n', &mut line)
-        .map_err(|source| GhostraceError::Io { path: path.to_path_buf(), source })?;
-    if bytes == 0 || !line.ends_with(b"\n") {
-        return Err(GhostraceError::ExportInvalid(
-            "published export has no complete manifest line".to_owned(),
-        ));
-    }
+fn manifest_digest(manifest: &ExportManifest) -> Result<SnapshotDigest, GhostraceError> {
+    // The receipt describes the manifest we published without reopening a
+    // destination path that another actor may have redirected or replaced.
+    let mut line = serde_json::to_vec(manifest)?;
+    line.push(b'\n');
     digest_as_snapshot(&line)
 }
 
