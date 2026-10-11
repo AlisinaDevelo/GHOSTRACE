@@ -58,6 +58,7 @@ fn hello_for(record: &PairingRecord, extension_id: &str, key_digest: &str) -> Ve
         extension_key_digest: key_digest.to_owned(),
         permissions_digest: PERMISSIONS_DIGEST.to_owned(),
         client_nonce: encode_hex(&CLIENT_NONCE),
+        resume_receipt: None,
     })
     .expect("hello serializes")
 }
@@ -188,11 +189,19 @@ fn open_bridge<S: NativeBridgeSink>(
     record: &PairingRecord,
     wall_clock: DateTime<Utc>,
 ) -> (NativeBridge<S>, PairedSession) {
+    open_bridge_with_hello(store, sink, record, wall_clock, &hello(record, KEY_DIGEST))
+}
+
+fn open_bridge_with_hello<S: NativeBridgeSink>(
+    store: PairingStore,
+    sink: S,
+    record: &PairingRecord,
+    wall_clock: DateTime<Utc>,
+    hello: &[u8],
+) -> (NativeBridge<S>, PairedSession) {
     let mut bridge = NativeBridge::new(store, sink, UrlShapePolicy::OriginOnly, CALLER_ORIGIN)
         .expect("bridge opens");
-    let welcome = bridge
-        .receive(&hello(record, KEY_DIGEST), Duration::ZERO, wall_clock)
-        .expect("hello admitted");
+    let welcome = bridge.receive(hello, Duration::ZERO, wall_clock).expect("hello admitted");
     let BridgeOutput::Reply(HostMessage::Welcome { host_nonce, .. }) = welcome else {
         panic!("expected welcome")
     };
@@ -204,6 +213,132 @@ fn open_bridge<S: NativeBridgeSink>(
     let session =
         PairedSession::derive(&record.secret_for_extension(), &host_nonce_bytes, &CLIENT_NONCE);
     (bridge, session)
+}
+
+fn resume_hello(record: &PairingRecord, client_nonce: &[u8; 32], receipt: &str) -> Vec<u8> {
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&hello(record, KEY_DIGEST)).expect("hello JSON");
+    value["client_nonce"] = serde_json::Value::String(encode_hex(client_nonce));
+    value["resume_receipt"] = serde_json::Value::String(receipt.to_owned());
+    serde_json::to_vec(&value).expect("resumed hello JSON")
+}
+
+#[test]
+fn resume_receipts_refuse_tampering_pairing_nonce_and_extension_key_forgery() {
+    let directory = TempDir::new().expect("temp directory");
+    let store = PairingStore::open(directory.path()).expect("pairing store");
+    let now = Utc::now();
+    let approval = store.approve(request(), now).expect("approval");
+    let record = store.get(approval.view.pairing_id).expect("lookup").expect("record");
+    let other = store.approve(request(), now).expect("other approval");
+    let other_record = store.get(other.view.pairing_id).expect("lookup").expect("other record");
+    let (mut bridge, extension) = open_bridge(store, RecordingSink::default(), &record, now);
+    let recorded = bridge
+        .receive(
+            &signed(&extension, navigation(2, "https://example.com/")),
+            Duration::from_secs(1),
+            now,
+        )
+        .expect("durable navigation");
+    let BridgeOutput::Recorded { resume_receipt, .. } = recorded else {
+        panic!("expected durable receipt")
+    };
+    drop(bridge);
+
+    let mut changed = resume_receipt.clone().into_bytes();
+    changed[81] = if changed[81] == b'0' { b'1' } else { b'0' };
+    let changed = String::from_utf8(changed).expect("ASCII receipt");
+    let mut transcript = b"ghostrace-native-processed-resume-v1\0".to_vec();
+    transcript.push(1);
+    transcript.extend_from_slice(record.pairing_id.as_bytes());
+    transcript.extend_from_slice(&CLIENT_NONCE);
+    transcript.extend_from_slice(&99_u64.to_be_bytes());
+    let guessed_key = ghostrace::hmac_sha256_for_test(
+        &record.secret_for_extension(),
+        b"ghostrace-native-resume-key-v1\0",
+    );
+    let mut forged = vec![1_u8];
+    forged.extend_from_slice(&99_u64.to_be_bytes());
+    forged.extend_from_slice(&ghostrace::hmac_sha256_for_test(&guessed_key, &transcript));
+    let forged = encode_hex(&forged);
+    for message in [
+        resume_hello(&record, &CLIENT_NONCE, &changed),
+        resume_hello(&record, &CLIENT_NONCE, &forged),
+        resume_hello(&other_record, &CLIENT_NONCE, &resume_receipt),
+        resume_hello(&record, &[0x77; 32], &resume_receipt),
+        resume_hello(&record, &CLIENT_NONCE, "untrusted-cursor"),
+    ] {
+        let mut restarted = NativeBridge::new(
+            PairingStore::open(directory.path()).expect("restarted store"),
+            RecordingSink::default(),
+            UrlShapePolicy::OriginOnly,
+            CALLER_ORIGIN,
+        )
+        .expect("restarted bridge");
+        assert!(
+            matches!(
+                restarted.receive(&message, Duration::ZERO, now),
+                Err(NativeBridgeError::Session(ghostrace::NativeSessionError::Pairing(
+                    ghostrace::PairingError::BadMac
+                )))
+            ),
+            "an invalid receipt must not authorize a cursor"
+        );
+    }
+
+    let resumed = resume_hello(&record, &CLIENT_NONCE, &resume_receipt);
+    let mut standalone = NativeHostSession::new(UrlShapePolicy::OriginOnly);
+    assert!(
+        standalone.receive(&resumed, Duration::ZERO, now, |_| Some(record.clone())).is_err(),
+        "the standalone session has no host receipt verification capability"
+    );
+    let (mut restarted, _) = open_bridge_with_hello(
+        PairingStore::open(directory.path()).expect("restarted store"),
+        RecordingSink::default(),
+        &record,
+        now,
+        &resumed,
+    );
+    let old_transcript = signed(&extension, navigation(3, "https://example.org/"));
+    assert!(
+        matches!(
+            restarted.receive(&old_transcript, Duration::from_secs(1), now),
+            Err(NativeBridgeError::Session(ghostrace::NativeSessionError::Unauthenticated))
+        ),
+        "a resumed cursor must not make a previous session MAC valid"
+    );
+
+    let mut expired = NativeBridge::new(
+        PairingStore::open(directory.path()).expect("expired store"),
+        RecordingSink::default(),
+        UrlShapePolicy::OriginOnly,
+        CALLER_ORIGIN,
+    )
+    .expect("expired bridge");
+    assert!(
+        matches!(
+            expired.receive(&resumed, Duration::ZERO, record.expires_at),
+            Err(NativeBridgeError::Session(ghostrace::NativeSessionError::Pairing(
+                ghostrace::PairingError::RePairingRequired
+            )))
+        ),
+        "a valid receipt cannot extend pairing expiry"
+    );
+
+    PairingStore::open(directory.path()).expect("store").revoke(record.pairing_id).expect("revoke");
+    let mut revoked = NativeBridge::new(
+        PairingStore::open(directory.path()).expect("revoked store"),
+        RecordingSink::default(),
+        UrlShapePolicy::OriginOnly,
+        CALLER_ORIGIN,
+    )
+    .expect("revoked bridge");
+    assert!(matches!(
+        revoked.receive(&resumed, Duration::ZERO, now),
+        Err(NativeBridgeError::Session(ghostrace::NativeSessionError::Pairing(
+            ghostrace::PairingError::Revoked
+        )))
+    ));
 }
 
 #[test]
@@ -528,13 +663,14 @@ fn private_context_is_refused_before_local_service_admission() {
     let output = bridge
         .receive(&signed(&extension, private), Duration::from_secs(1), now)
         .expect("private refusal is a protocol result");
-    assert_eq!(
+    assert!(matches!(
         output,
         BridgeOutput::NavigationRefused {
             refusal: ghostrace::NavigationRefusal::PrivateContext,
             missing: 0,
+            ..
         }
-    );
+    ));
     assert!(admissions.lock().expect("sink lock").is_empty());
 }
 
@@ -790,7 +926,12 @@ fn assert_stdio_trailing_input(max_read: usize, trailing: Vec<u8>, after_closed:
         trailing_output.extend_from_slice(&body);
     }
     input_writer.write_all(&trailing).expect("send trailing frame");
-    input_writer.shutdown(std::net::Shutdown::Write).expect("close input");
+    if let Err(error) = input_writer.shutdown(std::net::Shutdown::Write) {
+        // The runner can reject trailing bytes and drop its peer before this
+        // close. macOS then reports ENOTCONN; the runner/output assertions
+        // below still prove the rejection. Every other shutdown error fails.
+        assert_eq!(error.raw_os_error(), Some(libc::ENOTCONN), "close input: {error}");
+    }
 
     assert_eq!(
         runner.join().expect("runner join"),
@@ -916,6 +1057,190 @@ fn service_retries_return_the_durable_receipt_without_duplicate_gap_or_navigatio
     let events = journal.events().expect("events");
     assert_eq!(events.len(), 2, "conflicting retry did not append anything");
     assert_eq!(events[1].event.event_id, event_id);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn reconnect_retries_a_later_uncertain_navigation_without_inventing_a_gap() {
+    struct ServiceSink {
+        handler: Arc<BrowserIngestService>,
+        instance: uuid::Uuid,
+        lose_once: Arc<std::sync::atomic::AtomicBool>,
+        commit_before_loss: bool,
+        uncertain_sequence: u64,
+    }
+    impl NativeBridgeSink for ServiceSink {
+        fn service_instance(&self) -> uuid::Uuid {
+            self.instance
+        }
+        fn ingest_browser_navigation(
+            &self,
+            request_id: uuid::Uuid,
+            relay: BrowserNavigationRelay,
+        ) -> Result<BrowserNavigationAck, NativeBridgeError> {
+            let lose = relay.proof.sequence == self.uncertain_sequence
+                && self.lose_once.swap(false, std::sync::atomic::Ordering::SeqCst);
+            if lose && !self.commit_before_loss {
+                return Err(NativeBridgeError::JournalUncertain);
+            }
+            let request = browser_navigation_request(self.instance, request_id, 5_000, relay)
+                .expect("relay request");
+            let result = self.handler.handle(&request).map_err(|_| NativeBridgeError::Journal)?;
+            if lose {
+                return Err(NativeBridgeError::JournalUncertain);
+            }
+            serde_json::from_value(result).map_err(|_| NativeBridgeError::State)
+        }
+    }
+
+    // Stop-and-wait retains the latest successful reply receipt, including
+    // acknowledged controls that intentionally produce no journal event.
+    for (commit_before_loss, control, skip_sequence) in [
+        (true, 0, false),
+        (false, 0, false),
+        (true, 1, false),
+        (false, 1, false),
+        (true, 2, false),
+        (false, 2, false),
+        (true, 0, true),
+        (false, 0, true),
+        (true, 1, true),
+        (false, 1, true),
+        (true, 2, true),
+        (false, 2, true),
+    ] {
+        let uncertain_sequence = if control == 0 { 3 } else { 4 } + u64::from(skip_sequence);
+        let directory = TempDir::new().expect("temp directory");
+        let pairing_directory = directory.path().join("pairings");
+        let store = PairingStore::open(&pairing_directory).expect("pairing store");
+        let approval = store.approve(request(), Utc::now()).expect("pairing approval");
+        let record = store.get(approval.view.pairing_id).expect("lookup").expect("record");
+        let journal = Journal::in_memory(DeterministicKeyProvider::from_seed("reconnect-retry"))
+            .expect("journal");
+        let handler = Arc::new(
+            BrowserIngestService::new_with_pairing_store(
+                journal.clone(),
+                browser_service_policy(),
+                PairingStore::open(&pairing_directory).expect("service pairing store"),
+            )
+            .expect("handler"),
+        );
+        let instance = uuid::Uuid::new_v4();
+        let lose_once = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let make_sink = || ServiceSink {
+            handler: Arc::clone(&handler),
+            instance,
+            lose_once: Arc::clone(&lose_once),
+            commit_before_loss,
+            uncertain_sequence,
+        };
+        let now = Utc::now();
+        let (mut bridge, extension) = open_bridge(store, make_sink(), &record, now);
+        let first = bridge
+            .receive(
+                &signed(&extension, navigation(2, "https://example.com/")),
+                Duration::from_secs(1),
+                now,
+            )
+            .expect("first durable navigation");
+        let BridgeOutput::Recorded { missing: 0, mut resume_receipt, .. } = first else {
+            panic!("first navigation must have a durable resume receipt")
+        };
+        if control != 0 {
+            let control_message = if control == 1 {
+                ExtensionMessage::Heartbeat { seq: 3, mac: String::new() }
+            } else {
+                ExtensionMessage::Navigation {
+                    seq: 3,
+                    url: "https://private.example/SENTINEL?token=SENTINEL".to_owned(),
+                    private_context: true,
+                    transition: ghostrace::NavigationTransition::Committed,
+                    mac: String::new(),
+                }
+            };
+            let output = bridge
+                .receive(&signed(&extension, control_message), Duration::from_millis(1_500), now)
+                .expect("control is authenticated and processed");
+            resume_receipt = match output {
+                BridgeOutput::Heartbeat { missing: 0, resume_receipt }
+                | BridgeOutput::NavigationRefused { missing: 0, resume_receipt, .. } => {
+                    resume_receipt
+                }
+                other => panic!("expected a successfully processed control, got {other:?}"),
+            };
+        }
+        assert_eq!(
+            bridge.receive(
+                &signed(&extension, navigation(uncertain_sequence, "https://example.org/")),
+                Duration::from_secs(2),
+                now,
+            ),
+            Err(NativeBridgeError::JournalUncertain)
+        );
+        drop(bridge);
+        let resumed_hello = resume_hello(&record, &CLIENT_NONCE, &resume_receipt);
+        let (mut restarted, extension) = open_bridge_with_hello(
+            PairingStore::open(&pairing_directory).expect("restarted pairing store"),
+            make_sink(),
+            &record,
+            now,
+            &resumed_hello,
+        );
+        let retry = restarted
+            .receive(
+                &signed(&extension, navigation(uncertain_sequence, "https://example.org/")),
+                Duration::from_secs(1),
+                now,
+            )
+            .expect("uncertain delivery recovers after reconnect");
+        let BridgeOutput::Recorded { missing, .. } = retry else {
+            panic!("retry must recover its durable receipt")
+        };
+        assert_eq!(missing, if skip_sequence { 1 } else { 0 });
+        let events = journal.events().expect("journal events");
+        if skip_sequence {
+            assert_eq!(events.len(), 3, "the original real gap is recorded exactly once");
+            assert!(matches!(&events[1].event.payload,
+                EventPayload::Gap(payload) if payload.dropped_count == 1));
+        } else {
+            assert_eq!(events.len(), 2, "retry preserves two navigations without adding a gap");
+            assert!(events.iter().all(|event| event.event.kind == EventKind::BrowserNavigation));
+        }
+        let retained = events.iter().map(|entry| &entry.event).collect::<Vec<_>>();
+        assert!(!serde_json::to_string(&retained).expect("journal JSON").contains("SENTINEL"));
+
+        if commit_before_loss && control == 0 && !skip_sequence {
+            // A client that ignores a newer successful reply and reuses a
+            // stale receipt violates stop-and-wait. The service must retain
+            // its conflicting-gap refusal instead of aliasing a receipt.
+            restarted
+                .receive(
+                    &signed(&extension, navigation(4, "https://example.net/")),
+                    Duration::from_secs(2),
+                    now,
+                )
+                .expect("next durable navigation");
+            drop(restarted);
+            let (mut stale, extension) = open_bridge_with_hello(
+                PairingStore::open(&pairing_directory).expect("stale store"),
+                make_sink(),
+                &record,
+                now,
+                &resumed_hello,
+            );
+            assert_eq!(
+                stale.receive(
+                    &signed(&extension, navigation(4, "https://example.net/")),
+                    Duration::from_secs(1),
+                    now,
+                ),
+                Err(NativeBridgeError::Journal)
+            );
+            let events = journal.events().expect("events after stale refusal");
+            assert_eq!(events.len(), 3, "stale resumption cannot add a fabricated gap");
+            assert!(events.iter().all(|entry| entry.event.kind == EventKind::BrowserNavigation));
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -1279,8 +1604,11 @@ fn production_binary_runs_the_full_chromium_bridge_to_a_durable_service_journal(
         .expect("send navigation");
     let accepted = read_host_message_until(&mut output, deadline);
     let event_id = match accepted {
-        HostMessage::Accepted { event_id, missing } => {
+        HostMessage::Accepted { event_id, missing, resume_receipt } => {
             assert_eq!(missing, 0);
+            let receipt = resume_receipt.expect("production acknowledgment carries a resume proof");
+            assert_eq!(receipt.len(), 82);
+            assert!(receipt.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')));
             event_id
         }
         other => panic!("expected accepted navigation, got {other:?}"),
@@ -1433,7 +1761,7 @@ fn production_binary_refuses_a_mismatched_hello_without_echoing_input() {
     drop(input);
     assert_eq!(
         read_host_message_until(&mut output, deadline),
-        HostMessage::Refused { reason: "not_paired".to_owned() }
+        HostMessage::Refused { reason: "not_paired".to_owned(), resume_receipt: None }
     );
     let trailing_output = read_to_end_until(&mut output, deadline, MAX_NATIVE_E2E_CAPTURE_BYTES);
     let mut diagnostics = child.process_mut().stderr.take().expect("native host stderr");

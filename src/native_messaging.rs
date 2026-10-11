@@ -26,7 +26,7 @@ pub const MAX_NATIVE_MESSAGE_DEPTH: usize = 8;
 /// Most JSON values (objects, arrays, scalars) accepted in one message.
 pub const MAX_NATIVE_MESSAGE_VALUES: usize = 256;
 /// Most fields accepted in one JSON object, including the tagged message type.
-pub const MAX_NATIVE_MESSAGE_FIELDS: usize = 8;
+pub const MAX_NATIVE_MESSAGE_FIELDS: usize = 9;
 /// Largest decoded string accepted in one message field.
 pub const MAX_NATIVE_MESSAGE_STRING_BYTES: usize = 8 * 1024;
 /// Total decoded string budget for one message, including object keys.
@@ -214,8 +214,8 @@ pub fn encode_frame(body: &[u8]) -> Result<Vec<u8>, NativeMessagingError> {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ExtensionMessage {
-    /// Opens a session; carries the pairing identity and a fresh client
-    /// nonce (64 lowercase hex characters).
+    /// Opens a session; carries the pairing identity and a delivery-stream
+    /// nonce (64 lowercase hex characters), retained across delivery retries.
     Hello {
         protocol_version: u32,
         seq: u64,
@@ -224,6 +224,10 @@ pub enum ExtensionMessage {
         extension_key_digest: String,
         permissions_digest: String,
         client_nonce: String,
+        /// Host-issued proof of a previously successfully processed sequence.
+        /// Only the bridge can verify it and authorize a resumed cursor.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resume_receipt: Option<String>,
     },
     /// Every message after `hello` carries `mac`, the hex HMAC over
     /// [`ExtensionMessage::mac_input`] under the session key.
@@ -654,6 +658,18 @@ impl ProtocolSession {
         body: &[u8],
         now: Duration,
     ) -> Result<SessionEvent, NativeMessagingError> {
+        self.receive_after_admission_with_resume(body, now, None)
+    }
+
+    /// The native bridge may resume only from a host-authenticated processed
+    /// receipt. This seam stays private to the crate so arbitrary callers of
+    /// the unauthenticated protocol parser cannot supply a cursor.
+    pub(crate) fn receive_after_admission_with_resume(
+        &mut self,
+        body: &[u8],
+        now: Duration,
+        resume_sequence: Option<u64>,
+    ) -> Result<SessionEvent, NativeMessagingError> {
         self.check_deadline(now)?;
         let message = parse_message(body)?;
         self.started_at.get_or_insert(now);
@@ -661,7 +677,7 @@ impl ProtocolSession {
         match (&self.state, &message) {
             (
                 SessionState::AwaitingHello,
-                ExtensionMessage::Hello { protocol_version, seq, .. },
+                ExtensionMessage::Hello { protocol_version, seq, resume_receipt, .. },
             ) => {
                 if *protocol_version != NATIVE_MESSAGING_PROTOCOL_VERSION {
                     self.state = SessionState::Closed;
@@ -670,7 +686,12 @@ impl ProtocolSession {
                 if *seq != 1 {
                     return Err(NativeMessagingError::Replay);
                 }
-                self.last_seq = 1;
+                if resume_receipt.is_some() != resume_sequence.is_some()
+                    || resume_sequence.is_some_and(|sequence| sequence < 2)
+                {
+                    return Err(NativeMessagingError::Replay);
+                }
+                self.last_seq = resume_sequence.unwrap_or(1);
                 self.state = SessionState::Open;
                 // Only a successfully admitted hello starts activity. A
                 // valid-but-rejected pre-hello frame must not slide the

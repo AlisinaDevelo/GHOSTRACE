@@ -1,0 +1,1 @@
+{"type":"hello","protocol_version":1,"seq":1,"pairing_id":"00000000-0000-4000-8000-000000000001","extension_id":"abcdefghijklmnopabcdefghijklmnop","extension_key_digest":"aa","permissions_digest":"bb","client_nonce":"cc","resume_receipt":"0100000000000000020000000000000000000000000000000000000000000000000000000000000000"}

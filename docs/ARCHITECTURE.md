@@ -1042,7 +1042,8 @@ event classes, retained fields, and the private-context policy. Approval creates
 redacted from `Debug`), a 90-day expiry, and a revocation flag.
 
 On connect the extension sends a `ClientHello` with its pairing ID, identity
-digests, and a fresh client nonce. A different extension ID or unknown pairing is
+digests, and a delivery nonce, fresh for a new stream and retained for retries.
+A different extension ID or unknown pairing is
 refused as not paired; a changed key digest (replaced or sideloaded extension), a
 changed permission digest, or an expired approval requires re-pairing; a revoked
 pairing is refused. An admitted session derives its key as HMAC-SHA256 of the
@@ -1138,6 +1139,37 @@ timestamps; a changed canonical payload, gap count, or policy is refused. The
 extension must retain its delivery nonce and sequence for retries and use a new
 nonce for a new delivery stream. Timeout/transport failures return the fixed
 `journal_uncertain` code because a transaction may already have committed.
+As specified in [ADR 0007](adr/0007-native-reconnect-recovery.md), every
+successfully processed navigation, heartbeat, or policy refusal also
+returns an opaque `resume_receipt`. A navigation receipt is issued only after
+the validated durable service acknowledgment; a control receipt proves only
+that its authenticated sequence was processed, and never claims journal
+persistence. Protocol, authentication, gap, and uncertain-delivery errors issue
+no receipt. The receipt is exactly 82 lowercase hex characters: a version byte,
+an eight-byte sequence, and a 32-byte HMAC. Its domain-separated MAC key derives
+from the host-only pairing-store key, independently of the credential given to
+the extension, and binds the pairing ID, delivery nonce, and acknowledged
+sequence. The receipt contains no URL, private-context data, journal path, or
+journal key and is never added to a journal event.
+
+The extension must use stop-and-wait: send one input, await its reply, retain the
+latest successful reply's receipt, then send the next input. On uncertain
+delivery it reconnects with the same delivery nonce, the previous receipt in
+the optional `hello.resume_receipt` field, and a fresh session key from the new
+host nonce. Only a verified host receipt can restore the protocol cursor; the
+standalone protocol/session APIs refuse an unverified receipt. The extension
+then re-signs and retries the outstanding input with its original sequence.
+This preserves the original gap count whether the service committed before
+the timeout or never received the input. Old clients may omit the field and
+start at sequence one, but cannot recover a later outstanding delivery this
+way. Pipelining and resuming from a stale receipt are unsupported: a receipt
+does not reconstruct an arbitrary transcript or prove later unacknowledged
+sequences. Conflicting durable gap/payload contracts remain refused. The updated
+reply parser accepts older v1 replies with no receipt, without authorizing any
+resume cursor. Older strict reply parsers that reject unknown fields need
+migration to read the added response field; no extension/client is shipped by
+this slice, and bidirectional old-binary compatibility is not claimed.
+
 Heartbeat, refused-navigation, and goodbye gaps have no origin payload; they
 return `journal_error` rather than claim a persisted gap. Private-network
 navigation is refused by the journal projection because the legacy payload

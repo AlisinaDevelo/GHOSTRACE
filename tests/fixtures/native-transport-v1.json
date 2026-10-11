@@ -5,6 +5,14 @@
   "network_listener": false,
   "cases": [
     {
+      "id": "resume-hello-equivalent",
+      "body": "{\"type\":\"hello\",\"protocol_version\":1,\"seq\":1,\"pairing_id\":\"00000000-0000-4000-8000-000000000001\",\"extension_id\":\"abcdefghijklmnopabcdefghijklmnop\",\"extension_key_digest\":\"aa\",\"permissions_digest\":\"bb\",\"client_nonce\":\"cc\",\"resume_receipt\":\"0100000000000000020000000000000000000000000000000000000000000000000000000000000000\"}",
+      "chromium_origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop/",
+      "safari_bundle_id": "com.alisinadevelo.ghostrace.extension",
+      "safari_profile_id": "default",
+      "expected": "normalized"
+    },
+    {
       "id": "heartbeat-equivalent",
       "body": "{\"type\":\"heartbeat\",\"seq\":2,\"mac\":\"00\"}",
       "chromium_origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop/",

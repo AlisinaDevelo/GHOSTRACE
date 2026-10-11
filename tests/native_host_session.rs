@@ -13,6 +13,18 @@ use ghostrace::{
 const EXTENSION: &str = "abcdefghijklmnopabcdefghijklmnop";
 const CLIENT_NONCE: [u8; 32] = [9; 32];
 
+#[test]
+fn legacy_v1_replies_decode_without_authorizing_a_resume_cursor() {
+    for encoded in [
+        r#"{"type":"accepted","event_id":"00000000-0000-4000-8000-000000000001","missing":0}"#,
+        r#"{"type":"heartbeat","missing":0}"#,
+    ] {
+        let message: HostMessage = serde_json::from_str(encoded).expect("legacy v1 reply");
+        let decoded = serde_json::to_value(message).expect("decoded reply JSON");
+        assert!(decoded.get("resume_receipt").is_none(), "legacy replies prove no resume cursor");
+    }
+}
+
 fn record() -> PairingRecord {
     PairingRecord::approve(
         PairingRequest {
@@ -39,6 +51,7 @@ fn hello(record: &PairingRecord, key_digest: &str) -> Vec<u8> {
         extension_key_digest: key_digest.to_owned(),
         permissions_digest: "b".repeat(64),
         client_nonce: encode_hex(&CLIENT_NONCE),
+        resume_receipt: None,
     })
     .expect("hello")
 }
