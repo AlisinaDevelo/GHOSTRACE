@@ -5,6 +5,7 @@
 #   scripts/build-universal.sh [out-dir]          default: dist/universal
 #   scripts/build-universal.sh --twice [out-dir]  build twice from two copies
 #                                                 of the commit and compare
+# The output must be a new directory; existing files are never removed.
 #
 # Pinned: the Rust toolchain (rust-toolchain.toml), Cargo.lock (--locked),
 # the minimum macOS version, the build timestamp (the commit time), the
@@ -16,6 +17,24 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 MIN_MACOS=13.0
 TARGETS=(aarch64-apple-darwin x86_64-apple-darwin)
+clone_root=
+trap 'if [ -n "$clone_root" ]; then rm -rf "$clone_root"; fi' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+prepare_output() {
+	local requested=$1
+	if [ -e "$requested" ] || [ -L "$requested" ]; then
+		echo "Output already exists; choose a new output directory." >&2
+		exit 2
+	fi
+	# Reserve a new leaf atomically, then resolve it before build_once changes
+	# the working directory. mkdir never replaces an existing path or symlink.
+	mkdir -p -- "$(dirname -- "$requested")"
+	mkdir -- "$requested"
+	OUT=$(CDPATH='' cd -- "$requested" && pwd -P)
+}
 
 build_once() {
 	local source=$1 out=$2
@@ -106,19 +125,19 @@ PY
 }
 
 if [ "${1:-}" = "--twice" ]; then
-	OUT=${2:-$ROOT/dist/universal-twice}
-	rm -rf "$OUT"
-	mkdir -p "$OUT"
+	prepare_output "${2:-$ROOT/dist/universal-twice}"
 	revision=$(git -C "$ROOT" rev-parse HEAD)
 	for run in a b; do
 		# Each build uses its own clone at a different absolute path, so a
 		# leaked build path would show up as a difference.
-		clone=$(mktemp -d)/ghostrace-src-$run
+		clone_root=$(mktemp -d)
+		clone=$clone_root/ghostrace-src-$run
 		git -c init.templateDir= clone -q --no-hardlinks "$ROOT" "$clone"
 		git -C "$clone" checkout -q "$revision"
 		build_once "$clone" "$OUT/$run"
 		manifest "$clone" "$OUT/$run" >/dev/null
-		rm -rf "$(dirname "$clone")"
+		rm -rf "$clone_root"
+		clone_root=
 	done
 	python3 - "$OUT" <<'PY'
 import json, sys
@@ -138,8 +157,7 @@ print(json.dumps(report, indent=2))
 sys.exit(0 if not differences else 1)
 PY
 else
-	OUT=${1:-$ROOT/dist/universal}
-	rm -rf "$OUT"
+	prepare_output "${1:-$ROOT/dist/universal}"
 	build_once "$ROOT" "$OUT"
 	manifest "$ROOT" "$OUT"
 fi
