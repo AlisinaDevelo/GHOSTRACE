@@ -458,7 +458,11 @@ against the real login keychain when `GHOSTRACE_LOGIN_KEYCHAIN_TEST=1`.
 for rebuilds without a paid Developer ID. `create` generates certificate material
 in a private temporary directory, makes a self-signed certificate valid only for
 code signing, and imports the private key into the login keychain as
-non-extractable; the temporary files are removed afterward. This setup does not
+non-extractable. A restrictive umask creates temporary files with mode 0600;
+the mode-0700 directory is removed on success, tool failure, and HUP, INT, or
+TERM termination. Synthetic failure tests cover certificate generation, PKCS#12
+export, keychain import, trust/removal, and those signals without touching a
+user keychain. This setup does not
 claim that private key material never exists outside the keychain during creation.
 `trust` marks the identity trusted for code signing, which macOS confirms with the
 user's password. `sign` signs a build with that identity and the identifier
