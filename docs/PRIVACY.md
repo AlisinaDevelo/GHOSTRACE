@@ -184,8 +184,18 @@ database file; `-wal`, `-shm`, rollback-journal, temporary, and backup sidecars 
 never accepted as standalone backups.
 
 Export is an explicit user action. The CLI refuses to overwrite an existing
-destination without --force. An export may contain sensitive plaintext and is the
-user's responsibility once written outside the protected journal directory.
+destination without --force. Preview and execution also refuse the source
+journal and its SQLite artifact names as destinations, including path aliases
+and sidecars that do not exist yet. On Unix, the writer keeps verified inode
+identities of the original journal and existing sidecars throughout streaming
+and refuses publication over a relocated source inode. It retains the original
+destination directory descriptor for temporary creation, atomic publication,
+cleanup, and directory fsync. A replaced parent is refused when detected;
+a replacement after the final check cannot redirect publication into the
+journal directory. The body spool is unlinked immediately and read through
+its retained file handle. Publication succeeds only when the destination inode
+matches the retained validated file handle. An export may contain sensitive plaintext
+and is the user's responsibility once written outside the protected journal directory.
 GHOSTRACE does not upload or fetch a destination.
 
 The optional Parquet archive is a user-requested derived copy, not an automatic

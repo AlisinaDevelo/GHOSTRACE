@@ -202,7 +202,15 @@ pub fn validate_export(path: impl AsRef<Path>) -> Result<ExportValidation, Ghost
     let path = path.as_ref();
     let file = File::open(path)
         .map_err(|source| GhostraceError::Io { path: path.to_path_buf(), source })?;
-    let mut reader = BufReader::with_capacity(64 * 1024, file);
+    validate_export_reader(file, path)
+}
+
+/// Validate a retained artifact handle without reopening its mutable pathname.
+pub(crate) fn validate_export_reader(
+    reader: impl std::io::Read,
+    path: &Path,
+) -> Result<ExportValidation, GhostraceError> {
+    let mut reader = BufReader::with_capacity(64 * 1024, reader);
     let manifest_bytes = read_bounded_line(&mut reader, path)?
         .ok_or_else(|| GhostraceError::ExportInvalid("export is empty".to_owned()))?;
     let manifest_line = std::str::from_utf8(&manifest_bytes)
