@@ -31,11 +31,12 @@ extension messaging, and device parity remain separate acceptance gates.
 
 ## Bounded campaign
 
-After the Rust toolchain and `cargo-fuzz` are available, run one target at a
-time with the repository's `fuzz/run-bounded.sh` wrapper:
+Install `nightly-2026-10-03` and `cargo-fuzz` 0.13.2, then fetch the locked
+test dependencies before running the offline wrapper:
 
 ```text
-bash fuzz/run-bounded.sh
+cargo +nightly-2026-10-03 fetch --locked --manifest-path fuzz/Cargo.toml
+sh fuzz/run-bounded.sh
 ```
 
 The wrapper defaults to one 60-second run per target, one libFuzzer worker,
@@ -43,15 +44,29 @@ The wrapper defaults to one 60-second run per target, one libFuzzer worker,
 input. `frame_decoder` uses its explicit 131080-byte decoder-buffer bound.
 Override `FUZZ_SECONDS`, `FUZZ_TIMEOUT_SECS`, `FUZZ_RSS_MB`, and
 `FUZZ_MAX_LEN` only when the receipt records the changed values. The script
-keeps logs and a copy of each campaign corpus below ignored `fuzz/artifacts/`;
+replays every checked-in seed and optional `fuzz/regressions/<target>/` input
+before each campaign. It keeps bounded logs, per-target receipts, failure
+inputs and a copy of each campaign corpus below ignored `fuzz/artifacts/`;
 mutation never changes the checked-in seeds. It selects the Rust compiler's
 host target, not the architecture of the `cargo-fuzz` tool binary.
 `FUZZ_TARGET_TRIPLE` and `FUZZ_BUILD_DIR` can override the target and build-cache
-path; record both in the receipt. Use an installed nightly Rust toolchain (for
-example through `RUSTUP_TOOLCHAIN`) and record its exact version.
+path. The wrapper records both, exact commands, compiler identity, input and
+log digests, CPU and wall time, execution counts, peak RSS, and exit outcomes.
+It refuses existing evidence directories and output inside checked-in inputs.
+Builds have a 900-second deadline; replay and campaign subprocess groups have
+outer deadlines and a 4 MiB log cap. Limit overrides are validated and recorded.
+Interrupted subprocesses retain an interrupted receipt and stop the run.
 
-The campaign has not been run for this candidate branch. Building a fuzz crate
-is not a campaign and is not reported as one.
+`.github/workflows/native-fuzz.yml` runs the same seven targets on Linux for
+pushes, pull requests, merge queues and manual dispatch. It uses pinned tools,
+serial builds, 900-second build deadlines, a 45-minute job limit and uploads
+synthetic receipts/logs/corpora for 30 days, including on failure. The Python
+runner regressions use a simulated compiler boundary and do not substitute
+for the actual Rust campaigns.
+
+The initial local run of this candidate was interrupted during its first target;
+it is incomplete. Building a fuzz crate or replaying seeds is not a campaign.
+Completed runs must be identified by their exact source revision and receipt.
 
 Dependencies are pinned by `fuzz/Cargo.lock`. Check the unpublished harness
 against the production policy with `cd fuzz && cargo deny --locked --offline
@@ -67,3 +82,8 @@ and crash/hang outcome, and SHA-256 checksums of any minimized regression
 inputs. Store only synthetic inputs in the repository; redact or discard any
 secret-bearing diagnostic. A zero-crash result without the per-target receipt
 does not close task 0109.
+
+Failure inputs are retained with hashes; the runner does not automatically
+minimize them. Minimized regressions must be reviewed and committed under
+`fuzz/regressions/<target>/` for subsequent replay. Live Safari integration
+and journal/service resource checks remain separate evidence gates.

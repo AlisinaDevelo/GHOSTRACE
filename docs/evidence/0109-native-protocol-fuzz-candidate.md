@@ -1,7 +1,9 @@
 # Task 0109 candidate evidence: hostile native-boundary fuzzing
 
-Status: candidate package only. A fuzz-crate build or checked-in corpus is not
-a fuzzing campaign and this document does not support issue closure.
+Status: historical bounded campaign recorded below; current continuous CI
+candidate awaits a completed run on its exact merged revision. A fuzz-crate
+build or checked-in corpus is not a campaign and this document alone does not
+support issue closure.
 
 `fuzz/Cargo.toml` defines seven corpus-guided libFuzzer targets: frame decoder,
 schema parser, origin validation, pairing state, sequence handling, policy
@@ -11,11 +13,13 @@ the targets do not open listeners, launch extensions, touch persistence, or
 emit raw inputs in errors. `fuzz/run-bounded.sh` serializes targets and caps
 time, per-input timeout, RSS, and input length.
 
-No campaign was run for this candidate branch because the shared Rust build
-resource was reserved for the parent integration health check. There are no
-minimized regressions, hang/crash receipts, execution counts, peak-RSS
-measurements, or diagnostic-output checks to report yet. Those are required
-before task 0109 can be marked complete.
+The original candidate had no campaign evidence; the later 2026-10-04 run
+below supersedes that historical limitation for revision `51657a2` only.
+The 2026-10-11 CI candidate adds pinned tools, seed/regression replay,
+bounded subprocesses/logs, receipt digests and artifact retention. Its first
+local attempt was interrupted during the first target and is incomplete.
+Current merged-revision results and reviewed minimized regressions are still
+required before task 0109 can be marked complete.
 
 The transport differential target is intentionally not a live Safari test.
 Safari app-extension packaging, permissions, runtime messaging, and target

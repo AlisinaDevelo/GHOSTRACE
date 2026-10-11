@@ -1,0 +1,59 @@
+name: Native boundary fuzzing
+
+on:
+  push:
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-fuzz-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bounded-campaign:
+    name: bounded native fuzz campaign
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      RUSTUP_TOOLCHAIN: nightly-2026-10-03
+      CARGO_BUILD_JOBS: '1'
+      FUZZ_SECONDS: '60'
+      FUZZ_TIMEOUT_SECS: '2'
+      FUZZ_RSS_MB: '256'
+      FUZZ_MAX_LEN: '65536'
+      FUZZ_BUILD_TIMEOUT_SECS: '900'
+      FUZZ_MAX_LOG_BYTES: '4194304'
+      FUZZ_OUTPUT_DIR: fuzz/artifacts/ci
+      FUZZ_BUILD_DIR: fuzz/target/bounded
+      ASAN_OPTIONS: quarantine_size_mb=16
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test runner file handling
+        run: python3 -m unittest discover -s tests -p 'test_fuzz_runner.py' -v
+      - name: Install pinned nightly
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
+        with:
+          toolchain: nightly-2026-10-03
+      - name: Install pinned cargo-fuzz
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0  # v2.87.22
+        with:
+          tool: cargo-fuzz@0.13.2
+      - name: Fetch locked test dependencies
+        run: cargo fetch --locked --manifest-path fuzz/Cargo.toml
+      - name: Replay seeds and run all seven bounded targets
+        run: sh fuzz/run-bounded.sh
+      - name: Retain synthetic campaign evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: native-fuzz-${{ github.sha }}-${{ github.run_attempt }}
+          path: fuzz/artifacts/ci/
+          if-no-files-found: warn
+          retention-days: 30
