@@ -31,11 +31,27 @@ pub enum HostMessage {
     /// its secret, its client nonce, and `host_nonce`.
     Welcome { protocol_version: u32, host_nonce: String },
     /// A navigation was admitted and committed through the LocalService writer.
-    Accepted { event_id: Uuid, missing: u64 },
+    Accepted {
+        event_id: Uuid,
+        missing: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resume_receipt: Option<String>,
+    },
     /// A heartbeat was authenticated and accepted.
-    Heartbeat { missing: u64 },
-    /// The session ends; `reason` is a fixed code.
-    Refused { reason: String },
+    Heartbeat {
+        missing: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resume_receipt: Option<String>,
+    },
+    /// A fixed refusal code; a policy refusal may continue the session, while
+    /// an authentication/protocol/sink error terminates it without a receipt.
+    Refused {
+        reason: String,
+        /// Present only for an authenticated, successfully processed policy
+        /// refusal. Protocol/authentication errors never authorize resumption.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resume_receipt: Option<String>,
+    },
     /// The extension ended the session cleanly.
     Closed,
     /// Goodbye was authenticated, but one or more sequence numbers were
@@ -139,6 +155,32 @@ impl NativeHostSession {
     where
         F: FnOnce(Uuid) -> Option<PairingRecord>,
     {
+        self.receive_with_pairing(body, now, wall_clock, |pairing_id, _, resume_receipt| {
+            // The standalone session has no host-only receipt verification
+            // capability. It must never treat a supplied cursor as approval.
+            if resume_receipt.is_some() {
+                return Err(PairingError::BadMac);
+            }
+            Ok((pairing(pairing_id).ok_or(PairingError::NotPaired)?, None))
+        })
+    }
+
+    /// The bridge supplies the pairing and verifies any processed resume
+    /// receipt after ingress admission and bounded parsing, before state moves.
+    pub(crate) fn receive_with_pairing<F>(
+        &mut self,
+        body: &[u8],
+        now: Duration,
+        wall_clock: DateTime<Utc>,
+        pairing: F,
+    ) -> Result<HostOutput, NativeSessionError>
+    where
+        F: FnOnce(
+            Uuid,
+            &[u8; 32],
+            Option<&str>,
+        ) -> Result<(PairingRecord, Option<u64>), PairingError>,
+    {
         // Count every complete frame before parsing or authentication. The
         // caller-origin check and the MAC check below must not provide a way
         // around the protocol ingress budget.
@@ -150,6 +192,7 @@ impl NativeHostSession {
             extension_key_digest,
             permissions_digest,
             client_nonce,
+            resume_receipt,
             ..
         } = &message
         {
@@ -161,8 +204,9 @@ impl NativeHostSession {
                 return Err(NativeSessionError::Pairing(PairingError::NotPaired));
             }
             if self.paired.is_none() {
-                let record = pairing(*pairing_id).ok_or(PairingError::NotPaired)?;
                 let client_nonce = decode_hex32(client_nonce)?;
+                let (record, resume_sequence) =
+                    pairing(*pairing_id, &client_nonce, resume_receipt.as_deref())?;
                 let hello = ClientHello {
                     pairing_id: *pairing_id,
                     extension_id: extension_id.clone(),
@@ -171,7 +215,7 @@ impl NativeHostSession {
                     client_nonce,
                 };
                 let session = PairedSession::open(&record, &hello, wall_clock)?;
-                self.protocol.receive_after_admission(body, now)?;
+                self.protocol.receive_after_admission_with_resume(body, now, resume_sequence)?;
                 let host_nonce = encode_hex(&session.host_nonce);
                 self.client_nonce = Some(hello.client_nonce);
                 self.paired = Some(session);

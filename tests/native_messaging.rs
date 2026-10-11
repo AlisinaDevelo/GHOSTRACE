@@ -131,7 +131,7 @@ fn fields_and_strings_are_bounded_before_typed_deserialization() {
         Err(NativeMessagingError::StringBudgetExceeded)
     );
 
-    let too_wide = br#"{"type":"navigation","seq":2,"url":"https://e.com/","private_context":false,"transition":"committed","mac":"00","x1":null,"x2":null,"x3":null}"#;
+    let too_wide = br#"{"type":"navigation","seq":2,"url":"https://e.com/","private_context":false,"transition":"committed","mac":"00","x1":null,"x2":null,"x3":null,"x4":null}"#;
     assert_eq!(parse_message(too_wide), Err(NativeMessagingError::TooManyFields));
 
     let duplicate = br#"{"type":"heartbeat","seq":2,"mac":"00","mac":"01"}"#;

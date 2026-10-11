@@ -28,7 +28,7 @@ use uuid::Uuid;
 use crate::{
     browser_origin::{NavigationHostClass, NavigationRefusal, UrlShapePolicy},
     browser_pairing::{
-        browser_relay_proof_mac, delivery_event_id, verify_browser_relay_proof_mac,
+        browser_relay_proof_mac, delivery_event_id, hmac_sha256, verify_browser_relay_proof_mac,
         BrowserEventClass, PairingError, PairingRecord, PairingRequest,
     },
     crypto::CiphertextEnvelope,
@@ -79,6 +79,10 @@ const SUPPORTED_BROWSER_CHANNELS: [&str; 4] = ["chrome", "chrome-beta", "chromiu
 const RETAINED_ORIGIN: &str = "origin";
 const PRIVATE_CONTEXT_REFUSAL: &str = "refuse_private_context";
 const CHROMIUM_EXTENSION_ORIGIN_PREFIX: &str = "chrome-extension://";
+const RESUME_KEY_DOMAIN: &[u8] = b"ghostrace-native-resume-key-v1\0";
+const RESUME_RECEIPT_DOMAIN: &[u8] = b"ghostrace-native-processed-resume-v1\0";
+const RESUME_RECEIPT_VERSION: u8 = 1;
+const RESUME_RECEIPT_BYTES: usize = 1 + 8 + 32;
 
 /// Fixed, path-free errors for a native host boundary. Untrusted extension
 /// input must never be copied into an error returned by this module.
@@ -216,8 +220,8 @@ impl From<&PairingRecord> for PairingView {
 }
 
 /// The one-time delivery produced by an explicit pairing approval. The secret
-/// is never part of [`PairingView`] or unencrypted CLI/list output; the host
-/// retains its copy only inside the authenticated ciphertext.
+/// is absent from [`PairingView`] and list output. The explicit approval receipt
+/// delivers it once; the host retains its copy inside authenticated ciphertext.
 #[derive(Clone, Eq, PartialEq, Serialize)]
 pub struct PairingApproval {
     pub view: PairingView,
@@ -322,6 +326,57 @@ impl PairingStore {
         self.with_shared_lock(|| {
             Ok(self.records()?.into_iter().find(|record| record.pairing_id == pairing_id))
         })
+    }
+
+    /// Issue only after successful authenticated processing; navigation waits
+    /// for a validated durable service acknowledgment. The key is derived from
+    /// host-only pairing-store custody, never the extension's pairing
+    /// credential; even a paired extension cannot invent a cursor.
+    fn resume_receipt(&self, pairing_id: Uuid, client_nonce: &[u8; 32], sequence: u64) -> String {
+        let mut receipt = [0_u8; RESUME_RECEIPT_BYTES];
+        receipt[0] = RESUME_RECEIPT_VERSION;
+        receipt[1..9].copy_from_slice(&sequence.to_be_bytes());
+        receipt[9..].copy_from_slice(&self.resume_mac(pairing_id, client_nonce, sequence));
+        crate::native_host::encode_hex(&receipt)
+    }
+
+    fn verify_resume_receipt(
+        &self,
+        pairing_id: Uuid,
+        client_nonce: &[u8; 32],
+        encoded: &str,
+    ) -> Result<u64, PairingError> {
+        if encoded.len() != 2 * RESUME_RECEIPT_BYTES
+            || !encoded.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+        {
+            return Err(PairingError::BadMac);
+        }
+        let mut receipt = [0_u8; RESUME_RECEIPT_BYTES];
+        for (index, byte) in receipt.iter_mut().enumerate() {
+            *byte = u8::from_str_radix(&encoded[index * 2..index * 2 + 2], 16)
+                .map_err(|_| PairingError::BadMac)?;
+        }
+        let sequence = u64::from_be_bytes(receipt[1..9].try_into().expect("eight receipt bytes"));
+        if receipt[0] != RESUME_RECEIPT_VERSION || sequence < 2 {
+            return Err(PairingError::BadMac);
+        }
+        let expected = self.resume_mac(pairing_id, client_nonce, sequence);
+        let difference = expected.iter().zip(&receipt[9..]).fold(0_u8, |acc, (a, b)| acc | (a ^ b));
+        if difference != 0 {
+            return Err(PairingError::BadMac);
+        }
+        Ok(sequence)
+    }
+
+    fn resume_mac(&self, pairing_id: Uuid, client_nonce: &[u8; 32], sequence: u64) -> [u8; 32] {
+        let key = hmac_sha256(&self.key, RESUME_KEY_DOMAIN);
+        let mut transcript = Vec::with_capacity(RESUME_RECEIPT_DOMAIN.len() + 1 + 16 + 32 + 8);
+        transcript.extend_from_slice(RESUME_RECEIPT_DOMAIN);
+        transcript.push(RESUME_RECEIPT_VERSION);
+        transcript.extend_from_slice(pairing_id.as_bytes());
+        transcript.extend_from_slice(client_nonce);
+        transcript.extend_from_slice(&sequence.to_be_bytes());
+        hmac_sha256(&key, &transcript)
     }
 
     /// Admit one bridge frame under a shared lock that remains held until the
@@ -591,9 +646,9 @@ fn is_hex_digest(value: &str) -> bool {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BridgeOutput {
     Reply(HostMessage),
-    Recorded { event_id: Uuid, missing: u64 },
-    NavigationRefused { refusal: NavigationRefusal, missing: u64 },
-    Heartbeat { missing: u64 },
+    Recorded { event_id: Uuid, missing: u64, resume_receipt: String },
+    NavigationRefused { refusal: NavigationRefusal, missing: u64, resume_receipt: String },
+    Heartbeat { missing: u64, resume_receipt: String },
     Closed,
 }
 
@@ -1127,7 +1182,15 @@ impl<S: NativeBridgeSink> NativeBridge<S> {
         }
         let output = self
             .session
-            .receive(body, now, wall_clock, |pairing_id| admission.get(pairing_id))
+            .receive_with_pairing(body, now, wall_clock, |pairing_id, client_nonce, receipt| {
+                let record = admission.get(pairing_id).ok_or(PairingError::NotPaired)?;
+                let resume_sequence = receipt
+                    .map(|receipt| {
+                        self.store.verify_resume_receipt(pairing_id, client_nonce, receipt)
+                    })
+                    .transpose()?;
+                Ok((record, resume_sequence))
+            })
             .map_err(NativeBridgeError::Session)?;
         match output {
             crate::native_host::HostOutput::Reply(reply) => {
@@ -1212,7 +1275,8 @@ impl<S: NativeBridgeSink> NativeBridge<S> {
                 {
                     return Err(NativeBridgeError::State);
                 }
-                Ok(BridgeOutput::Recorded { event_id: navigation_id, missing })
+                let resume_receipt = self.processed_resume_receipt()?;
+                Ok(BridgeOutput::Recorded { event_id: navigation_id, missing, resume_receipt })
             }
             crate::native_host::HostOutput::NavigationRefused { refusal, missing } => {
                 if missing > 0 {
@@ -1222,7 +1286,8 @@ impl<S: NativeBridgeSink> NativeBridge<S> {
                     // retry through a future gap-capable service method.
                     return Err(NativeBridgeError::Journal);
                 }
-                Ok(BridgeOutput::NavigationRefused { refusal, missing })
+                let resume_receipt = self.processed_resume_receipt()?;
+                Ok(BridgeOutput::NavigationRefused { refusal, missing, resume_receipt })
             }
             crate::native_host::HostOutput::Heartbeat { missing } => {
                 if missing > 0 {
@@ -1231,7 +1296,8 @@ impl<S: NativeBridgeSink> NativeBridge<S> {
                     // authenticated sequence gap.
                     return Err(NativeBridgeError::Journal);
                 }
-                Ok(BridgeOutput::Heartbeat { missing })
+                let resume_receipt = self.processed_resume_receipt()?;
+                Ok(BridgeOutput::Heartbeat { missing, resume_receipt })
             }
             crate::native_host::HostOutput::Closed => {
                 self.active_pairing = None;
@@ -1244,6 +1310,12 @@ impl<S: NativeBridgeSink> NativeBridge<S> {
                 Err(NativeBridgeError::Journal)
             }
         }
+    }
+
+    fn processed_resume_receipt(&self) -> Result<String, NativeBridgeError> {
+        let pairing = self.active_pairing.as_ref().ok_or(NativeBridgeError::State)?;
+        let nonce = self.session.client_nonce().ok_or(NativeBridgeError::State)?;
+        Ok(self.store.resume_receipt(pairing.pairing_id, &nonce, self.session.last_sequence()))
     }
 }
 
@@ -1326,7 +1398,10 @@ pub fn run_stdio_with_timeout<R: Read + AsRawFd, W: Write + AsRawFd, S: NativeBr
                 Err(error) => {
                     write_host_message_with_timeout(
                         &mut writer,
-                        &HostMessage::Refused { reason: error.code().to_owned() },
+                        &HostMessage::Refused {
+                            reason: error.code().to_owned(),
+                            resume_receipt: None,
+                        },
                         timeout.min(NATIVE_HOST_WRITE_TIMEOUT),
                     )?;
                     return Err(error);
@@ -1334,14 +1409,23 @@ pub fn run_stdio_with_timeout<R: Read + AsRawFd, W: Write + AsRawFd, S: NativeBr
             };
             let message = match output {
                 BridgeOutput::Reply(message) => message,
-                BridgeOutput::Recorded { event_id, missing } => {
+                BridgeOutput::Recorded { event_id, missing, resume_receipt } => {
                     summary.recorded_events = summary.recorded_events.saturating_add(1);
-                    HostMessage::Accepted { event_id, missing }
+                    HostMessage::Accepted {
+                        event_id,
+                        missing,
+                        resume_receipt: Some(resume_receipt),
+                    }
                 }
-                BridgeOutput::NavigationRefused { refusal, .. } => {
-                    HostMessage::Refused { reason: navigation_refusal_code(refusal).to_owned() }
+                BridgeOutput::NavigationRefused { refusal, resume_receipt, .. } => {
+                    HostMessage::Refused {
+                        reason: navigation_refusal_code(refusal).to_owned(),
+                        resume_receipt: Some(resume_receipt),
+                    }
                 }
-                BridgeOutput::Heartbeat { missing } => HostMessage::Heartbeat { missing },
+                BridgeOutput::Heartbeat { missing, resume_receipt } => {
+                    HostMessage::Heartbeat { missing, resume_receipt: Some(resume_receipt) }
+                }
                 BridgeOutput::Closed => {
                     summary.closed = true;
                     HostMessage::Closed
@@ -1836,7 +1920,7 @@ mod tests {
             )
         };
         assert_eq!(result, 0, "set a small socket send buffer");
-        let message = HostMessage::Refused { reason: "x".repeat(60 * 1024) };
+        let message = HostMessage::Refused { reason: "x".repeat(60 * 1024), resume_receipt: None };
         let started = Instant::now();
         assert_eq!(
             write_host_message_with_timeout(&mut writer, &message, Duration::from_millis(20)),

@@ -6,7 +6,8 @@
 //! public key, the requested event classes, the retained fields, and the
 //! private-context policy. The approval yields a random pairing secret that is
 //! handed to the extension once. Each session derives a fresh key from that
-//! secret and two fresh nonces, and every message carries a MAC over its
+//! secret, a fresh host nonce, and the reconnect-stable delivery nonce; every
+//! message carries a MAC over its
 //! sequence number and body, so a transcript from an earlier session never
 //! verifies. A different extension ID is refused; a changed key or permission
 //! set, an expired approval, or a revoked pairing requires re-pairing.
@@ -91,7 +92,7 @@ pub struct PairingRequest {
 
 /// A stored approval. The secret never leaves the host except once, to the
 /// extension, at approval time.
-/// Persisted only inside the encrypted journal; `Debug` redacts the secret.
+/// Persisted only inside the encrypted pairing store; `Debug` redacts the secret.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PairingRecord {
@@ -380,7 +381,7 @@ impl PairedSession {
 }
 
 /// HMAC-SHA256 (RFC 2104) over the crate's existing SHA-256.
-fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
+pub(crate) fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
     const BLOCK: usize = 64;
     let mut block_key = [0u8; BLOCK];
     if key.len() > BLOCK {
