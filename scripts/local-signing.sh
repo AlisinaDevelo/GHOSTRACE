@@ -16,6 +16,18 @@
 # treats the binary as unidentified, and the data-protection keychain still
 # refuses it.
 set -euo pipefail
+umask 077
+
+WORK_DIR=""
+cleanup() {
+	if [ -n "$WORK_DIR" ]; then
+		rm -rf -- "$WORK_DIR"
+	fi
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 NAME="GHOSTRACE Local Signing"
 IDENTIFIER="com.alisinadevelo.ghostrace"
@@ -42,11 +54,9 @@ create() {
 		echo "The identity \"$NAME\" already exists."
 		return 0
 	fi
-	local work
-	work=$(mktemp -d)
-	chmod 700 "$work"
-	trap 'rm -rf "$work"' RETURN
-	cat >"$work/cert.cnf" <<EOF
+	WORK_DIR=$(mktemp -d)
+	chmod 700 "$WORK_DIR"
+	cat >"$WORK_DIR/cert.cnf" <<EOF
 [req]
 distinguished_name=dn
 x509_extensions=ext
@@ -58,19 +68,19 @@ basicConstraints=critical,CA:false
 keyUsage=critical,digitalSignature
 extendedKeyUsage=critical,codeSigning
 EOF
-	openssl req -x509 -newkey rsa:3072 -nodes -days 3650 -config "$work/cert.cnf" \
-		-keyout "$work/key.pem" -out "$work/cert.pem" 2>/dev/null
+	openssl req -x509 -newkey rsa:3072 -nodes -days 3650 -config "$WORK_DIR/cert.cnf" \
+		-keyout "$WORK_DIR/key.pem" -out "$WORK_DIR/cert.pem" 2>/dev/null
 	local password
 	password=$(openssl rand -hex 24)
 	# OpenSSL 3 needs -legacy for a PKCS#12 file macOS can import; LibreSSL
 	# does not know the flag and already writes the compatible format.
-	openssl pkcs12 -export -legacy -inkey "$work/key.pem" -in "$work/cert.pem" \
-		-out "$work/identity.p12" -passout "pass:$password" 2>/dev/null ||
-		openssl pkcs12 -export -inkey "$work/key.pem" -in "$work/cert.pem" \
-			-out "$work/identity.p12" -passout "pass:$password"
+	openssl pkcs12 -export -legacy -inkey "$WORK_DIR/key.pem" -in "$WORK_DIR/cert.pem" \
+		-out "$WORK_DIR/identity.p12" -passout "pass:$password" 2>/dev/null ||
+		openssl pkcs12 -export -inkey "$WORK_DIR/key.pem" -in "$WORK_DIR/cert.pem" \
+			-out "$WORK_DIR/identity.p12" -passout "pass:$password"
 	# -x marks the private key non-extractable: it can sign, but never leave
-  # the keychain again.
-  security import "$work/identity.p12" -k "$KEYCHAIN" -P "$password" -x -T /usr/bin/codesign >/dev/null
+	# the keychain again.
+	security import "$WORK_DIR/identity.p12" -k "$KEYCHAIN" -P "$password" -x -T /usr/bin/codesign >/dev/null
 	echo "Created \"$NAME\" in $(basename "$KEYCHAIN")."
 	echo "Next: $0 trust   (macOS asks for your password once)"
 }
@@ -80,12 +90,10 @@ trust() {
 		echo "Run '$0 create' first." >&2
 		exit 1
 	}
-	local work
-	work=$(mktemp -d)
-	trap 'rm -rf "$work"' RETURN
-	security find-certificate -c "$NAME" -p "$KEYCHAIN" >"$work/cert.pem"
+	WORK_DIR=$(mktemp -d)
+	security find-certificate -c "$NAME" -p "$KEYCHAIN" >"$WORK_DIR/cert.pem"
 	echo "macOS will ask for your password to trust \"$NAME\" for code signing only."
-	security add-trusted-cert -p codeSign -k "$KEYCHAIN" "$work/cert.pem"
+	security add-trusted-cert -p codeSign -k "$KEYCHAIN" "$WORK_DIR/cert.pem"
 	echo "Trusted for code signing."
 }
 
@@ -118,11 +126,9 @@ remove() {
 		echo "There is no \"$NAME\" identity."
 		return 0
 	fi
-	local work
-	work=$(mktemp -d)
-	trap 'rm -rf "$work"' RETURN
-	security find-certificate -c "$NAME" -p "$KEYCHAIN" >"$work/cert.pem"
-	security remove-trusted-cert "$work/cert.pem" 2>/dev/null || true
+	WORK_DIR=$(mktemp -d)
+	security find-certificate -c "$NAME" -p "$KEYCHAIN" >"$WORK_DIR/cert.pem"
+	security remove-trusted-cert "$WORK_DIR/cert.pem" 2>/dev/null || true
 	security delete-identity -c "$NAME" "$KEYCHAIN" >/dev/null
 	echo "Removed \"$NAME\". Binaries signed with it now prompt for keychain access again."
 }
