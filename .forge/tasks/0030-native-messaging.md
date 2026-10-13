@@ -1,12 +1,12 @@
 ---
 id: 0030
 title: Implement Native Messaging host and explicit pairing
-status: review
+status: done
 agent: maintainer
 model: human
 release: M5
 depends_on: [0008, 0010, 0029, 0102, 0103, 0104]
-change: null
+change: pr-434
 workstream: browser
 type: feature
 priority: p1
@@ -18,18 +18,29 @@ platform: any
 Create a bounded, authenticated local bridge between an explicitly paired browser extension and the journal ingestion path.
 
 ## Acceptance criteria
-- [ ] Only paired extension IDs are accepted.
-- [ ] Messages are bounded and schema-validated.
-- [ ] Malformed input cannot execute commands or escape journal paths.
-- [ ] Pairing can be revoked.
+- [x] Only paired extension IDs are accepted.
+- [x] Messages are bounded and schema-validated.
+- [x] Malformed input cannot execute commands or escape journal paths.
+- [x] Pairing can be revoked.
 
 ## Context
 The host must expose no generic command execution or filesystem capability. Pairing credentials and journal keys are separate security assets.
 
 ## Notes
-Local candidate on `feature/native-host-journal-bridge`; review, publication, and
-merged-main reproduction remain pending. Checkboxes remain unchecked until the
-repository completion evidence contract is met.
+Completed on reviewed protected-main source
+`ee4216c8fd3ef993538655ac672aa2d37825f6d0` after PR #434 merged; PR #430 added
+uncertain-delivery reconnect recovery. All four capstone criteria map to retained
+IDs `E-0030-01` through `E-0030-04` in the
+[native completion evidence](../../docs/evidence/0030-native-host-completion.md).
+Dependencies 0008, 0010, 0029, 0102, 0103 and 0104 are verified done.
+
+On Apple M5/macOS 27.0.1 with pinned Rust 1.88.0, the exact clean merged source
+passed 98 integration and 4 bridge unit tests (102 distinct checks), including
+happy, negative/privacy, failure, recovery and bounded-resource checks.
+R-NATIVE-01/02 and R-PAIRING-01 retain commands, measurements and log digests;
+R-DELIVERY-01 records independent review, hosted checks and merge/source binding.
+Actual native executable and private Unix IPC use a synthetic journal. Installed
+browser collection and a shipped long-running service owner remain separate gates.
 
 Acceptance tests:
 - Paired IDs: `unpaired_hello_and_unauthenticated_navigation_never_reach_the_sink`,

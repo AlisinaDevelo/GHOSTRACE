@@ -33,7 +33,7 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0027 | Implement NSWorkspace frontmost-app collector | M4 | done | frontmost | maintainer | — | 0006, 0007, 0010, 0012, 0098 |
 | 0028 | Add frontmost attribution and privacy tests | M4 | backlog | frontmost | maintainer | — | 0027, 0018, 0099, 0100 |
 | 0029 | Decide browser transport and permissions in security ADR | M5 | done | browser | maintainer | — | 0002, 0004, 0005, 0012, 0101 |
-| 0030 | Implement Native Messaging host and explicit pairing | M5 | review | browser | maintainer | — | 0008, 0010, 0029, 0102, 0103, 0104 |
+| 0030 | Implement Native Messaging host and explicit pairing | M5 | done | browser | maintainer | — | 0008, 0010, 0029, 0102, 0103, 0104 |
 | 0031 | Implement Chromium top-level navigation collector | M5 | backlog | browser | maintainer | — | 0007, 0029, 0030, 0105, 0106 |
 | 0032 | Implement browser bookmark event and snapshot collector | M5 | backlog | browser | maintainer | — | 0007, 0030, 0031, 0107 |
 | 0033 | Add browser privacy matrix and private-mode regression suite | M5 | backlog | browser | maintainer | — | 0031, 0032, 0108, 0109 |
@@ -106,8 +106,8 @@ This is the versioned source of truth for the 2026–2031 program. A task is don
 | 0100 | Evaluate developer-workflow cross-source explanations | M4 | done | frontmost | researcher | 0028 | 0092, 0096, 0099 |
 | 0101 | Build the browser integration threat corpus | M5 | done | browser | security-auditor | 0029 | 0002, 0004, 0005, 0012 |
 | 0102 | Install and remove the native-host manifest safely | M5 | done | browser | macos-engineer | 0030 | 0008, 0010, 0029 |
-| 0103 | Version and bound the native-messaging protocol | M5 | in-progress | browser | api-designer | 0030 | 0102 |
-| 0104 | Implement explicit browser pairing and replay protection | M5 | backlog | browser | security-auditor | 0030 | 0102 |
+| 0103 | Version and bound the native-messaging protocol | M5 | done | browser | api-designer | 0030 | 0102 |
+| 0104 | Implement explicit browser pairing and replay protection | M5 | done | browser | security-auditor | 0030 | 0102 |
 | 0105 | Define Chromium navigation permission and state handling | M5 | backlog | browser | browser-engineer | 0031 | 0007, 0029, 0103, 0104 |
 | 0106 | Canonicalize browser origins without retaining secrets | M5 | backlog | browser | security-auditor | 0031 | 0050, 0105 |
 | 0107 | Model bookmark snapshots as bounded diffs | M5 | backlog | browser | browser-engineer | 0032 | 0103, 0105, 0106 |

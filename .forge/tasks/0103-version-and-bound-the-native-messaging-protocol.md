@@ -1,13 +1,13 @@
 ---
 id: 0103
 title: Version and bound the native-messaging protocol
-status: in-progress
+status: done
 agent: api-designer
 model: human
 release: M5
 parent: 0030
 depends_on: [0102]
-change: null
+change: pr-434
 workstream: browser
 type: feature
 priority: p1
@@ -19,29 +19,31 @@ platform: any
 Define strict framing, message types, sequence, size, timeout, rate, version, and shutdown behavior between extension and host.
 
 ## Acceptance criteria
-- [ ] Length prefixes and JSON payloads are parsed with hard byte, nesting, field, and allocation limits before semantic processing.
-- [ ] Unknown versions, types, fields, duplicate sequence numbers, truncated frames, trailing data, and timeouts fail closed.
-- [ ] Fuzzing and differential fixtures cover Chromium and Safari transport adapters without opening a network listener.
+- [x] Length prefixes and JSON payloads are parsed with hard byte, nesting, field, and allocation limits before semantic processing.
+- [x] Unknown versions, types, fields, duplicate sequence numbers, truncated frames, trailing data, and timeouts fail closed.
+- [x] Fuzzing and differential fixtures cover Chromium and Safari transport adapters without opening a network listener.
 
 ## Context
 Content-script input is untrusted and must not directly trigger privileged native behavior.
 
 ## Notes
-Planned in the 2026–2031 GHOSTRACE program. Completion requires the acceptance evidence above; issue closure alone is not evidence.
+Completed on reviewed protected-main source
+`ee4216c8fd3ef993538655ac672aa2d37825f6d0`, after PR #434 merged. Retained
+criteria `E-0103-01` through `E-0103-03` map to R-NATIVE-01/02 and
+R-FUZZ-60-M5-ee4216c in the
+[native completion evidence](../../docs/evidence/0030-native-host-completion.md).
+R-DELIVERY-01 records independent review, passing hosted checks and merge binding.
 
-Candidate implementation on `fix/native-protocol-resource-bounds` (based on
-`93d6c55`) adds the allocation-free JSON structure pre-scan and explicit field,
-duplicate-key, per-string, and total-string bounds in `src/native_messaging.rs`.
-It also adds the explicit-start deadline check and an ingress admission seam so
-the native host can count malformed, unauthenticated, and rejected frames before
-parsing or pairing. `src/native_transport.rs` and
-`tests/fixtures/native-transport-v1.json` are pure Chromium/Safari-shaped
-normalization fixtures only: they do not install, launch, or claim a Safari
-extension adapter.
+The allocation-free JSON scan and stdio ingress admission enforce bounds before
+semantic processing. Unknown versions/types/fields, sequence replay, malformed
+frames and deadline/shutdown failures are covered on the actual host executable.
+The exact clean merged source passed 102 distinct selected native checks on
+Apple M5/macOS 27.0.1 with Rust 1.88.0. Its pinned-nightly full fuzz campaign
+passed all seven targets: 18,025,804 executions, peak reported RSS 168 MB,
+11 seed replays, no failure artifacts and unchanged inputs.
 
-This note is not closure evidence. The native-host owner must integrate
-`ProtocolSession::new_at`, `admit_attempt`, and
-`receive_after_admission` around stdio reads, pairing, and MAC verification.
-The focused Rust tests and the libFuzzer targets still require the serialized
-toolchain/build and campaign gates; a fixture or fuzz-crate build alone does
-not satisfy this task.
+Chromium/Safari differential adapters remain pure transport fixtures without a
+network listener; no installed browser or live Safari runtime is claimed.
+The [historical protocol handoff](../../docs/evidence/0103-native-protocol-bounds-candidate.md)
+retains its original source and limitations. Full production resource/fault
+coverage remains task 0109; service capabilities remain task 0112.
