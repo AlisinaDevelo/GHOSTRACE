@@ -305,13 +305,72 @@ pub(crate) fn database_identity(
     report: &IntegrityReport,
     state: &AuthenticatedState,
 ) -> Result<SnapshotDigest, GhostraceError> {
-    let bytes = if let Some(path) = path {
+    digest_bytes(&database_identity_bytes(path, report, state)?)
+}
+
+pub(crate) fn database_identities(
+    path: Option<&Path>,
+    report: &IntegrityReport,
+    state: &AuthenticatedState,
+) -> Result<(SnapshotDigest, SnapshotDigest), GhostraceError> {
+    // Derive the repair-only comparison from the same read as the signed v1
+    // identity. Do not open/close another descriptor for the active source.
+    let mut bytes = database_identity_bytes(path, report, state)?;
+    let identity = digest_bytes(&bytes)?;
+    let copy_identity =
+        if path.is_some() { sqlite_copy_identity(&mut bytes)? } else { identity.clone() };
+    Ok((identity, copy_identity))
+}
+
+fn database_identity_bytes(
+    path: Option<&Path>,
+    report: &IntegrityReport,
+    state: &AuthenticatedState,
+) -> Result<Vec<u8>, GhostraceError> {
+    if let Some(path) = path {
         std::fs::read(path)
-            .map_err(|source| GhostraceError::Io { path: path.to_path_buf(), source })?
+            .map_err(|source| GhostraceError::Io { path: path.to_path_buf(), source })
     } else {
-        serde_json::to_vec(&(report, state))?
-    };
-    digest_bytes(&bytes)
+        Ok(serde_json::to_vec(&(report, state))?)
+    }
+}
+
+fn sqlite_copy_identity(bytes: &mut [u8]) -> Result<SnapshotDigest, GhostraceError> {
+    if bytes.len() < 100 || !bytes.starts_with(b"SQLite format 3\0") {
+        return Err(GhostraceError::CheckpointInvalid("invalid SQLite database header".to_owned()));
+    }
+    // SQLite's backup API rewrites the file change counter, schema cookie,
+    // version-valid-for counter, and last-writer SQLite version. These are
+    // bookkeeping fields, not schema/page data. Keep every other byte,
+    // including page count, application ID, user version, and actual schema.
+    for range in [24..28, 40..44, 92..100] {
+        bytes[range].fill(0);
+    }
+    digest_bytes(bytes)
+}
+
+pub(crate) fn require_checkpoint_copy_equivalence(
+    source: &VerificationCheckpoint,
+    copy: &VerificationCheckpoint,
+    source_copy_identity: &SnapshotDigest,
+    copy_identity: &SnapshotDigest,
+) -> Result<(), GhostraceError> {
+    if source.schema_version != copy.schema_version
+        || source.journal_schema_version != copy.journal_schema_version
+        || source.chain_epoch != copy.chain_epoch
+        || source.head_mac != copy.head_mac
+        || source.event_count != copy.event_count
+        || source.max_ingest_seq != copy.max_ingest_seq
+        || source.key_generation != copy.key_generation
+        || source.policy_digest != copy.policy_digest
+        || source.integrity_digest != copy.integrity_digest
+        || source_copy_identity != copy_identity
+    {
+        return Err(GhostraceError::CheckpointMismatch(
+            "verified database copy differs from the source checkpoint".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn digest_json<T: Serialize>(value: &T) -> Result<SnapshotDigest, GhostraceError> {
@@ -389,4 +448,34 @@ pub(crate) fn hex_digest(bytes: &[u8]) -> String {
         write!(&mut encoded, "{byte:02x}").expect("writing to a String cannot fail");
     }
     encoded
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn copy_equivalence_ignores_only_sqlite_backup_bookkeeping() {
+        let mut bytes = vec![0_u8; 4096];
+        bytes[..16].copy_from_slice(b"SQLite format 3\0");
+        let expected = sqlite_copy_identity(&mut bytes.clone()).expect("header digest");
+        for offset in 0..bytes.len() {
+            let mut changed = bytes.clone();
+            changed[offset] ^= 1;
+            let identity = sqlite_copy_identity(&mut changed);
+            if (24..28).contains(&offset)
+                || (40..44).contains(&offset)
+                || (92..100).contains(&offset)
+            {
+                assert_eq!(identity.expect("bookkeeping digest"), expected, "offset {offset}");
+            } else {
+                assert!(
+                    identity.is_err() || identity.expect("content digest") != expected,
+                    "offset {offset}"
+                );
+            }
+        }
+        assert!(sqlite_copy_identity(&mut []).is_err());
+        assert!(sqlite_copy_identity(&mut bytes[..99]).is_err());
+    }
 }

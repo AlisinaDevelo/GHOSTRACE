@@ -179,9 +179,14 @@ filesystem snapshot, crash dump, or a user from copying an explicit export.
 The active WAL has an explicit privacy and resource policy: automatic checkpoints,
 bounded busy waits, a maximum read-transaction lifetime, and a maximum sidecar size.
 Passive checkpoints report remaining frames and refuse when the configured bound is
-not met. A database snapshot requires a truncate checkpoint and copies only the
-database file; `-wal`, `-shm`, rollback-journal, temporary, and backup sidecars are
-never accepted as standalone backups.
+not met. A database snapshot requires a truncate checkpoint, then uses SQLite's
+backup API through the existing connection to produce a consistent database-only
+copy even when another connection commits or checkpoints. A busy or locked copy
+refuses without an unbounded retry. Its fresh destination is mode `0600`, is synced
+before success, and refuses existing database or sidecar artifacts. `-wal`, `-shm`,
+rollback-journal, temporary, and backup sidecars are never standalone backups.
+The mechanism and checkpoint compatibility proposal is documented in
+[ADR 0008](adr/0008-consistent-sqlite-backups.md).
 
 Export is an explicit user action. The CLI refuses to overwrite an existing
 destination without --force. Preview and execution also refuse the source

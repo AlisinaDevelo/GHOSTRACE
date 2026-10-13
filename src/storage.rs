@@ -12,7 +12,10 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::{
+    backup::{Backup, StepResult},
+    Connection, OpenFlags,
+};
 
 use crate::error::GhostraceError;
 
@@ -665,10 +668,11 @@ pub(crate) fn wal_size_bytes(path: &Path) -> Result<u64, GhostraceError> {
     }
 }
 
-/// Copy only a checkpointed database file.  SQLite WAL and SHM sidecars are
-/// never independent backups because they require their matching database and
-/// live reader state.
+/// Back up through the existing SQLite connection so concurrent checkpoints
+/// cannot mix pages and no independent source descriptor can clear its locks.
+/// The destination is a fresh, private database without copied WAL/SHM sidecars.
 pub(crate) fn copy_database_snapshot(
+    connection: &Connection,
     source: &Path,
     destination: &Path,
 ) -> Result<u64, GhostraceError> {
@@ -679,28 +683,135 @@ pub(crate) fn copy_database_snapshot(
         return Err(GhostraceError::BackupExists);
     }
     let parent = parent_directory(destination)?;
-    ensure_private_directory(parent)?;
+    let parent_identity = ensure_private_directory(parent)?;
     verify_database_artifacts(source)?;
     verify_private_file(source)?;
     if fs::symlink_metadata(destination).is_ok() {
         return Err(GhostraceError::BackupExists);
     }
+    for suffix in DATABASE_ARTIFACT_SUFFIXES {
+        match fs::symlink_metadata(sidecar_path(destination, suffix)?) {
+            Ok(_) => return Err(GhostraceError::BackupExists),
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(io_error(destination, error)),
+        }
+    }
 
-    let mut input_options = OpenOptions::new();
-    input_options.read(true);
-    add_no_follow(&mut input_options);
-    let mut input = input_options.open(source).map_err(|error| secure_open_error(source, error))?;
     let mut output_options = OpenOptions::new();
     output_options.write(true).create_new(true);
     add_no_follow(&mut output_options);
-    let mut output =
+    let output =
         output_options.open(destination).map_err(|error| secure_open_error(destination, error))?;
-    let bytes =
-        std::io::copy(&mut input, &mut output).map_err(|error| io_error(destination, error))?;
-    output.sync_all().map_err(|error| io_error(destination, error))?;
-    set_file_mode_handle(destination, &output)?;
-    verify_private_file(destination)?;
-    Ok(bytes)
+    let output_identity =
+        file_identity(&output.metadata().map_err(|error| io_error(destination, error))?);
+    let result = (|| {
+        set_file_mode_handle(destination, &output)?;
+        verify_file_handle(destination, &output)?;
+        // SQLite's NOFOLLOW flag also rejects macOS's trusted /var alias.
+        // Resolve the already verified parent, retaining both identity checks.
+        let sqlite_destination = fs::canonicalize(parent)
+            .map_err(|error| io_error(parent, error))?
+            .join(destination.file_name().ok_or(GhostraceError::UnsafePath)?);
+        run_test_open_hook(destination);
+        let mut destination_connection = Connection::open_with_flags(
+            &sqlite_destination,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )?;
+        run_test_open_hook(destination);
+        if verify_existing_private_directory(parent)? != parent_identity
+            || verify_private_file(destination)? != output_identity
+        {
+            return Err(GhostraceError::PathRace);
+        }
+        #[cfg(unix)]
+        {
+            let mut moved: std::ffi::c_int = 0;
+            // SAFETY: the connection is exclusively owned here, NULL selects
+            // its main file, and HAS_MOVED writes only the supplied live int.
+            // SQLite checks its own open inode, closing the swap/restore gap
+            // that pathname comparisons alone cannot detect.
+            let code = unsafe {
+                rusqlite::ffi::sqlite3_file_control(
+                    destination_connection.handle(),
+                    std::ptr::null(),
+                    rusqlite::ffi::SQLITE_FCNTL_HAS_MOVED,
+                    (&mut moved as *mut std::ffi::c_int).cast(),
+                )
+            };
+            if code != rusqlite::ffi::SQLITE_OK {
+                return Err(backup_error(code));
+            }
+            if moved != 0 {
+                return Err(GhostraceError::PathRace);
+            }
+        }
+        // Keep rollback journaling on this fresh destination. The completed
+        // backup lives in its main file, and close removes transient sidecars.
+        destination_connection.pragma_update(None, "journal_mode", "DELETE")?;
+        destination_connection.pragma_update(None, "synchronous", "FULL")?;
+        {
+            let backup = Backup::new(connection, &mut destination_connection)?;
+            #[cfg(test)]
+            if let Some(hook) = test_hooks::take_copy() {
+                backup.step(16)?;
+                hook();
+            }
+            // A single step holds SQLite's source read snapshot until all
+            // pages are copied. Busy/locked results refuse without retrying.
+            match backup.step(-1)? {
+                StepResult::Done => {}
+                StepResult::Busy => return Err(backup_error(rusqlite::ffi::SQLITE_BUSY)),
+                StepResult::Locked => return Err(backup_error(rusqlite::ffi::SQLITE_LOCKED)),
+                _ => return Err(backup_error(rusqlite::ffi::SQLITE_ABORT)),
+            }
+        }
+        destination_connection.close().map_err(|(_, error)| GhostraceError::Database(error))?;
+        if verify_existing_private_directory(parent)? != parent_identity
+            || verify_file_handle(destination, &output)? != output_identity
+        {
+            return Err(GhostraceError::PathRace);
+        }
+        verify_database_artifacts(destination)?;
+        for suffix in DATABASE_ARTIFACT_SUFFIXES {
+            if fs::symlink_metadata(sidecar_path(destination, suffix)?).is_ok() {
+                return Err(GhostraceError::BackupExists);
+            }
+        }
+        output.sync_all().map_err(|error| io_error(destination, error))?;
+        sync_directory(parent)?;
+        Ok(output.metadata().map_err(|error| io_error(destination, error))?.len())
+    })();
+    // Only Unix has a device/inode identity here. On other platforms, retain
+    // a failed output rather than risk deleting a replacement we cannot prove
+    // belongs to this operation.
+    #[cfg(unix)]
+    if result.is_err()
+        && fs::symlink_metadata(destination)
+            .is_ok_and(|metadata| file_identity(&metadata) == output_identity)
+        && verify_existing_private_directory(parent)
+            .is_ok_and(|identity| identity == parent_identity)
+    {
+        let _ = fs::remove_file(destination);
+    }
+    result
+}
+
+fn backup_error(code: i32) -> GhostraceError {
+    rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), None).into()
+}
+
+/// Make the fresh backup's directory entry durable on supported Unix targets.
+fn sync_directory(path: &Path) -> Result<(), GhostraceError> {
+    #[cfg(unix)]
+    {
+        File::open(path)
+            .map_err(|source| io_error(path, source))?
+            .sync_all()
+            .map_err(|source| io_error(path, source))?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
 }
 
 fn open_database_file(path: &Path) -> Result<File, GhostraceError> {
@@ -1015,10 +1126,12 @@ mod test_hooks {
     use std::{cell::RefCell, path::Path};
 
     type Hook = Box<dyn FnOnce(&Path) + Send + 'static>;
+    type CopyHook = Box<dyn FnOnce() + Send + 'static>;
 
     thread_local! {
         static OPEN_HOOK: RefCell<Option<Hook>> = const { RefCell::new(None) };
         static PUBLISH_HOOK: RefCell<Option<Hook>> = const { RefCell::new(None) };
+        static COPY_HOOK: RefCell<Option<CopyHook>> = const { RefCell::new(None) };
     }
 
     pub(super) fn install(hook: Hook) {
@@ -1039,6 +1152,16 @@ mod test_hooks {
 
     pub(super) fn take_publish() -> Option<Hook> {
         PUBLISH_HOOK.with(|slot| slot.borrow_mut().take())
+    }
+
+    pub(super) fn install_copy(hook: CopyHook) {
+        COPY_HOOK.with(|slot| {
+            assert!(slot.borrow_mut().replace(hook).is_none(), "copy hook already installed");
+        });
+    }
+
+    pub(super) fn take_copy() -> Option<CopyHook> {
+        COPY_HOOK.with(|slot| slot.borrow_mut().take())
     }
 }
 
@@ -1096,6 +1219,206 @@ mod tests {
             assert!(!output.exists());
         }
         assert_eq!(fs::read(&source).expect("source bytes"), before);
+    }
+
+    #[test]
+    fn database_snapshot_stays_consistent_when_a_peer_checkpoints_during_copy() {
+        use crate::{crypto::DeterministicKeyProvider, journal::Journal};
+
+        let root = tempdir().expect("synthetic fixture directory");
+        private(root.path());
+        let source = root.path().join("journal.sqlite3");
+        let destination = root.path().join("snapshot.sqlite3");
+        let journal = Journal::open_fixture(
+            &source,
+            DeterministicKeyProvider::from_seed("backup-generation-synthetic"),
+        )
+        .expect("fixture journal");
+        let mut peer = Connection::open(&source).expect("synthetic peer");
+        peer.execute_batch(
+            "PRAGMA wal_autocheckpoint=0;
+             CREATE TABLE backup_generation(id INTEGER PRIMARY KEY, generation INTEGER, filler BLOB);",
+        )
+        .expect("synthetic generation table");
+        let transaction = peer.transaction().expect("fixture transaction");
+        {
+            let mut insert = transaction
+                .prepare("INSERT INTO backup_generation VALUES(?1, 0, zeroblob(8000))")
+                .expect("fixture insert");
+            for id in 0..128 {
+                insert.execute([id]).expect("synthetic row");
+            }
+        }
+        transaction.commit().expect("initial committed generation");
+        journal.shutdown().expect("initial checkpoint");
+        test_hooks::install_copy(Box::new(move || {
+            peer.execute("UPDATE backup_generation SET generation=1 WHERE id=0 OR id=127", [])
+                .expect("atomic peer generation update");
+            let checkpoint: (i64, i64, i64) = peer
+                .query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                })
+                .expect("peer checkpoint");
+            assert_eq!(checkpoint.0, 0, "peer checkpoint must run");
+            assert_eq!(checkpoint.1, checkpoint.2, "peer checkpoint must finish");
+        }));
+
+        journal.backup_snapshot(&destination).expect("database snapshot");
+        let snapshot = Connection::open(destination).expect("synthetic snapshot");
+        let generations: (i64, i64) = snapshot
+            .query_row(
+                "SELECT generation, (SELECT generation FROM backup_generation WHERE id=127)
+                 FROM backup_generation WHERE id=0",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("snapshot generations");
+        assert_eq!(
+            generations.0, generations.1,
+            "one committed transaction updates both rows; a backup must not mix generations"
+        );
+    }
+
+    #[test]
+    fn busy_backup_refuses_and_removes_its_fresh_destination() {
+        let root = tempdir().expect("synthetic fixture directory");
+        private(root.path());
+        let source = root.path().join("source.sqlite3");
+        let destination = root.path().join("snapshot.sqlite3");
+        let connection = open_database(&source).expect("fixture connection");
+        connection
+            .execute_batch(
+                "CREATE TABLE marker(value INTEGER);
+                 INSERT INTO marker VALUES(1);
+                 BEGIN IMMEDIATE;
+                 INSERT INTO marker VALUES(2);",
+            )
+            .expect("active source write");
+
+        let result = copy_database_snapshot(&connection, &source, &destination);
+        connection.execute_batch("ROLLBACK").expect("finish fixture write");
+        assert!(matches!(
+            result,
+            Err(GhostraceError::Database(rusqlite::Error::SqliteFailure(error, _)))
+                if error.code == rusqlite::ErrorCode::DatabaseBusy
+        ));
+        assert!(!destination.exists(), "failed backup must not publish an empty file");
+        for suffix in DATABASE_ARTIFACT_SUFFIXES {
+            assert!(!sidecar_path(&destination, suffix).expect("sidecar path").exists());
+        }
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM marker", [], |row| row.get::<_, i64>(0))
+                .expect("source rows"),
+            1
+        );
+    }
+
+    #[test]
+    fn backup_refuses_a_destination_swapped_during_sqlite_open_and_restored() {
+        let root = tempdir().expect("synthetic fixture directory");
+        private(root.path());
+        let source = root.path().join("source.sqlite3");
+        let destination = root.path().join("snapshot.sqlite3");
+        let saved = root.path().join("retained-output.sqlite3");
+        let replacement = root.path().join("replacement.sqlite3");
+        let connection = open_database(&source).expect("fixture connection");
+        connection
+            .execute_batch("CREATE TABLE marker(value INTEGER); INSERT INTO marker VALUES(1);")
+            .expect("fixture schema and row");
+        fs::write(&replacement, []).expect("empty synthetic replacement");
+        set_file_mode(&replacement).expect("replacement mode");
+        let before = fs::read(&replacement).expect("replacement before backup");
+        let saved_for_hook = saved.clone();
+        let replacement_for_hook = replacement.clone();
+        test_hooks::install(Box::new(move |destination| {
+            fs::rename(destination, &saved_for_hook).expect("retain fresh output");
+            fs::rename(&replacement_for_hook, destination).expect("swap SQLite open target");
+            test_hooks::install(Box::new(move |destination| {
+                fs::rename(destination, &replacement_for_hook).expect("restore replacement name");
+                fs::rename(&saved_for_hook, destination).expect("restore fresh output name");
+            }));
+        }));
+
+        let result = copy_database_snapshot(&connection, &source, &destination);
+        assert!(matches!(result, Err(GhostraceError::PathRace)), "got {result:?}");
+        assert_eq!(fs::read(replacement).expect("replacement after backup"), before);
+        assert!(!destination.exists(), "failed backup must remove its own fresh output");
+        assert!(!saved.exists(), "restored output must not retain an extra name");
+    }
+
+    #[test]
+    fn peer_journal_ingest_during_backup_keeps_a_reopenable_authenticated_snapshot() {
+        use crate::{
+            crypto::DeterministicKeyProvider,
+            fixture::{ingest_fixture, read_fixture},
+            journal::Journal,
+            model::IngestionOrigin,
+            policy::PolicyProfile,
+            wal::CheckpointMode,
+        };
+
+        let root = tempdir().expect("synthetic fixture directory");
+        private(root.path());
+        let source = root.path().join("source.sqlite3");
+        let destination = root.path().join("snapshot.sqlite3");
+        let provider = DeterministicKeyProvider::from_seed("backup-peer-journal-synthetic");
+        let journal = Journal::open_fixture(&source, provider.clone()).expect("fixture journal");
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/causal-chain.jsonl");
+        let policy = PolicyProfile::fixture_default();
+        ingest_fixture(&fixture, &journal, &policy).expect("initial fixture events");
+        let peer =
+            Journal::open_fixture(&source, provider.clone()).expect("independent peer journal");
+        let mut event = read_fixture(&fixture).expect("synthetic events").remove(0);
+        event.event_id = uuid::Uuid::from_u128(9001);
+        event.parent_event_id = None;
+        event.source_cursor = None;
+        test_hooks::install_copy(Box::new(move || {
+            peer.ingest(&IngestionOrigin::fixture(), &event, &policy).expect("peer commit");
+            peer.checkpoint(CheckpointMode::Truncate).expect("peer checkpoint");
+        }));
+
+        journal.backup_snapshot(&destination).expect("consistent snapshot");
+        assert_eq!(journal.events().expect("source events").len(), 9);
+        journal.verify_authenticated_state().expect("source authentication");
+        assert!(!sidecar_path(&destination, "-wal").expect("WAL path").exists());
+        assert!(!sidecar_path(&destination, "-shm").expect("SHM path").exists());
+        let snapshot = Journal::open_fixture(&destination, provider).expect("reopened snapshot");
+        assert!(matches!(snapshot.events().expect("snapshot events").len(), 8 | 9));
+        assert!(snapshot.integrity_check().expect("snapshot integrity").integrity_ok);
+        snapshot.verify_authenticated_state().expect("snapshot authentication");
+    }
+
+    #[test]
+    fn backup_refuses_existing_destination_artifacts_without_changing_them() {
+        use crate::{crypto::DeterministicKeyProvider, journal::Journal};
+
+        let root = tempdir().expect("synthetic fixture directory");
+        private(root.path());
+        let source = root.path().join("source.sqlite3");
+        let journal = Journal::open_fixture(
+            &source,
+            DeterministicKeyProvider::from_seed("backup-existing-synthetic"),
+        )
+        .expect("fixture journal");
+        for suffix in std::iter::once("").chain(DATABASE_ARTIFACT_SUFFIXES.iter().copied()) {
+            let destination = root.path().join("snapshot.sqlite3");
+            let existing = sidecar_path(&destination, suffix).expect("artifact path");
+            fs::write(&existing, b"synthetic prior artifact").expect("existing fixture");
+            set_file_mode(&existing).expect("private artifact");
+            assert!(matches!(
+                journal.backup_snapshot(&destination),
+                Err(GhostraceError::BackupExists)
+            ));
+            assert_eq!(
+                fs::read(&existing).expect("unchanged artifact"),
+                b"synthetic prior artifact"
+            );
+            if !suffix.is_empty() {
+                assert!(!destination.exists(), "refusal must not create a main database");
+            }
+            fs::remove_file(existing).expect("remove fixture artifact");
+        }
     }
 
     #[test]
