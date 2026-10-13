@@ -1033,6 +1033,14 @@ capability (`ingest`, `read`, `export`, `policy`, `lifecycle`, `admin`) must hav
 granted when the service was bound. Nothing is granted by default, and refusals
 are fixed error values. `tests/local_service.rs` covers each check.
 
+Response JSON is encoded through a capped writer: neither its serialized length
+nor its buffer capacity can exceed 64 KiB. An oversized result becomes the fixed
+`too_large` refusal, with no partial result sent to the socket. This bounds
+serialization storage only; handler result construction and runtime remain
+separate service-method limits. `tests/local_service_response_bounds.rs` checks
+real socket responses, exact encoded-byte boundaries, escaping, UTF-8, and
+allocations after a prepared handler result is returned.
+
 ## Native-host manifest registration
 
 `NativeHostInstaller` (`src/native_host_manifest.rs`) registers the GHOSTRACE
