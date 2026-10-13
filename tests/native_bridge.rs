@@ -1910,3 +1910,432 @@ fn malformed_commands_paths_and_oversized_messages_have_no_sink_or_file_effect()
         assert!(!marker.exists(), "{variant}");
     }
 }
+
+#[cfg(target_os = "macos")]
+mod production_pairing_lifecycle {
+    use super::*;
+    use std::{
+        path::Path,
+        process::{ChildStderr, ChildStdin, ChildStdout},
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    struct Fixture {
+        _directory: TempDir,
+        home: PathBuf,
+        ghostrace_home: PathBuf,
+        journal_path: PathBuf,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let directory = TempDir::new().expect("pairing lifecycle directory");
+            fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700))
+                .expect("private lifecycle directory");
+            let home = directory.path().join("home");
+            let ghostrace_home = home.join("Library/Application Support/GHOSTRACE");
+            fs::create_dir_all(&ghostrace_home).expect("lifecycle home");
+            fs::set_permissions(&ghostrace_home, fs::Permissions::from_mode(0o700))
+                .expect("private lifecycle home");
+            NativeHostInstaller::new(
+                ghostrace_home.parent().expect("Application Support"),
+                env!("CARGO_BIN_EXE_ghostrace"),
+                EXTENSION,
+            )
+            .expect("lifecycle installer")
+            .install("chrome")
+            .expect("lifecycle manifest");
+            let journal_path = directory.path().join("lifecycle-journal.sqlite3");
+            Self { _directory: directory, home, ghostrace_home, journal_path }
+        }
+
+        fn store(&self) -> PairingStore {
+            PairingStore::open(self.ghostrace_home.join(NATIVE_HOST_STORE_DIR))
+                .expect("reopen lifecycle pairing store")
+        }
+
+        fn journal(&self) -> Journal {
+            Journal::open_fixture(
+                &self.journal_path,
+                DeterministicKeyProvider::from_seed("native-pairing-lifecycle"),
+            )
+            .expect("lifecycle fixture journal")
+        }
+
+        fn cli(&self, arguments: &[&str], input: &[u8]) -> Vec<u8> {
+            let child = Command::new(env!("CARGO_BIN_EXE_ghostrace"))
+                .arg("native-host")
+                .args(arguments)
+                .arg("--home")
+                .arg(&self.ghostrace_home)
+                .env("HOME", &self.home)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("spawn pairing CLI");
+            let mut child = NativeHostChildGuard::new(child);
+            child
+                .process_mut()
+                .stdin
+                .take()
+                .expect("pairing CLI stdin")
+                .write_all(input)
+                .expect("answer pairing CLI");
+            let deadline = Instant::now() + NATIVE_E2E_TIMEOUT;
+            let mut output = child.process_mut().stdout.take().expect("pairing CLI stdout");
+            let mut diagnostics = child.process_mut().stderr.take().expect("pairing CLI stderr");
+            let stdout = read_to_end_until(&mut output, deadline, MAX_NATIVE_E2E_CAPTURE_BYTES);
+            let stderr =
+                read_to_end_until(&mut diagnostics, deadline, MAX_NATIVE_E2E_CAPTURE_BYTES);
+            assert!(child.wait_until(deadline).success(), "pairing CLI failed");
+            assert!(stderr.is_empty(), "pairing CLI emitted unexpected diagnostics");
+            stdout
+        }
+
+        fn pair(&self, answer: &[u8]) -> (PairingRequest, String) {
+            let stdout = self.cli(
+                &[
+                    "pair",
+                    "--extension-id",
+                    EXTENSION,
+                    "--extension-key-digest",
+                    KEY_DIGEST,
+                    "--permissions-digest",
+                    PERMISSIONS_DIGEST,
+                ],
+                answer,
+            );
+            let stdout = String::from_utf8(stdout).expect("pairing CLI UTF-8");
+            let (preview, outcome) = stdout
+                .split_once("Approve this browser pairing? [y/N] ")
+                .expect("approval request precedes the interactive prompt");
+            let preview = serde_json::from_str(preview).expect("pairing request preview");
+            (preview, outcome.to_owned())
+        }
+
+        fn approve(&self) -> PairingRecord {
+            let (preview, outcome) = self.pair(b"y\n");
+            assert_eq!(preview, request());
+            let approval: serde_json::Value =
+                serde_json::from_str(&outcome).expect("approval receipt");
+            let pairing_id = serde_json::from_value(approval["view"]["pairing_id"].clone())
+                .expect("approved pairing ID");
+            let record = self.store().get(pairing_id).expect("approved lookup").expect("record");
+            assert!(
+                approval["extension_secret"].as_str()
+                    == Some(encode_hex(&record.secret_for_extension()).as_str()),
+                "approval delivers the stored credential once"
+            );
+            record
+        }
+
+        fn start_service(&self, journal: &Journal) -> (ServiceThreadGuard, Arc<AtomicUsize>) {
+            let service_directory = self._directory.path().join("service");
+            let mut service = LocalService::bind(&service_directory, [ServiceCapability::Ingest])
+                .expect("lifecycle service");
+            let socket_path = service.socket_path().to_path_buf();
+            write_native_service_endpoint(
+                &self.ghostrace_home,
+                socket_path.clone(),
+                service.instance(),
+            )
+            .expect("lifecycle endpoint");
+            let calls = Arc::new(AtomicUsize::new(0));
+            let handler = CountingHandler {
+                inner: BrowserIngestService::new_with_pairing_store(
+                    journal.clone(),
+                    browser_service_policy(),
+                    self.store(),
+                )
+                .expect("lifecycle handler"),
+                calls: Arc::clone(&calls),
+            };
+            let (sender, receiver) = sync_channel(1);
+            let handle = std::thread::spawn(move || {
+                let result = service.serve_one(&handler);
+                let _ = sender.send(result);
+            });
+            (
+                ServiceThreadGuard::new(
+                    socket_path,
+                    handle,
+                    receiver,
+                    Instant::now() + NATIVE_E2E_TIMEOUT,
+                ),
+                calls,
+            )
+        }
+
+        fn spawn_host(&self) -> Host {
+            let child = Command::new(env!("CARGO_BIN_EXE_ghostrace"))
+                .arg(CALLER_ORIGIN)
+                .env("HOME", &self.home)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("spawn lifecycle host");
+            let mut child = NativeHostChildGuard::new(child);
+            let input = child.process_mut().stdin.take().expect("lifecycle stdin");
+            let output = child.process_mut().stdout.take().expect("lifecycle stdout");
+            let diagnostics = child.process_mut().stderr.take().expect("lifecycle stderr");
+            Host {
+                child,
+                input: Some(input),
+                output,
+                diagnostics,
+                deadline: Instant::now() + NATIVE_E2E_TIMEOUT,
+            }
+        }
+
+        fn assert_refused_hello(
+            &self,
+            body: &[u8],
+            reason: &str,
+            journal: &Journal,
+            record: &PairingRecord,
+        ) {
+            let (service, calls) = self.start_service(journal);
+            let mut host = self.spawn_host();
+            host.send(body);
+            host.assert_refused(reason);
+            host.finish(false, &self.home, record);
+            finish_without_ingest(service, &calls);
+        }
+    }
+
+    struct CountingHandler {
+        inner: BrowserIngestService,
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl ServiceHandler for CountingHandler {
+        fn handle(
+            &self,
+            request: &ghostrace::ServiceRequest,
+        ) -> Result<serde_json::Value, ghostrace::ServiceError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.inner.handle(request)
+        }
+
+        fn handle_with_deadline(
+            &self,
+            request: &ghostrace::ServiceRequest,
+            context: ghostrace::ServiceRequestContext,
+        ) -> Result<serde_json::Value, ghostrace::ServiceError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.inner.handle_with_deadline(request, context)
+        }
+    }
+
+    struct Host {
+        child: NativeHostChildGuard,
+        input: Option<ChildStdin>,
+        output: ChildStdout,
+        diagnostics: ChildStderr,
+        deadline: Instant,
+    }
+
+    impl Host {
+        fn send(&mut self, body: &[u8]) {
+            self.input
+                .as_mut()
+                .expect("open host input")
+                .write_all(&encode_frame(body).expect("lifecycle frame"))
+                .expect("send lifecycle frame");
+        }
+
+        fn reply(&mut self) -> HostMessage {
+            read_host_message_until(&mut self.output, self.deadline)
+        }
+
+        fn handshake(&mut self, record: &PairingRecord) -> (String, PairedSession) {
+            self.send(&hello(record, KEY_DIGEST));
+            let HostMessage::Welcome { host_nonce, .. } = self.reply() else {
+                panic!("paired lifecycle host must welcome the extension");
+            };
+            let mut nonce = [0_u8; 32];
+            for (index, byte) in nonce.iter_mut().enumerate() {
+                *byte = u8::from_str_radix(&host_nonce[index * 2..index * 2 + 2], 16)
+                    .expect("host nonce hex");
+            }
+            let session =
+                PairedSession::derive(&record.secret_for_extension(), &nonce, &CLIENT_NONCE);
+            (host_nonce, session)
+        }
+
+        fn goodbye(&mut self, session: &PairedSession, sequence: u64) {
+            self.send(&signed(
+                session,
+                ExtensionMessage::Goodbye { seq: sequence, mac: String::new() },
+            ));
+            assert_eq!(self.reply(), HostMessage::Closed);
+        }
+
+        fn assert_refused(&mut self, expected: &str) {
+            let HostMessage::Refused { reason, .. } = self.reply() else {
+                panic!("lifecycle input must be refused before ingestion");
+            };
+            assert_eq!(reason, expected);
+        }
+
+        fn finish(mut self, success: bool, home: &Path, record: &PairingRecord) {
+            drop(self.input.take());
+            let trailing =
+                read_to_end_until(&mut self.output, self.deadline, MAX_NATIVE_E2E_CAPTURE_BYTES);
+            let diagnostics = read_to_end_until(
+                &mut self.diagnostics,
+                self.deadline,
+                MAX_NATIVE_E2E_CAPTURE_BYTES,
+            );
+            assert_eq!(self.child.wait_until(self.deadline).success(), success);
+            assert!(trailing.is_empty(), "no unframed or extra host output");
+            let diagnostics = String::from_utf8(diagnostics).expect("host diagnostics UTF-8");
+            assert!(!diagnostics.contains("SENTINEL"));
+            assert!(!diagnostics.contains(home.to_string_lossy().as_ref()));
+            assert!(!diagnostics.contains(&encode_hex(&record.secret_for_extension())));
+        }
+    }
+
+    fn finish_without_ingest(mut service: ServiceThreadGuard, calls: &AtomicUsize) {
+        // Wake the otherwise accepting service with a zero-length frame. Its
+        // fixed refusal proves the host never consumed the one-shot listener.
+        let mut wake = UnixStream::connect(&service.socket_path)
+            .expect("service was not contacted by refused host");
+        wake.write_all(&0_u32.to_be_bytes()).expect("wake lifecycle service");
+        wake.shutdown(std::net::Shutdown::Write).expect("close lifecycle wake input");
+        let bytes = read_to_end_until(&mut wake, service.deadline, MAX_NATIVE_E2E_CAPTURE_BYTES);
+        assert!(bytes.len() >= 4, "service wake receives a framed refusal");
+        let length = u32::from_be_bytes(bytes[..4].try_into().expect("service prefix")) as usize;
+        assert_eq!(bytes.len(), length + 4);
+        let response: ghostrace::ServiceResponse =
+            serde_json::from_slice(&bytes[4..]).expect("service wake refusal");
+        assert_eq!(
+            response,
+            ghostrace::ServiceResponse::Refused { error: ghostrace::ServiceError::Malformed }
+        );
+        service.wait_until().expect("lifecycle service shutdown");
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "refused input never reaches ingestion");
+    }
+
+    #[test]
+    fn production_binary_restart_changes_nonce_and_refuses_previous_message_mac() {
+        let fixture = Fixture::new();
+        let record = fixture.approve();
+        let journal = fixture.journal();
+        let (mut service, calls) = fixture.start_service(&journal);
+        let mut first = fixture.spawn_host();
+        let (first_nonce, extension) = first.handshake(&record);
+        let transcript =
+            signed(&extension, navigation(2, "https://example.com/private?token=SENTINEL"));
+        first.send(&transcript);
+        assert!(matches!(first.reply(), HostMessage::Accepted { missing: 0, .. }));
+        service.wait_until().expect("first process durable navigation");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        first.goodbye(&extension, 3);
+        first.finish(true, &fixture.home, &record);
+
+        let (service, calls) = fixture.start_service(&journal);
+        let mut restarted = fixture.spawn_host();
+        let (restarted_nonce, _) = restarted.handshake(&record);
+        assert_ne!(first_nonce, restarted_nonce, "process restart must use a fresh host nonce");
+        restarted.send(&transcript);
+        restarted.assert_refused("unauthenticated");
+        restarted.finish(false, &fixture.home, &record);
+        finish_without_ingest(service, &calls);
+        journal.shutdown().expect("close lifecycle journal");
+        drop(journal);
+        let reopened = fixture.journal();
+        let events = reopened.events().expect("durable lifecycle events");
+        assert_eq!(events.len(), 1, "replay cannot add a durable navigation");
+        assert!(!serde_json::to_string(&events[0].event)
+            .expect("event metadata")
+            .contains("SENTINEL"));
+        reopened.shutdown().expect("close reopened journal");
+    }
+
+    #[test]
+    fn production_binary_restart_requires_repairing_after_key_or_permission_change() {
+        let fixture = Fixture::new();
+        let record = fixture.approve();
+        let journal = fixture.journal();
+        let (service, calls) = fixture.start_service(&journal);
+        let mut first = fixture.spawn_host();
+        let (_, extension) = first.handshake(&record);
+        first.goodbye(&extension, 2);
+        first.finish(true, &fixture.home, &record);
+        finish_without_ingest(service, &calls);
+
+        for field in ["extension_key_digest", "permissions_digest"] {
+            let mut changed: serde_json::Value =
+                serde_json::from_slice(&hello(&record, KEY_DIGEST)).expect("hello JSON");
+            changed[field] = serde_json::json!("c".repeat(64));
+            fixture.assert_refused_hello(
+                &serde_json::to_vec(&changed).expect("changed hello"),
+                "re_pairing_required",
+                &journal,
+                &record,
+            );
+        }
+        journal.shutdown().expect("close update journal");
+        drop(journal);
+        let reopened = fixture.journal();
+        assert!(reopened.events().expect("durable update events").is_empty());
+        reopened.shutdown().expect("close reopened update journal");
+    }
+
+    #[test]
+    fn production_binary_restart_observes_revocation_from_a_separate_cli_process() {
+        let fixture = Fixture::new();
+        let record = fixture.approve();
+        let journal = fixture.journal();
+        let (service, calls) = fixture.start_service(&journal);
+        let mut first = fixture.spawn_host();
+        let (_, extension) = first.handshake(&record);
+        first.goodbye(&extension, 2);
+        first.finish(true, &fixture.home, &record);
+        finish_without_ingest(service, &calls);
+
+        let receipt = fixture.cli(&["revoke", &record.pairing_id.to_string()], b"");
+        let receipt: serde_json::Value =
+            serde_json::from_slice(&receipt).expect("CLI revocation receipt");
+        assert_eq!(receipt["revoked"], true);
+        fixture.assert_refused_hello(&hello(&record, KEY_DIGEST), "revoked", &journal, &record);
+        let views: serde_json::Value =
+            serde_json::from_slice(&fixture.cli(&["list"], b"")).expect("restarted CLI list");
+        assert_eq!(views[0]["revoked"], true);
+        assert!(views[0].get("extension_secret").is_none());
+        journal.shutdown().expect("close revoked journal");
+        drop(journal);
+        let reopened = fixture.journal();
+        assert!(reopened.events().expect("durable revoked events").is_empty());
+        reopened.shutdown().expect("close reopened revoked journal");
+    }
+
+    #[test]
+    fn production_pairing_cli_decline_approval_and_list_preserve_the_consent_boundary() {
+        let fixture = Fixture::new();
+        let (preview, outcome) = fixture.pair(b"n\n");
+        assert_eq!(preview, request());
+        assert_eq!(outcome.trim(), "Pairing not approved; no secret was generated.");
+        assert!(fixture.store().list().expect("declined store").is_empty());
+        assert!(!fixture.ghostrace_home.join(NATIVE_HOST_STORE_DIR).join("pairings.enc").exists());
+
+        let record = fixture.approve();
+        let listed = fixture.cli(&["list"], b"");
+        let views: serde_json::Value = serde_json::from_slice(&listed).expect("approved CLI list");
+        assert_eq!(views.as_array().expect("list array").len(), 1);
+        assert_eq!(views[0]["revoked"], false);
+        assert!(views[0].get("extension_secret").is_none());
+        assert!(!String::from_utf8(listed)
+            .expect("CLI list UTF-8")
+            .contains(&encode_hex(&record.secret_for_extension())));
+        let encrypted =
+            fs::read(fixture.ghostrace_home.join(NATIVE_HOST_STORE_DIR).join("pairings.enc"))
+                .expect("encrypted approval state");
+        let encrypted = String::from_utf8_lossy(&encrypted);
+        assert!(!encrypted.contains(EXTENSION));
+        assert!(!encrypted.contains(&encode_hex(&record.secret_for_extension())));
+    }
+}
