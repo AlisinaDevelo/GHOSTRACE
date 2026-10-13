@@ -13,7 +13,7 @@ ghostrace = { path = "..", version = "=0.0.1" }
 libfuzzer-sys = "0.4"
 chrono = "0.4"
 serde_json = "1.0"
-uuid = { version = "1.10", features = ["serde", "v4"] }
+uuid = { version = ">=1.26.1, <1.27", features = ["serde", "v4"] }
 
 [[bin]]
 name = "frame_decoder"
