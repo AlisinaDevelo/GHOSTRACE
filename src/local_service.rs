@@ -11,7 +11,7 @@
 use std::{
     collections::{BTreeSet, HashSet, VecDeque},
     fs::{self, File, OpenOptions},
-    io::{Read, Write},
+    io::{self, Read, Write},
     os::unix::{
         ffi::OsStrExt,
         fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
@@ -286,6 +286,45 @@ pub enum ServiceResponse {
     Refused { error: ServiceError },
 }
 
+/// Keep the encoded body bounded even when a handler returns an oversized
+/// value. This does not bound the handler's construction of that value.
+struct ResponseBuffer {
+    bytes: Vec<u8>,
+    exceeded: bool,
+}
+
+impl Write for ResponseBuffer {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if bytes.len() > MAX_SERVICE_MESSAGE_BYTES - self.bytes.len() {
+            self.exceeded = true;
+            return Err(io::Error::other("local service response exceeds its byte bound"));
+        }
+        let needed = self.bytes.len() + bytes.len();
+        if needed > self.bytes.capacity() {
+            // Vec's usual amortized growth can overshoot the wire bound.
+            // Reserve an explicit capacity that never exceeds that bound.
+            let capacity =
+                needed.max(self.bytes.capacity().saturating_mul(2)).min(MAX_SERVICE_MESSAGE_BYTES);
+            self.bytes.reserve_exact(capacity - self.bytes.len());
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn encode_response(response: &ServiceResponse) -> Result<Vec<u8>, ServiceError> {
+    let mut buffer = ResponseBuffer { bytes: Vec::new(), exceeded: false };
+    match serde_json::to_writer(&mut buffer, response) {
+        Ok(()) => Ok(buffer.bytes),
+        Err(_) if buffer.exceeded => Err(ServiceError::TooLarge),
+        Err(_) => Err(ServiceError::Io),
+    }
+}
+
 /// A dispatched method. It receives only requests that passed every check.
 #[derive(Clone, Copy, Debug)]
 pub struct ServiceRequestContext {
@@ -514,12 +553,12 @@ impl LocalService {
             }
             Err(error) => (ServiceResponse::Refused { error }, ingress_deadline),
         };
-        let body = serde_json::to_vec(&response).map_err(|_| ServiceError::Io)?;
-        let body = if body.len() > MAX_SERVICE_MESSAGE_BYTES {
-            serde_json::to_vec(&ServiceResponse::Refused { error: ServiceError::TooLarge })
-                .map_err(|_| ServiceError::Io)?
-        } else {
-            body
+        let body = match encode_response(&response) {
+            Ok(body) => body,
+            Err(ServiceError::TooLarge) => {
+                encode_response(&ServiceResponse::Refused { error: ServiceError::TooLarge })?
+            }
+            Err(error) => return Err(error),
         };
         let result = write_message_until(&mut stream, &body, response_deadline);
         finish_until(&mut stream, response_deadline);
