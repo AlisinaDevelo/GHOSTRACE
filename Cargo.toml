@@ -31,7 +31,7 @@ sha2 = "0.11"
 thiserror = "2.0"
 tempfile = "3.14"
 url = "2.5"
-uuid = { version = ">=1.26.1, <1.27", features = ["serde", "v4"] }
+uuid = { version = ">=1.26.1, <1.29", features = ["serde", "v4"] }
 parquet = { version = "60", default-features = false, features = ["zstd"], optional = true }
 
 [features]
@@ -45,7 +45,7 @@ name = "frontmost_macos"
 harness = false
 
 [dev-dependencies]
-jsonschema = { version = "0.58", default-features = false }
+jsonschema = { version = "0.59", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
