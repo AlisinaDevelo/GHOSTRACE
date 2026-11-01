@@ -23,7 +23,7 @@ path = "src/main.rs"
 chrono = { version = "0.4", features = ["serde", "clock"] }
 clap = { version = "4.5", features = ["derive"] }
 chacha20poly1305 = "0.11"
-rusqlite = { version = "0.40", features = ["backup", "bundled", "hooks", "limits"] }
+rusqlite = { version = "0.41", features = ["backup", "bundled", "hooks", "limits"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -31,7 +31,7 @@ sha2 = "0.11"
 thiserror = "2.0"
 tempfile = "3.14"
 url = "2.5"
-uuid = { version = ">=1.26.1, <1.27", features = ["serde", "v4"] }
+uuid = { version = ">=1.26.1, <1.30", features = ["serde", "v4"] }
 parquet = { version = "60", default-features = false, features = ["zstd"], optional = true }
 
 [features]
@@ -45,7 +45,7 @@ name = "frontmost_macos"
 harness = false
 
 [dev-dependencies]
-jsonschema = { version = "0.58", default-features = false }
+jsonschema = { version = "0.60", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
